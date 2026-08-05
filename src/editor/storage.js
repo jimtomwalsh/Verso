@@ -312,6 +312,25 @@
       catch (e) { return { ok: false, error: e }; }
     }
 
+    // --- reset the workspace (platform-pivot 07) ---
+    // "Clear all course tabs and restore the default sample" used to mean three
+    // localStorage.removeItem calls in persist.js -- the last writer of the doc-of-record
+    // that went round this seam. On the file or http backend it cleared nothing, because the
+    // registry is not in localStorage there; the reload restored every course and the author
+    // had been told otherwise. Routed through saveRegistry it means the same thing in every
+    // posture, and it reports its outcome as a value like every other durable write here.
+    // The SEED comes from the caller: this module knows how to persist a registry, not what
+    // a default workspace should contain.
+    function resetWorkspace(seed) {
+      var registry = (seed && seed.registry) || {};
+      var res = saveRegistry(registry);
+      if (!res.ok) return { ok: false, stage: res.stage, quota: !!res.quota, error: res.error };
+      var ids = Object.keys(registry);
+      writeJson(KEYS.openDocs, ids);
+      writeJson(KEYS.activeDoc, ids.length ? ids[0] : null);
+      return { ok: true, count: ids.length };
+    }
+
     // --- the shared component library (#18) and the Product containers (Product Rail #1) ---
     // Both take their fresh-install seed from the caller: this module knows how to persist them,
     // not what a demo component or a sample Product should contain.
@@ -362,6 +381,7 @@
       saveOpenDocIds: function (ids) { return writeJson(KEYS.openDocs, ids); },
       getActiveDocId: function (fallback) { return readJson(KEYS.activeDoc, fallback); },
       saveActiveDocId: function (id) { return writeJson(KEYS.activeDoc, id); },
+      resetWorkspace: resetWorkspace,
       loadLibrary: loadLibrary,
       saveLibrary: saveLibrary,
       loadProducts: loadProducts,

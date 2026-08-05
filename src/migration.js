@@ -458,6 +458,42 @@
     return { ok: true, count: ka.length };
   }
 
+  // ---- 3. The terminal drain of the legacy asset blob (platform-pivot 07) ----
+  // Media used to persist as ONE base64 map under the localStorage key "authoring.assets".
+  // That writer is gone: persist.js now keeps media in IndexedDB, and a doc whose media
+  // cannot be hoisted there simply keeps its inline data: URLs, so the registry's own
+  // quota reporting owns the failure instead of a second store failing on its own.
+  //
+  // A machine that last ran the old build still HAS that key, and its media is only there.
+  // This drains it once -- read every record into the live store, then delete the key -- so
+  // no author's images are stranded by the retirement. It is deliberately here rather than
+  // in persist.js: the storage path itself must carry no legacy reader, and one-way
+  // legacy migrations are what this module is for.
+  //
+  // PURE (every dependency injected) so tests/run.js exercises it with plain objects.
+  // env = { read() -> raw json|null, remove(), has(id) -> bool, put(id, rec) }
+  function drainLegacyAssetBlob(env) {
+    env = env || {};
+    var raw = null;
+    try { raw = env.read ? env.read() : null; } catch (e) { return { ok: false, reason: "read failed", moved: 0, removed: false }; }
+    if (!raw) return { ok: true, moved: 0, removed: false, reason: "nothing to drain" };
+    var old;
+    try { old = JSON.parse(raw) || {}; } catch (e) { return { ok: false, reason: "unparseable", moved: 0, removed: false }; }
+    var moved = 0;
+    var ids = Object.keys(old);
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      var already = false;
+      try { already = !!(env.has && env.has(id)); } catch (e) { already = false; }
+      if (already) continue;
+      try { env.put(id, old[id]); moved++; }
+      catch (e) { return { ok: false, reason: "put failed for " + id, moved: moved, removed: false }; }
+    }
+    // Only drop the source once every record it held is somewhere else.
+    try { if (env.remove) env.remove(); } catch (e) { return { ok: true, moved: moved, removed: false, reason: "drained but could not remove the old key" }; }
+    return { ok: true, moved: moved, removed: true, seen: ids.length };
+  }
+
   window.Migration = {
     savesSuppressed: savesSuppressed,
     suppress: suppress,
@@ -471,7 +507,10 @@
     buildClientBackup: buildClientBackup,
     verifyClientBackup: verifyClientBackup,
     verifyFacet: verifyFacet,
-    runToServer: runToServer
+    runToServer: runToServer,
+    // platform-pivot 07 — the last reader of the retired localStorage asset blob
+    LEGACY_ASSET_KEY: "authoring.assets",
+    drainLegacyAssetBlob: drainLegacyAssetBlob
   };
 
   // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --

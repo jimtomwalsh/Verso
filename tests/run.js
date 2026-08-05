@@ -1224,6 +1224,63 @@ section("arch-P3-01 editor storage");
   ok("the flag has exactly one writer, and it is named", /function commitBackend\(value\) \{ return writeStore\(storage, KEYS\.backend, value\); \}/.test(src("src/editor/storage.js")));
   ok("the guarded cutover is what calls it", /setFlag = opts\.setFlag \|\| function \(vv\) \{ Store\.commitBackend\(vv\); \}/.test(src("src/editor/assets.js")));
 
+  // THE SEAM IS THE ONLY DOOR (platform-pivot 07). The cutover ratchet above guards ONE key.
+  // This guards all six, against every file, in both directions: a doc-of-record key may be
+  // named in a raw localStorage call in src/editor/storage.js and nowhere else. That is the
+  // ticket's "no call site references the old blob storage path" made permanent -- the last one
+  // was persist.js clearing the registry by hand for "Reset Workspace", which on the file and
+  // http backends cleared nothing and told the author otherwise.
+  // Scoped to raw localStorage calls on purpose: store-http.js names "authoring.products" and
+  // "authoring.library" as SERVER kv keys, which is the seam working, not going round it.
+  var DOC_OF_RECORD = ["authoring.registry", "authoring.library", "authoring.products",
+                       "authoring.activeDocId", "authoring.openDocIds", "authoring.storageBackend"];
+  var SRC_FILES = [];
+  (function walk(dir) {
+    fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).forEach(function (e) {
+      var rel = dir + "/" + e.name;
+      if (e.isDirectory()) return walk(rel);
+      if (/\.js$/.test(e.name)) SRC_FILES.push(rel);
+    });
+  })("src");
+  var trespassers = [];
+  SRC_FILES.forEach(function (f) {
+    if (f === "src/editor/storage.js") return;
+    var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    DOC_OF_RECORD.forEach(function (key) {
+      var re = new RegExp("localStorage\\s*\\.\\s*(getItem|setItem|removeItem)\\s*\\(\\s*[\"']" + key.replace(".", "\\.") + "[\"']");
+      if (re.test(code)) trespassers.push(f + " -> " + key);
+    });
+  });
+  ok("no file outside the storage seam reads or writes a doc-of-record key directly" +
+     (trespassers.length ? " (" + trespassers.join(", ") + ")" : ""), trespassers.length === 0);
+  ok("the ratchet is looking at the whole of src/, not a hand-kept list", SRC_FILES.length > 40);
+
+  // Reset means the same thing in all three postures, because it goes through the adapter.
+  var resetAdapter = STORAGE.makeMemoryAdapter();
+  var resetting = STORAGE.create({ storage: resetAdapter.storage, adapter: resetAdapter, hoist: function () {} });
+  resetting.saveRegistry({ "C-1": { meta: { code: "C-1" } }, "C-2": { meta: { code: "C-2" } } });
+  resetting.saveOpenDocIds(["C-1", "C-2"]);
+  resetting.saveActiveDocId("C-2");
+  var reset = resetting.resetWorkspace({ registry: { "SAMPLE": { meta: { code: "SAMPLE" } } } });
+  ok("resetWorkspace reports its outcome as a value", reset.ok === true && reset.count === 1);
+  ok("reset writes the seed through the SAME adapter every other write uses",
+    Object.keys(resetting.getRegistry()).join() === "SAMPLE" &&
+    Object.keys(JSON.parse(resetAdapter.data[STORAGE.KEYS.registry])).join() === "SAMPLE");
+  ok("reset repoints the open tabs and the active doc at the seed",
+    resetting.getOpenDocIds([]).join() === "SAMPLE" && resetting.getActiveDocId(null) === "SAMPLE");
+  // A refused write must leave the workspace exactly as it was -- reset is destructive, so it
+  // reports rather than half-completing.
+  var blocked = STORAGE.create({ storage: STORAGE.makeMemoryAdapter().storage, suppressed: function () { return true; }, hoist: function () {} });
+  blocked.saveOpenDocIds(["KEEP"]);
+  var refused = blocked.resetWorkspace({ registry: { "SAMPLE": {} } });
+  ok("a refused reset changes nothing and names the stage",
+    refused.ok === false && refused.stage === "suppressed" && blocked.getOpenDocIds([]).join() === "KEEP");
+  ok("persist.js's Reset button calls the editor, and refuses out loud when it cannot",
+    /window\.Editor\.resetWorkspace\(\)/.test(src("src/persist.js")) &&
+    /if \(!res \|\| !res\.ok\)/.test(src("src/persist.js")));
+  ok("editor.js seeds the reset with the sample course and nothing else",
+    /seedRegistry\[window\.SAMPLE_DOC\.meta\.code\] = window\.SAMPLE_DOC;[\s\S]{0,120}Store\.resetWorkspace\(/.test(src("src/editor.js")));
+
   // editor.js reaches for both the render context and the storage seam as it LOADS, so every page
   // that loads editor.js has to load them first. kit.html is the one that is easy to forget: it
   // boots editor.js in __KIT_MODE, and arch-P1 wired the render context into index.html alone,
@@ -1767,6 +1824,41 @@ section("platform-pivot 33 pre-flight backup + guarded cutover");
     // live hand-flip is the 2026-07-12 clobber.
     ok("33: the cutover writes no storage key itself (commitBackend is the one writer)",
       !/setItem\s*\(/.test(mig));
+  })();
+
+  // --- platform-pivot 07: the terminal drain of the retired asset blob ---
+  // The blob writer is gone, so this only ever runs one way: read what an older build left in
+  // localStorage, put it somewhere durable, drop the key. Every failure mode keeps the key,
+  // because the key is the only copy of that media until the puts land.
+  (function () {
+    function env(over) {
+      var s = { read: function () { return s.raw; }, remove: function () { s.raw = null; s.removed = true; },
+                has: function (id) { return !!s.store[id]; }, put: function (id, rec) { s.store[id] = rec; },
+                raw: null, store: {}, removed: false };
+      Object.keys(over || {}).forEach(function (k) { s[k] = over[k]; });
+      return s;
+    }
+    var e = env({ raw: JSON.stringify({ a: { data: "d1" }, b: { data: "d2" } }) });
+    var r = M.drainLegacyAssetBlob(e);
+    ok("07: every record in the old blob is moved", r.ok === true && r.moved === 2 && e.store.a.data === "d1" && e.store.b.data === "d2");
+    ok("07: and only then is the old key dropped", r.removed === true && e.removed === true && e.raw === null);
+    ok("07: a second run is a no-op", M.drainLegacyAssetBlob(e).moved === 0);
+
+    var dup = env({ raw: JSON.stringify({ a: { data: "old" } }) });
+    dup.store.a = { data: "current" };
+    M.drainLegacyAssetBlob(dup);
+    ok("07: a record already in the live store is not overwritten by the old copy", dup.store.a.data === "current");
+
+    var nothing = M.drainLegacyAssetBlob(env());
+    ok("07: no old key is success with nothing to do", nothing.ok === true && nothing.moved === 0 && nothing.removed === false);
+
+    var junk = M.drainLegacyAssetBlob(env({ raw: "{not json" }));
+    ok("07: an unreadable blob is reported and the key kept", junk.ok === false && junk.removed === false);
+
+    var breaks = env({ raw: JSON.stringify({ a: {}, b: {} }), put: function (id) { if (id === "b") throw new Error("full"); } });
+    var br = M.drainLegacyAssetBlob(breaks);
+    ok("07: a failed put keeps the old key, so the media is never lost between stores",
+      br.ok === false && br.removed === false && breaks.removed === false && breaks.raw !== null);
   })();
 })();
 
@@ -4659,27 +4751,100 @@ section("YY asset-seam");
   ok("embed hoist round-trips", decodeURIComponent(puts[0].slice(puts[0].indexOf(",") + 1)) === "<b>hi</b>");
 
   // store
+  // platform-pivot 07 rewrote this from "assert against source text with the localStorage
+  // fallback doing the work" to driving the REAL hydrate -> drain -> put path against a fake
+  // IndexedDB. That matters here specifically: the fallback used to make `put` succeed with no
+  // IDB at all, so the test never once exercised the store the app actually ships on.
   var ptxt = src("src/persist.js");
-  var pe = ptxt.indexOf("placeholder: PLACEHOLDER"); pe = ptxt.indexOf("};", pe) + 2;
-  var pblock = ptxt.slice(ptxt.indexOf("var ASSET_KEY"), pe);
-  var lsStore = {}, failNext = false;
-  var fakeLS = { getItem: function (k) { return k in lsStore ? lsStore[k] : null; }, setItem: function (k, v) { if (failNext) { var e = new Error("full"); e.name = "QuotaExceededError"; throw e; } lsStore[k] = v; } };
-  var n = 0, fakeURL = { createObjectURL: function () { return "blob:" + (++n); }, revokeObjectURL: function () {} };
-  var pw = { Editor: { reportSaveFailure: function () {} }, console: console };
-  new Function("window", "localStorage", "URL", "Blob", "atob", pblock)(pw, fakeLS, fakeURL, function () {}, function (s) { return Buffer.from(s, "base64").toString("binary"); });
-  var AS = pw.AssetStore;
+  var pe = ptxt.indexOf("idbReady: function ()"); pe = ptxt.indexOf("};", pe) + 2;
+  var pblock = ptxt.slice(ptxt.indexOf("var PLACEHOLDER"), pe);
+
+  // A fake IndexedDB. Every request completes on flush() rather than at once, because the real
+  // code assigns its handlers AFTER open()/openCursor() returns -- firing synchronously would
+  // pass against an implementation the browser would never run.
+  function makeFakeIDB(seed) {
+    var rows = {}; Object.keys(seed || {}).forEach(function (k) { rows[k] = seed[k]; });
+    var pending = [];
+    var objectStore = {
+      put: function (rec, id) { rows[id] = rec; },
+      delete: function (id) { delete rows[id]; },
+      openCursor: function () {
+        var req = {}, keys = Object.keys(rows), i = 0;
+        pending.push(function () {
+          (function step() {
+            if (i >= keys.length) { req.result = null; return req.onsuccess && req.onsuccess(); }
+            var k = keys[i++];
+            req.result = { key: k, value: rows[k], continue: step };
+            req.onsuccess && req.onsuccess();
+          })();
+        });
+        return req;
+      }
+    };
+    var db = { transaction: function () { return { objectStore: function () { return objectStore; } }; } };
+    return {
+      rows: rows,
+      api: { open: function () { var r = { result: db }; pending.push(function () { r.onsuccess && r.onsuccess(); }); return r; } },
+      flush: function () { var guard = 0; while (pending.length && guard++ < 50) { pending.shift()(); } }
+    };
+  }
+  function bootAssets(opts) {
+    opts = opts || {};
+    var lsStore = {};
+    if (opts.legacy) lsStore["authoring.assets"] = JSON.stringify(opts.legacy);
+    var fakeLS = {
+      getItem: function (k) { return k in lsStore ? lsStore[k] : null; },
+      setItem: function (k, v) { lsStore[k] = v; },
+      removeItem: function (k) { delete lsStore[k]; }
+    };
+    var n = 0, fakeURL = { createObjectURL: function () { return "blob:" + (++n); }, revokeObjectURL: function () {} };
+    var idb = opts.noIDB ? null : makeFakeIDB(opts.seed);
+    var pw = {
+      Editor: { reportSaveFailure: function () {} }, console: console,
+      indexedDB: idb ? idb.api : null,
+      Migration: require(path.join(ROOT, "src/migration.js")).Migration
+    };
+    new Function("window", "localStorage", "URL", "Blob", "atob", "indexedDB", pblock)(
+      pw, fakeLS, fakeURL, function () {}, function (s) { return Buffer.from(s, "base64").toString("binary"); },
+      idb ? idb.api : undefined);
+    var hydrated = false;
+    pw.AssetStore.hydrate(function () { hydrated = true; });
+    if (idb) idb.flush();
+    return { AS: pw.AssetStore, ls: lsStore, idb: idb, hydrated: function () { return hydrated; } };
+  }
+
+  var boot = bootAssets();
+  ok("hydrate completes and IndexedDB is the backer", boot.hydrated() === true && boot.AS.idbReady() === true);
+  var AS = boot.AS;
   var id = AS.put("data:image/png;base64,AAAA", { mime: "image/png" });
   ok("put id + dedupe", !!id && AS.put("data:image/png;base64,AAAA", {}) === id);
   var svg = AS.put("data:image/svg+xml;utf8,<svg/>", { mime: "image/svg+xml" });
   ok("svg url -> data:", AS.url(svg).slice(0, 5) === "data:");
   ok("raster url -> blob:", AS.url(id).slice(0, 5) === "blob:");
-  failNext = true;
-  var realErr = console.error; console.error = function () {}; // expected quota log
-  ok("quota put -> null", AS.put("data:image/png;base64,BBBB", {}) === null);
-  console.error = realErr;
-  failNext = false;
+  ok("a put record reaches IndexedDB, per record", boot.idb.rows[id] && boot.idb.rows[id].mime === "image/png");
   AS.sweep([svg]);
   ok("sweep removes unref", !AS.has(id) && AS.has(svg));
+  ok("sweep deletes the IndexedDB record too", !boot.idb.rows[id] && !!boot.idb.rows[svg]);
+
+  // platform-pivot 07: the retired localStorage blob. There is no writer left, so `put` with no
+  // IndexedDB declines rather than opening a second store -- the caller keeps its inline data:
+  // URL (migrateDocMedia is documented non-destructive) and the registry write owns durability.
+  var bare = bootAssets({ noIDB: true });
+  ok("with no IndexedDB, put declines instead of writing a localStorage blob",
+    bare.AS.put("data:image/png;base64,CCCC", {}) === null && bare.ls["authoring.assets"] === undefined);
+  ok("nothing in persist.js writes the retired asset key",
+    !/setItem\s*\([^)]*authoring\.assets/.test(ptxt) && !/var ASSET_KEY/.test(ptxt) && !/function persistFallback/.test(ptxt));
+
+  // ...and a machine that still holds the old blob has it drained into IndexedDB exactly once,
+  // then the key removed. Media is never stranded by the retirement.
+  var legacyRec = { data: "data:image/png;base64,DDDD", mime: "image/png", name: null, w: null, h: null };
+  var drained = bootAssets({ legacy: { "leg-1": legacyRec }, seed: { "kept-1": legacyRec } });
+  ok("the legacy blob is drained into IndexedDB", drained.AS.has("leg-1") && drained.idb.rows["leg-1"].data === legacyRec.data);
+  ok("draining leaves records already in IndexedDB alone", drained.AS.has("kept-1"));
+  ok("the retired key is removed once it is empty", drained.ls["authoring.assets"] === undefined);
+  var reboot = bootAssets({ legacy: { "leg-1": legacyRec }, noIDB: true });
+  ok("with nowhere to drain to, the old key is left alone rather than deleted",
+    reboot.ls["authoring.assets"] !== undefined);
 })();
 
 // ---- tour source MediaTransport: pure time/mark helpers ------------------
