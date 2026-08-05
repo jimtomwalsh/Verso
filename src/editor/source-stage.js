@@ -1542,6 +1542,11 @@
         el.contentEditable = "false";
       });
       art.classList.toggle("source-doc--unlocked", __sourceUnlocked);
+      // uio-S-M03: reading is a different measure from working. The mode already decides what you
+      // can do to the document; it decides how the document presents too, so the two can never
+      // disagree about which one you are in.
+      var col = art.closest ? art.closest(".source-doc__col") : null;
+      if (col) SOURCE_MODES.forEach(function (m) { col.classList.toggle("source-doc__col--" + m, __sourceMode === m); });
     }
     // When LOCKED the blocks are contentEditable=false, so a real click can't place a caret in them
     // and a keystroke lands on <body>, never reaching the article's keydown guard -- so no "source

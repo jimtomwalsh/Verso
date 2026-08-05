@@ -170,6 +170,9 @@ In this mode:
   - **Edit** — the signed-off prose is editable. The chip turns red, because this is the only mode
     that puts approved wording at risk.
 
+  **Read also widens the column and steps the text up**, because reading a manual end to end and
+  editing one passage of it are not the same task.
+
   Leaving Edit locks the prose, with everything that involves: if your edit changed wording other
   documents link to, you get the same warning you always did. Trying to type while locked shows a
   brief reminder instead of changing anything. Clicking a mark while reading moves you to Review,

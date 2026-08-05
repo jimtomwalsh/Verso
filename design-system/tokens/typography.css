@@ -21,6 +21,14 @@
   --text-2xl: 28px;   /* brand / marketing headings */
   --text-3xl: 40px;
 
+  /* Reading type (uio-S-M03). The ramp above is CHROME — labels, menus, rows, all built to be
+     scanned at a glance. Source is the first surface in Verso where an author READS long-form
+     prose rather than operating a control, and chrome sizes are wrong for that: 13px at 1.65 is a
+     dense working measure, not something you read a manual in. These two are the reading pair, and
+     they belong to a reading surface, never to chrome. */
+  --text-reading:    17px;
+  --leading-reading: 1.78;
+
   /* Weights */
   --weight-regular:  400;
   --weight-medium:   500;

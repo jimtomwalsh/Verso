@@ -3,7 +3,22 @@
 /* Reading column + sticky left TOC (toc-search-drawer). The article stays centred; the TOC
    pins to the left of the pane and hides on a narrow pane so the column keeps full width. */
 .source-doc__layout { display: flex; align-items: flex-start; gap: 24px; }
-.source-doc__col { position: relative; flex: 1 1 auto; max-width: 760px; margin: 0 auto; padding-bottom: 120px; }
+/* uio-S-M03 (SRC-09): two measures, because reading a manual end to end and editing one passage of
+   it are not the same task. Working caps at 700px; Reading widens to 780px AND steps the type up,
+   which is what actually shortens the line — 780px at 17px measures ~86 characters against 700px
+   at 13px measuring ~101 (both measured in the browser, not estimated).
+
+   BOTH ARE STILL ABOVE THE 45-75 BAND prose is comfortable at, and the reason is the type: the
+   working measure runs at 13px because it inherits the chrome ramp. The spec's ~660-720px cap
+   assumes a larger reading size than chrome uses, so capping alone cannot get there. Bringing
+   Source's working type off the chrome ramp is a bigger change than this ticket — see the note
+   filed against uio-S-A01. Recorded here rather than fixed quietly, so the next person does not
+   re-derive it from scratch.
+
+   The mode drives both, so the measure cannot disagree with what you are allowed to do. */
+.source-doc__col { position: relative; flex: 1 1 auto; max-width: var(--measure-working, 700px); margin: 0 auto; padding-bottom: 120px; }
+.source-doc__col--read { max-width: var(--measure-reading, 780px); }
+.source-doc__col--read .source-doc { font-size: var(--text-reading, 17px); line-height: var(--leading-reading, 1.78); }
 .source-doc__toc { position: sticky; top: 0; flex: 0 0 188px; align-self: flex-start; max-height: calc(100vh - 130px); overflow-y: auto; padding: 2px 0 20px; }
 .source-doc__toc-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 8px; padding-left: 12px; }
 .source-doc__toc-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 4px 10px 4px 12px; font-size: var(--text-sm); line-height: 1.45; color: var(--text-secondary); cursor: pointer; border-radius: 0 5px 5px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
