@@ -17276,6 +17276,46 @@ section("uio-F03 scope + inheritance model");
 // is attached to THIS PASSAGE (one card, docked, never over the prose)". There were three cards,
 // each floating in the right margin, each pinned to its own span. They could stack, they covered
 // the reading column, and three surfaces were answering one question.
+// uio-S-M03 (SRC-09): 760px at 13px is ~95 characters a line, past the band prose is comfortable
+// at. Working and reading are different tasks and should not share a measure.
+section("uio-S-M03 a capped measure, and a wider one for reading");
+(function () {
+  var es = src("src/editor/source-stage.js");
+  var css = EDITOR_CSS;
+  var typ = src("design-system/tokens/typography.css");
+  var sp = src("design-system/tokens/spacing.css");
+
+  // The DS gets the pattern FIRST. Source is the first surface in Verso where an author reads
+  // long-form prose rather than operating a control, so the chrome ramp had nothing right for it.
+  ok("the reading pair is a DS token, not a number in a stylesheet",
+    /--text-reading:\s*17px;/.test(typ) && /--leading-reading:\s*1\.78;/.test(typ));
+  ok("the DS says the reading pair belongs to a reading surface, never to chrome",
+    /never to chrome/.test(typ.replace(/\s+/g, " ")));
+  ok("both measures are DS tokens", /--measure-working:\s*700px;/.test(sp) && /--measure-reading:\s*780px;/.test(sp));
+  ok("the DS states why two measures rather than one compromise",
+    /two different measures, never one compromise between them/.test(sp.replace(/\s+/g, " ")));
+  // A measure alone fixes nothing: the same 780px reads at ~86ch at 17px and ~101ch at 13px.
+  ok("the DS says a measure is meaningless without a type size",
+    /Pair --measure-reading with --text-reading; a measure alone fixes nothing/.test(sp.replace(/\s+/g, " ")));
+  // Honest record: both measures are still above the band, and why. Written down rather than
+  // fixed quietly, because the cause is Source running its prose on the CHROME type ramp.
+  ok("the residual is recorded, not papered over",
+    /BOTH ARE STILL ABOVE THE 45-75 BAND/.test(css) && /see the note\s*filed against uio-S-A01/.test(css));
+
+  ok("the working measure is capped and reads its token",
+    /\.source-doc__col \{[^}]*max-width: var\(--measure-working, 700px\)/.test(css));
+  ok("Read widens and steps the type up",
+    /\.source-doc__col--read \{ max-width: var\(--measure-reading, 780px\); \}/.test(css) &&
+    /\.source-doc__col--read \.source-doc \{ font-size: var\(--text-reading, 17px\); line-height: var\(--leading-reading, 1\.78\); \}/.test(css));
+  // The MODE drives the measure, so the two can never disagree about which one you are in.
+  ok("the mode drives the measure, from the one place that already applies the mode",
+    /SOURCE_MODES\.forEach\(function \(m\) \{ col\.classList\.toggle\("source-doc__col--" \+ m, __sourceMode === m\); \}\);/.test(es));
+  ok("it rides applySourceLockState, not a second listener", (function () {
+    var fn = es.slice(es.indexOf("function applySourceLockState(art)"), es.indexOf("// When LOCKED the blocks are"));
+    return fn.indexOf("source-doc__col--") !== -1;
+  })());
+})();
+
 section("uio-S-M02 one card, docked");
 (function () {
   var es = src("src/editor/source-stage.js");
