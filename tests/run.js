@@ -3091,6 +3091,88 @@ section("platform-pivot 17/18/20 identity");
   }
 })();
 
+// ---- platform-pivot 30: the go-live gate + server-only smoke test ---------------
+// Four behaviours cannot be exercised in local mode by construction, and this suite covers all
+// four against fakes and a real store -- which proves the LOGIC and cannot prove the DEPLOYMENT.
+// The smoke test drives them over HTTP against a real running server, and the gate refuses to
+// let a green local run ship on its own. That refusal is the ticket.
+section("platform-pivot 30 go-live gate");
+(function () {
+  var SMOKE = require(path.join(ROOT, "server/smoke.js"));
+
+  // --- the gate's arithmetic (pure) ---
+  var greenSmoke = { ok: true, results: [{ id: "health", ok: true }, { id: "sync", ok: true }] };
+  var everything = { backup: true, dryRun: true, rollback: true, "idp-reach": true, "arr-proxy": true };
+  ok("30: with the smoke green and every confirmation made, promotion proceeds",
+    SMOKE.evaluateGate(greenSmoke, everything).ok === true);
+  // THE POINT OF THE TICKET.
+  var noSmoke = SMOKE.evaluateGate({ ok: false, results: [{ id: "health", ok: true }] }, everything);
+  ok("30: a FAILED smoke test hard-blocks promotion, whatever else was confirmed", noSmoke.ok === false && noSmoke.blocking.indexOf("smoke") >= 0);
+  ok("30: and says so in words an operator can act on", /promotion is blocked/.test(noSmoke.reason));
+  ok("30: a green smoke alone is NOT enough -- the confirmations are part of the gate",
+    SMOKE.evaluateGate(greenSmoke, {}).ok === false);
+
+  // The two [UNKNOWN]s are properties of the site's network. A gate that omitted them would read
+  // as "all clear" while the two most likely deployment failures went unchecked.
+  var ids = SMOKE.GATE_ITEMS.map(function (i) { return i.id; });
+  ok("30: the gate carries the IdP-reachability unknown", ids.indexOf("idp-reach") >= 0);
+  ok("30: and the IIS+ARR both-pipes unknown", ids.indexOf("arr-proxy") >= 0);
+  ok("30: both are marked as unknowns a person confirms, not as things code decided",
+    SMOKE.GATE_ITEMS.filter(function (i) { return i.unknown; }).every(function (i) { return i.automated === false; }));
+  ok("30: the arr-proxy item names BOTH pipes, since proxying one is the silent failure",
+    /wss:\/\/ AND the long-poll/.test(SMOKE.GATE_ITEMS.filter(function (i) { return i.id === "arr-proxy"; })[0].label));
+  ok("30: the gate also covers backup, dry run, health and rollback",
+    ["backup", "dryRun", "health", "rollback"].every(function (k) { return ids.indexOf(k) >= 0; }));
+  var partial = SMOKE.evaluateGate(greenSmoke, { backup: true, dryRun: true });
+  ok("30: an unconfirmed item blocks and is named", partial.ok === false && partial.blocking.indexOf("rollback") >= 0);
+
+  // --- the harness, against a REAL running server ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> go-live smoke tests skipped"); return; }
+    var os = require("os");
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    __async.push((async function () {
+      var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-smoke-"));
+      var server, base;
+      await new Promise(function (r) {
+        server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "v.sqlite"), linkSecret: "s", insecureCookie: true }, function (s) { base = "http://127.0.0.1:" + s.address().port; r(); });
+      });
+      try {
+        server.__identity.registerLocalAccount("root@local", "Root", "smokepw", "admin");
+        var res = await SMOKE.run({ base: base, admin: { email: "root@local", password: "smokepw" }, docId: "SMOKE-1", stamp: "t" });
+        function got(id) { return res.results.filter(function (r) { return r.id === id; })[0]; }
+        ok("30: the smoke test runs end to end against a real server over HTTP", res.results.length === 5);
+        ok("30: health answers with a level and a version", got("health").ok === true);
+        // These four are exactly what local mode cannot exercise.
+        ok("30: (1) a second client sees a fanned-out block.change, and it persisted -- " + got("sync").detail, got("sync").ok === true);
+        ok("30: (2) a held block refuses the second client -- " + got("locks").detail, got("locks").ok === true);
+        ok("30: (3) the auth rung yields a resolvable session -- " + got("auth").detail, got("auth").ok === true);
+        ok("30: (4) a review link reads and comments but CANNOT edit -- " + got("review-link").detail, got("review-link").ok === true);
+        ok("30: and the run reports one overall verdict", res.ok === true);
+
+        // It asserts externally observable behaviour only: no internals, no in-process handles.
+        var js = src("server/smoke.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+        ok("30: the harness reaches the server only over HTTP",
+          !/require\(".*verso-server/.test(js) && !/__blockStore|__identity|__hub/.test(js));
+        ok("30: it takes a base URL, so it runs against prod-in-window or a throwaway alike",
+          /function run\(opts\)/.test(js) && /opts\.base/.test(js));
+        ok("30: a failing check never aborts the rest -- an operator gets every problem at once",
+          /async function step\(id, fn\)/.test(js) && /return \{ id: id, ok: false, detail: "threw/.test(js));
+      } finally {
+        try { server.close(); } catch (e) {}
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+      }
+    })());
+  })();
+
+  // --- the command an operator actually runs ---
+  var cli = src("scripts/go-live.js");
+  ok("30: the gate is a command, and it exits non-zero when blocked", /process\.exit\(gate\.ok \? 0 : 1\)/.test(cli));
+  ok("30: it prints each item with whether it passed", /gate\.items\.forEach/.test(cli));
+  ok("30: and tells the operator how to confirm the manual ones", /--confirm " \+ i\.id/.test(cli));
+  ok("30: it drives the same harness, not a second copy of the checks", /require\("\.\.\/server\/smoke\.js"\)/.test(cli));
+})();
+
 // ---- platform-pivot 31: guided IT install, first run, monitoring ----------------
 // This is the ticket that most directly answers James's ask: the moment approval lands, an admin
 // who has never seen the codebase can stand this up. So the tests are about the things that

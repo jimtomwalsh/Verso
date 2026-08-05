@@ -135,6 +135,20 @@ configuration, so you cannot lock the organisation out by editing a role.
 
 ---
 
+## Before you promote anything
+
+Run the go-live gate against the running server. It drives the four behaviours that cannot be
+exercised anywhere but a real deployment, then refuses unless the manual confirmations are made
+too:
+
+```
+node scripts/go-live.js --base https://<host> --admin <email>:<password> \
+  --confirm backup,dryRun,rollback,idp-reach,arr-proxy
+```
+
+Exit 0 means go. Anything else blocks, and it names what is missing. **A green local test run can
+never ship on its own** — that is the whole point of this gate.
+
 ## Known unknowns, to confirm at deploy
 
 Two things cannot be settled from a developer machine, and the go-live gate
