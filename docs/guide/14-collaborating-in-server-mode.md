@@ -4,6 +4,12 @@ When your team runs Verso on a shared server (rather than the standalone app), s
 can edit the same course at once. **The standalone `file://` app is unchanged — this section
 applies only in server mode.**
 
+- **Signing in.** Opening the server shows a sign-in screen. Use the **Continue with … sign-in**
+  button — you enter your password on your organisation's own sign-in page, never in Verso.
+  Some servers instead sign you in automatically from your Windows account, and some use Verso
+  accounts with their own passwords; your IT admin sets which. If the message says the sign-in
+  service can't be reached, that isn't your password — wait and try again, or use the local admin
+  account link if you have those credentials.
 - **See who's here.** Avatars of everyone in the course show in the top bar, each in that
   person's colour (the same colour their comments use). A solid ring means they're editing; a
   hollow ring means they're just viewing, and a small flag shows where a colleague is looking.

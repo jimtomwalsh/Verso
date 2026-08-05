@@ -2988,6 +2988,307 @@ section("platform-pivot 17/18/20 identity");
   }
 })();
 
+// ---- platform-pivot 19: the corporate authentication rungs --------------------
+// A complete OIDC auth-code round trip runs here with no tenant and no network: a locally
+// generated RSA keypair plays the IdP, and every endpoint is injected. That is the point of
+// the adapter shape -- the live-IdP check is a deploy-time unknown (platform-pivot 30), but
+// nothing else about this rung has to wait for it.
+section("platform-pivot 19 auth rungs");
+(function () {
+  var AR = require(path.join(ROOT, "server/auth-rungs.js"));
+  var crypto = require("node:crypto");
+
+  // --- a fake IdP: a real keypair, real RS256 signatures, real discovery shape ---
+  var kp = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  var jwk = kp.publicKey.export({ format: "jwk" });
+  jwk.kid = "test-key-1"; jwk.alg = "RS256"; jwk.use = "sig";
+  var ISSUER = "https://login.example.invalid/tenant";
+  function b64url(buf) { return Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+  function signJwt(claims, over) {
+    over = over || {};
+    var head = b64url(JSON.stringify({ alg: over.alg || "RS256", typ: "JWT", kid: over.kid === null ? undefined : (over.kid || "test-key-1") }));
+    var body = b64url(JSON.stringify(claims));
+    var sig = over.badSig ? b64url("nonsense") : b64url(crypto.sign("RSA-SHA256", Buffer.from(head + "." + body, "utf8"), over.key || kp.privateKey));
+    return head + "." + body + "." + sig;
+  }
+  var NOW_MS = 1750000000000;
+  function nowFn() { return NOW_MS; }
+  function claims(over) {
+    var c = { iss: ISSUER, aud: "verso-client", exp: Math.floor(NOW_MS / 1000) + 3600, iat: Math.floor(NOW_MS / 1000),
+              email: "Ada@Example.Invalid", name: "Ada L" };
+    Object.keys(over || {}).forEach(function (k) { if (over[k] === undefined) delete c[k]; else c[k] = over[k]; });
+    return c;
+  }
+  var DISCOVERY = {
+    issuer: ISSUER,
+    authorization_endpoint: ISSUER + "/oauth2/v2.0/authorize",
+    token_endpoint: ISSUER + "/oauth2/v2.0/token",
+    jwks_uri: ISSUER + "/discovery/v2.0/keys"
+  };
+  // A rung wired to the fake IdP. `plan` lets a test break exactly one step.
+  //
+  // The fake ECHOES THE NONCE back in the id_token, the way a real IdP does. That detail is
+  // load-bearing: without it every token would fail the replay check and the whole suite would
+  // pass for the wrong reason -- "refused" is the expected answer in a dozen tests below, so a
+  // harness that can never produce a valid token proves nothing at all.
+  function rung(plan) {
+    plan = plan || {};
+    var calls = { discovery: 0, jwks: 0, token: 0, lastForm: null, lastNonce: null };
+    var adapter = AR.createOidcAdapter(
+      { issuer: ISSUER, clientId: "verso-client", clientSecret: "s3cr3t", redirectUri: "https://verso.example.invalid/auth/sso/callback" },
+      {
+        now: nowFn,
+        getJson: function (url) {
+          if (url.indexOf("openid-configuration") >= 0) { calls.discovery++; return Promise.resolve(plan.noDiscovery ? null : DISCOVERY); }
+          calls.jwks++; return Promise.resolve({ keys: plan.noKeys ? [] : [jwk] });
+        },
+        postForm: function (url, body) {
+          calls.token++; calls.lastForm = body;
+          if (plan.tokenError) return Promise.resolve({ error: "invalid_grant", error_description: "the code was already used" });
+          if (plan.noIdToken) return Promise.resolve({ access_token: "a" });
+          var c = claims(plan.claims);
+          if (c.nonce === undefined) c.nonce = calls.lastNonce;   // what a real IdP echoes back
+          return Promise.resolve({ id_token: signJwt(c, plan.jwt), token_type: "Bearer" });
+        }
+      });
+    adapter.__calls = calls;
+    // Wrap begin() so the harness sees the nonce this server minted, exactly as the IdP would.
+    var realBegin = adapter.begin;
+    adapter.begin = function (returnTo) {
+      return realBegin(returnTo).then(function (b) {
+        if (b) { var m = /nonce=([^&]+)/.exec(b.url); calls.lastNonce = m ? decodeURIComponent(m[1]) : null; }
+        return b;
+      });
+    };
+    return adapter;
+  }
+
+  // --- choosing the rung: config, never a build-time fork ---
+  ok("19: no auth config -> local accounts, the always-works floor", AR.chooseRung({}).rung === "local");
+  ok("19: a complete OIDC config selects the OIDC rung",
+    AR.chooseRung({ auth: { oidc: { issuer: "i", clientId: "c", clientSecret: "s", redirectUri: "r" } } }).rung === "oidc");
+  var half = AR.chooseRung({ auth: { rung: "oidc", oidc: { issuer: "i", clientId: "c" } } });
+  ok("19: a HALF-configured OIDC rung falls back to local and says what is missing",
+    half.rung === "local" && half.requested === "oidc" && /clientSecret/.test(half.reason));
+  var halfIwa = AR.chooseRung({ auth: { rung: "iwa", iwa: {} } });
+  ok("19: an IWA rung with no trusted upstream refuses to start, rather than trusting a header",
+    halfIwa.rung === "local" && /trustedProxies/.test(halfIwa.reason));
+  ok("19: Entra and AD FS are the SAME code path -- nothing branches on the provider",
+    !/entra|adfs|ad fs/i.test(src("server/auth-rungs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+
+  // --- the authorization redirect (pure) ---
+  var u = AR.authorizeUrl(DISCOVERY.authorization_endpoint, { clientId: "verso-client" }, "ST", "NO", "https://v/cb");
+  ok("19: the redirect asks for a code, with state and nonce",
+    /response_type=code/.test(u) && /state=ST/.test(u) && /nonce=NO/.test(u) && /client_id=verso-client/.test(u));
+  ok("19: and requests only the identity scopes", /scope=openid%20profile%20email/.test(u));
+  ok("19: no roles/groups scope is ever requested -- SSO proves identity only",
+    !/groups|roles|Directory\./i.test(u));
+
+  __async.push((async function () {
+    // --- the happy path, end to end ---
+    var a = rung();
+    var begun = await a.begin("/");
+    ok("19: begin() reaches discovery and returns a redirect", !!begun && begun.url.indexOf(DISCOVERY.authorization_endpoint) === 0);
+    var state = begun.state;
+    var done = await a.complete("CODE-1", state);
+    ok("19: a valid code exchanges into a verified identity", done.ok === true && done.identity.email === "ada@example.invalid");
+    ok("19: and the display name comes from the token", done.identity.name === "Ada L");
+    ok("19: the code exchange sends the client secret, form-encoded, server-side",
+      /grant_type=authorization_code/.test(a.__calls.lastForm) && /client_secret=s3cr3t/.test(a.__calls.lastForm));
+    ok("19: discovery is cached rather than re-fetched per sign-in", a.__calls.discovery === 1);
+    ok("19: a state is single-use -- a replayed callback is refused",
+      (await a.complete("CODE-1", state)).ok === false);
+    ok("19: and no attempt is left behind", a._pendingCount() === 0);
+
+    // --- every way the round trip must refuse ---
+    async function refuses(label, plan, match, mutate) {
+      var r = rung(plan);
+      var b = await r.begin("/");
+      var st = b && b.state;
+      if (mutate) st = mutate(st);
+      var res = await r.complete("CODE-X", st);
+      ok("19: " + label, res.ok === false && (!match || match.test(res.reason)));
+    }
+    await refuses("a callback this server never started is refused before any network call", {}, /did not start here/, function () { return "forged-state"; });
+    await refuses("a tampered signature is refused", { jwt: { badSig: true } }, /signature/);
+    await refuses("a token signed by the wrong key is refused", { jwt: { key: crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey } }, /signature/);
+    await refuses("a token whose kid matches nothing published is refused", { noKeys: true }, /no published key/);
+    await refuses("an unsigned (alg none) token is refused", { jwt: { alg: "none", badSig: true } }, /algorithm/);
+    await refuses("a token minted for another application is refused", { claims: { aud: "some-other-app" } }, /another application/);
+    await refuses("a token from a different issuer is refused", { claims: { iss: "https://evil.invalid" } }, /expected/);
+    await refuses("an expired token is refused", { claims: { exp: Math.floor(NOW_MS / 1000) - 10000 } }, /expired/);
+    await refuses("a replayed token from another sign-in is refused (nonce)", { claims: { nonce: "someone-elses" } }, /nonce/);
+    await refuses("a token with no email-shaped claim is refused rather than guessed", { claims: { email: undefined, preferred_username: undefined, upn: undefined } }, /cannot name the user/);
+    await refuses("an IdP that returns an error passes its reason on", { tokenError: true }, /already used/);
+    await refuses("an IdP that returns no id_token is refused", { noIdToken: true }, /no id_token/);
+
+    // an outage is a distinct, reportable state -- the sign-in surface depends on it
+    var down = rung({ noDiscovery: true });
+    ok("19: begin() returns null when the IdP cannot be reached (the outage state)", (await down.begin("/")) === null);
+    ok("19: and probe() reports it as unreachable rather than throwing", (await down.probe()).ok === false);
+    ok("19: a reachable IdP probes ok", (await rung().probe()).ok === true);
+
+    // upn / preferred_username, which is what AD FS and older Entra tenants send
+    var upnOnly = rung({ claims: { email: undefined, preferred_username: "ada@corp.invalid" } });
+    var b2 = await upnOnly.begin("/");
+    ok("19: preferred_username is accepted when email is absent (AD FS shape)",
+      (await upnOnly.complete("C", b2.state)).identity.email === "ada@corp.invalid");
+  })());
+
+  // --- the IWA rung: the header is worthless unless it came from the right place ---
+  (function () {
+    var iwa = AR.createIwaAdapter({ trustedProxies: ["10.0.0.5"], domainSuffix: "corp.invalid" });
+    function req(addr, headers) { return { headers: headers || {}, socket: { remoteAddress: addr } }; }
+    ok("19: IWA takes the account IIS forwards, from the configured upstream",
+      iwa.fromRequest(req("10.0.0.5", { "x-iis-windowsauth-user": "CORP\\ada" })).email === "ada@corp.invalid");
+    ok("19: a UPN arrives already in email shape",
+      iwa.fromRequest(req("10.0.0.5", { "x-iis-windowsauth-user": "Ada@Corp.Invalid" })).email === "ada@corp.invalid");
+    ok("19: THE SAME HEADER FROM ANYWHERE ELSE IS WORTHLESS -- this is the whole safety of the rung",
+      iwa.fromRequest(req("203.0.113.9", { "x-iis-windowsauth-user": "CORP\\administrator" })) === null);
+    ok("19: an IPv4 address seen through an IPv6 socket still matches its upstream",
+      !!iwa.fromRequest(req("::ffff:10.0.0.5", { "x-iis-windowsauth-user": "CORP\\ada" })));
+    ok("19: no header means no identity", iwa.fromRequest(req("10.0.0.5", {})) === null);
+    ok("19: a deployment that lists no upstream trusts nothing at all",
+      AR.createIwaAdapter({}).fromRequest(req("10.0.0.5", { "x-iis-windowsauth-user": "CORP\\ada" })) === null);
+    ok("19: neither rung is a credential check, so break-glass still falls through to local",
+      iwa.authenticate({ email: "x", password: "y" }) === null && rung().authenticate({}) === null);
+  })();
+
+  // --- the sign-in surface: five states, and the copy is the specification ---
+  (function () {
+    var SI = require(path.join(ROOT, "src/sign-in.js")).VersoSignIn;
+    ok("19: nothing renders without a server", SI.shouldSignIn({}) === false);
+    ok("19: nothing renders on a server we are already signed in to",
+      SI.shouldSignIn({ __versoServerUrl: "http://s", __versoServerAuthRequired: false }) === false);
+    ok("19: the surface appears exactly when the server says authentication is required",
+      SI.shouldSignIn({ __versoServerUrl: "http://s", __versoServerAuthRequired: true }) === true);
+
+    var sso = SI.viewModel({ org: "Northwind", sso: true, ssoReachable: true }, {});
+    ok("19: SSO is the prominent path and the account form is not shown beside it",
+      sso.hasSso === true && sso.showLocalForm === false && sso.ssoDisabled === false);
+    ok("19: the SSO button names the organisation", sso.ssoLabel === "Continue with Northwind sign-in");
+    ok("19: the reassurance is the specified sentence, verbatim",
+      sso.ssoNote === "You'll enter your password on Northwind's own sign-in page. Verso never sees it.");
+    ok("19: break-glass is framed as an emergency, verbatim",
+      sso.breakGlassNote === "For emergencies — works even when Northwind's sign-in service is down.");
+
+    var down = SI.viewModel({ org: "Northwind", sso: true, ssoReachable: false }, {});
+    ok("19: an unreachable IdP disables ONLY the SSO button", down.ssoDisabled === true);
+    ok("19: and says, verbatim, that this is not a password problem",
+      down.message.tone === "warn" &&
+      down.message.body === "Can't reach your organisation's sign-in service right now. This isn't your password — try again shortly, or use the local admin account below.");
+    ok("19: a credentials error never overwrites the outage notice",
+      SI.viewModel({ org: "Northwind", sso: true, ssoReachable: false }, { error: "credentials" }).message.tone === "warn");
+
+    var wrong = SI.viewModel({ org: "Northwind", sso: true, ssoReachable: true }, { showLocal: true, error: "credentials" });
+    ok("19: a wrong break-glass password does not implicate the SSO path, verbatim",
+      wrong.message.tone === "error" &&
+      wrong.message.body === "That password doesn't match. Try again, or continue with Northwind sign-in above.");
+    ok("19: the account form is reached from the break-glass link, not shown by default", wrong.showLocalForm === true);
+
+    var localOnly = SI.viewModel({ org: null, sso: false }, {});
+    ok("19: a local-accounts server shows the account form as the whole surface", localOnly.showLocalForm === true && localOnly.hasSso === false);
+    ok("19: ...and never as 'break-glass', because there is nothing to break out of", localOnly.localIsBreakGlass === false);
+    ok("19: a server with no SSO is never shown an outage", localOnly.ssoDisabled === false && localOnly.message === null);
+    ok("19: an unset organisation name falls back rather than naming anyone",
+      localOnly.org === "your organisation" && SI.interpolate("{org} sign-in", null) === "your organisation sign-in");
+
+    var text = src("src/sign-in.js");
+    ok("19: no organisation is compiled into the shipped strings",
+      !/DroneShield/i.test(text) && (text.match(/\{org\}/g) || []).length >= 5);
+    ok("19: the surface is inert unless a document exists, so `require` cannot install it",
+      /typeof document !== "undefined" && document\.createElement/.test(text));
+    var html = src("index.html");
+    ok("19: it is loaded after the bootstrap globals it depends on",
+      html.indexOf("src/store-http.js") < html.indexOf("src/sign-in.js"));
+    // The surface builds itself out of window.VersoUI, so a load-order slip would give a
+    // signed-out author a blank screen with no way in. This is the ratchet on that.
+    ok("19: and after src/ui-kit.js, whose canonical controls it is built from",
+      html.indexOf("src/ui-kit.js") < html.indexOf("src/sign-in.js"));
+    ok("19: it hand-rolls no button and no input -- both come from VersoUI",
+      /ui\(\)\.Button\(/.test(text) && /ui\(\)\.TextField\(/.test(text) &&
+      !/verso-signin__sso|verso-signin__input/.test(text) &&
+      !/verso-signin__sso|verso-signin__input/.test(src("styles/editor/15-sign-in.css")));
+    ok("19: and it focuses the first field, as its sibling modal does",
+      /email\.focus\(\)/.test(text));
+    // The chrome layer references the semantic role tokens, never the raw grey ramp -- the
+    // raw ramp does not follow the light-theme override, so a surface built on it would be
+    // the one thing in the app that never changes theme.
+    ok("19: the stylesheet uses semantic role tokens, not the raw ramp",
+      !/var\(--gray-/.test(src("styles/editor/15-sign-in.css")));
+    ok("19: TextField forwards the type its own contract declares (password, here)",
+      /el\.type = props\.type \|\| "text"/.test(src("src/ui-kit.js")));
+    ok("19: and its stylesheet is declared, ordered and linked on both pages",
+      /15-sign-in\.css/.test(src("styles/editor/order.json")) &&
+      /15-sign-in\.css/.test(src("index.html")) && /15-sign-in\.css/.test(src("kit.html")));
+  })();
+
+  // --- over HTTP: /auth/config, the redirect, and IWA in front of the boundary ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> auth-rung HTTP tests skipped"); return; }
+    var os = require("os");
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    __async.push((async function () {
+      // (1) a local-accounts deployment: no SSO to offer, and no outage to report
+      var t1 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rung-local-"));
+      var s1, b1;
+      await new Promise(function (r) { s1 = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(t1, "v.sqlite"), linkSecret: "s", organisationName: "Northwind" }, function (s) { b1 = "http://127.0.0.1:" + s.address().port; r(); }); });
+      try {
+        var j = await (await fetch(b1 + "/auth/config")).json();
+        ok("19: /auth/config names the rung and the organisation", j.ok && j.rung === "local" && j.org === "Northwind");
+        ok("19: it offers no SSO on a local-accounts deployment, and always the floor", j.sso === false && j.localAccounts === true);
+        ok("19: it carries no client id and no secret", !/client|secret/i.test(JSON.stringify(j)));
+        ok("19: with no redirect rung, /auth/sso/start is not a route", (await fetch(b1 + "/auth/sso/start", { redirect: "manual" })).status === 404);
+      } finally { try { s1.close(); } catch (e) {} try { fs.rmSync(t1, { recursive: true, force: true }); } catch (e) {} }
+
+      // (2) an OIDC deployment, with the fake IdP injected as the rung
+      var t2 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rung-oidc-"));
+      var oidc = rung();
+      var s2 = srv.createServer({ dbPath: path.join(t2, "v.sqlite"), config: { mode: "server", linkSecret: "s", organisationName: "Northwind" }, rung: oidc });
+      var b2 = await new Promise(function (r) { s2.listen(0, "127.0.0.1", function () { r("http://127.0.0.1:" + s2.address().port); }); });
+      try {
+        var j2 = await (await fetch(b2 + "/auth/config")).json();
+        ok("19: an OIDC deployment reports the rung and that it is reachable", j2.rung === "oidc" && j2.sso === true && j2.ssoReachable === true);
+        var red = await fetch(b2 + "/auth/sso/start", { redirect: "manual" });
+        ok("19: /auth/sso/start 302s to the IdP's authorize endpoint",
+          red.status === 302 && red.headers.get("location").indexOf("/oauth2/v2.0/authorize") > 0);
+        ok("19: the redirect is never cached", /no-store/.test(red.headers.get("cache-control") || ""));
+        var state = /state=([^&]+)/.exec(red.headers.get("location"))[1];
+        var cb = await fetch(b2 + "/auth/sso/callback?code=CODE-1&state=" + state, { redirect: "manual" });
+        ok("19: the callback mints a session cookie and sends the browser back to the app",
+          cb.status === 302 && /verso_session=/.test(cb.headers.get("set-cookie") || ""));
+        ok("19: the session cookie is HttpOnly", /HttpOnly/.test(cb.headers.get("set-cookie")));
+        var me = await (await fetch(b2 + "/auth/me", { headers: { cookie: (cb.headers.get("set-cookie") || "").split(";")[0] } })).json();
+        ok("19: the SSO user is provisioned into Verso's own record", me.principal && me.principal.email === "ada@example.invalid");
+        ok("19: as the FIRST user they are the bootstrap admin -- from Verso, never from a directory claim",
+          me.principal.role === "admin" || (me.principal.capabilities || []).indexOf("manageUsers") >= 0);
+        var bad = await fetch(b2 + "/auth/sso/callback?error=access_denied&error_description=refused+by+policy", { redirect: "manual" });
+        ok("19: an IdP refusal is passed on, not turned into a generic failure",
+          bad.status === 401 && /refused by policy/.test(JSON.stringify(await bad.json())));
+      } finally { try { s2.close(); } catch (e) {} try { fs.rmSync(t2, { recursive: true, force: true }); } catch (e) {} }
+
+      // (3) IWA: the first request IS the sign-in, but only from the trusted upstream
+      var t3 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rung-iwa-"));
+      var s3 = srv.createServer({
+        dbPath: path.join(t3, "v.sqlite"), config: { mode: "server", linkSecret: "s" },
+        rung: AR.createIwaAdapter({ trustedProxies: ["127.0.0.1"], domainSuffix: "corp.invalid" })
+      });
+      var b3 = await new Promise(function (r) { s3.listen(0, "127.0.0.1", function () { r("http://127.0.0.1:" + s3.address().port); }); });
+      try {
+        var anon = await fetch(b3 + "/api/registry");
+        ok("19: without the IIS header there is no identity, and the boundary still 401s", anon.status === 401);
+        var iwaRes = await fetch(b3 + "/api/registry", { headers: { "x-iis-windowsauth-user": "CORP\\ada" } });
+        ok("19: with it, the first request signs the person in -- no sign-in page to visit", iwaRes.status === 200);
+        var who = await (await fetch(b3 + "/auth/me", { headers: { "x-iis-windowsauth-user": "CORP\\ada" } })).json();
+        ok("19: and they are a real Verso user record", who.principal && who.principal.email === "ada@corp.invalid");
+      } finally { try { s3.close(); } catch (e) {} try { fs.rmSync(t3, { recursive: true, force: true }); } catch (e) {} }
+    })());
+  })();
+
+  // --- local mode is untouched (Law 4) ---
+  ok("19: no rung is built in local mode", /identity && config\.mode === "server"\) \? authRungs\.createRung/.test(src("server/verso-server.js")));
+})();
+
 // ---- platform-pivot 17: identity boundary over HTTP (server mode) --------------
 section("platform-pivot 17 identity boundary");
 (function () {

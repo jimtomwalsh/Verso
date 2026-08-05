@@ -236,7 +236,13 @@
     if (props.multiline) {
       el = h("textarea", "vds-textfield__input"); el.rows = props.rows || 3;
     } else {
-      el = h("input", "vds-textfield__input"); el.type = "text";
+      // TextFieldProps extends InputHTMLAttributes, so `type` and `autocomplete` are part of
+      // the contract -- this factory just never forwarded them, which is why the sign-in
+      // surface (platform-pivot 19) had to hand-roll a password field instead of using the
+      // canonical control. Forwarded here rather than worked around at the call site.
+      el = h("input", "vds-textfield__input"); el.type = props.type || "text";
+      if (props.autocomplete) el.autocomplete = props.autocomplete;
+      if (props.name) el.name = props.name;
     }
     el.spellcheck = false;
     el.placeholder = props.placeholder || "";

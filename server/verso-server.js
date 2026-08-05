@@ -26,6 +26,7 @@ var createReaper = require("./lock-reaper").createReaper;
 var createPresence = require("./presence").createPresence;
 var createIdentity = require("./identity").createIdentity;
 var createReview = require("./review").createReview;
+var authRungs = require("./auth-rungs");
 var migrations = require("./migrations");
 
 var API = "/api/";
@@ -162,11 +163,24 @@ function parseCookies(req) {
 // Resolve the principal for a request. Local mode -> a single implicit OWNER with full
 // power (admin+author); server mode -> a session cookie (user) or an x-verso-guest token,
 // else null (reject). This is the ONE boundary in front of the storage API (AC1).
-function principalOf(req, identity, config) {
+function principalOf(req, identity, config, rung) {
   if (!config || config.mode !== "server" || !identity) return { principal: "owner", role: "admin", kind: "owner", name: "Owner" };
   var guestTok = req.headers && req.headers["x-verso-guest"];
   if (guestTok) { var g = identity.authorizeGuest(guestTok); if (g) return g; }
-  return identity.resolveSession(parseCookies(req).verso_session) || null;
+  var session = identity.resolveSession(parseCookies(req).verso_session);
+  if (session) return session;
+  // The IWA rung (ticket 19): IIS has already done Kerberos/NTLM and forwards the account,
+  // so there is no sign-in page to visit -- the first request IS the sign-in. The adapter
+  // refuses a header that did not come from a configured upstream, so this cannot be used
+  // to walk in as anyone; see auth-rungs.js.
+  if (rung && rung.isRequestRung) {
+    var who = rung.fromRequest(req);
+    if (who) {
+      var u = identity.findOrCreateUser(who.email, who.name);
+      return identity.resolveSession(identity.createSession(u.id));
+    }
+  }
+  return null;
 }
 // The capability an /api route requires. Reads need `view`; comment routes need `comment`
 // (so reviewers + guests may annotate but not edit); review-link routes need `issueLinks`;
@@ -183,7 +197,7 @@ function capFor(rest, method) {
 // drive it without binding a socket. An optional blockStore (ticket 03) mounts the
 // block-addressable /api/doc/* routes below the same API -- the boundary Phase-2 sync
 // fans out from. When absent, only the ticket-02 blob routes are served.
-function makeHandler(store, config, blockStore, sync, identity, review) {
+function makeHandler(store, config, blockStore, sync, identity, review, rung) {
   config = config || {};
   return function handler(req, res) {
     var raw = req.url || "";
@@ -213,7 +227,7 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
     // on their own machine believing they are on the server, and strands the work. So the
     // route NEVER 401s: it always says which mode you are in, and withholds only the data.
     if (url === "/api/bootstrap.js") {
-      var bp = principalOf(req, identity, config);
+      var bp = principalOf(req, identity, config, rung);
       return sendBootstrap(res, config, store, blockStore, bp);
     }
 
@@ -233,20 +247,79 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
       return sendJson(res, 200, { ok: true });
     }
     if (url === "/auth/me") {
-      return sendJson(res, 200, { ok: true, principal: principalOf(req, identity, config) });
+      return sendJson(res, 200, { ok: true, principal: principalOf(req, identity, config, rung) });
+    }
+
+    // --- what the sign-in surface needs to know (ticket 19) --------------------
+    // Public and secret-free by construction: it names the RUNG and the organisation, never
+    // a client id and never a secret. The surface cannot render its five states without it --
+    // in particular it cannot tell "this deployment has no SSO" from "the IdP is down", and
+    // showing an outage message on a local-accounts-only server would be a lie.
+    if (url === "/auth/config" && method === "GET") {
+      var org = (config.auth && config.auth.organisationName) || config.organisationName || null;
+      var payload = {
+        ok: true,
+        mode: config.mode || "local",
+        org: org,                                   // null -> the surface says "your organisation"
+        rung: rung ? rung.name : "local",
+        sso: !!(rung && rung.isRedirectRung),       // is there a redirect path to offer at all
+        localAccounts: true                         // the floor is always present (break-glass)
+      };
+      // Reachability is asked for, not assumed. A deployment with SSO configured but an IdP
+      // it cannot reach must render the outage state, and the ONLY way to know is to look.
+      if (rung && rung.probe) {
+        return Promise.resolve(rung.probe()).then(function (p) {
+          payload.ssoReachable = !!(p && p.ok);
+          return sendJson(res, 200, payload);
+        }).catch(function () { payload.ssoReachable = false; return sendJson(res, 200, payload); });
+      }
+      return sendJson(res, 200, payload);
+    }
+
+    // --- the OIDC auth-code round trip (ticket 19) -----------------------------
+    // Two routes because that is what the flow is: leave for the IdP, come back with a code.
+    // Neither is behind the identity boundary -- they are how a person acquires an identity.
+    if (url === "/auth/sso/start" && identity && rung && rung.isRedirectRung) {
+      return Promise.resolve(rung.begin("/")).then(function (b) {
+        if (!b) return sendJson(res, 503, { ok: false, error: "cannot reach the sign-in service", rung: rung.name });
+        res.writeHead(302, { Location: b.url, "Cache-Control": "no-store" });
+        return res.end();
+      }).catch(function () { return sendJson(res, 503, { ok: false, error: "cannot reach the sign-in service" }); });
+    }
+    if (url.indexOf("/auth/sso/callback") === 0 && identity && rung && rung.isRedirectRung) {
+      var q = {};
+      String(query || "").split("&").forEach(function (kv) {
+        if (!kv) return; var i = kv.indexOf("="); var k = i < 0 ? kv : kv.slice(0, i);
+        q[decodeURIComponent(k)] = i < 0 ? "" : decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " "));
+      });
+      // An IdP that refuses says so in the query string; pass its reason on rather than
+      // rendering a generic failure the admin cannot act on.
+      if (q.error) return sendJson(res, 401, { ok: false, error: q.error_description || q.error });
+      return Promise.resolve(rung.complete(q.code, q.state)).then(function (r) {
+        if (!r || !r.ok) return sendJson(res, 401, { ok: false, error: (r && r.reason) || "sign-in failed" });
+        // SSO proved WHO, and stops there. The Verso user record decides what they may do.
+        var u = identity.findOrCreateUser(r.identity.email, r.identity.name);
+        var tok = identity.createSession(u.id);
+        var sec = (config.mode === "server" && !config.insecureCookie) ? "; Secure" : "";
+        res.writeHead(302, {
+          "Set-Cookie": "verso_session=" + tok + "; HttpOnly; Path=/; SameSite=Lax" + sec,
+          Location: r.returnTo || "/", "Cache-Control": "no-store"
+        });
+        return res.end();
+      }).catch(function (e) { return sendJson(res, 401, { ok: false, error: "sign-in failed: " + (e && e.message || e) }); });
     }
 
     // --- live-collaboration long-poll fallback (ticket 08; server mode only). Handled
     //     here (NOT under /api/) so it isn't shadowed by the /api 404 below. ---
     if (url === "/sync/send" && method === "POST" && sync) {
-      var sp = principalOf(req, identity, config);
+      var sp = principalOf(req, identity, config, rung);
       if (!sp) return sendJson(res, 401, { ok: false, error: "authentication required" });
       return withJsonBody(req, res, function (body) {
         sync.handleSend(body.clientId, body.envelope, sp, function (r) { return sendJson(res, r.ok ? 200 : (/authentication/.test(r.error || "") ? 401 : 409), r); });
       });
     }
     if (url === "/sync/poll" && method === "GET" && sync) {
-      var pp = principalOf(req, identity, config);
+      var pp = principalOf(req, identity, config, rung);
       if (!pp) return sendJson(res, 401, { ok: false, error: "authentication required" });
       var clientId = "";
       (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "clientId") clientId = decodeURIComponent(p[1] || ""); });
@@ -261,7 +334,7 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
 
     // --- identity boundary (ticket 17): resolve principal-or-reject in front of storage,
     //     then enforce the capability matrix (reads=view, writes=edit; guests scoped). ---
-    var principal = principalOf(req, identity, config);
+    var principal = principalOf(req, identity, config, rung);
     if (!principal) return sendJson(res, 401, { ok: false, error: "authentication required" });
     req.__principal = principal;
     if (config.mode === "server" && identity) {
@@ -456,13 +529,19 @@ function createServer(opts) {
   // local mode (a single implicit owner). Injected so tests can pass a shared instance.
   var identity = opts.hasOwnProperty("identity") ? opts.identity
     : ((opts.dbPath && config.mode === "server") ? createIdentity({ dbPath: opts.dbPath, now: opts.now, linkSecret: config.linkSecret, sessionTtlMs: config.sessionTtlMs }) : null);
+  // The corporate authentication rung (ticket 19): OIDC (Entra / AD FS) or IIS IWA, chosen
+  // per DEPLOYMENT from the config file, never at build time. Null means this deployment runs
+  // on local accounts alone -- the always-works floor -- which is also what a half-configured
+  // rung falls back to rather than half-starting.
+  var rung = opts.hasOwnProperty("rung") ? opts.rung
+    : ((identity && config.mode === "server") ? authRungs.createRung(config, { now: opts.now }) : null);
   // Review comments (ticket 23): server mode only, on the same on-disk store.
   var review = opts.hasOwnProperty("review") ? opts.review
     : ((opts.dbPath && config.mode === "server") ? createReview({ dbPath: opts.dbPath, now: opts.now }) : null);
   var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager, presence: presence, review: review }) : null;
   // The sync wire resolves each connection through the SAME identity boundary as /api --
   // an anonymous /sync connection is rejected; the connection carries the resolved role.
-  var sync = hub ? createSyncRoutes(hub, config, function (req) { return principalOf(req, identity, config); }) : null;
+  var sync = hub ? createSyncRoutes(hub, config, function (req) { return principalOf(req, identity, config, rung); }) : null;
   // Lease reaper (ticket 12): reclaims a vanished holder's stale lock, then broadcasts the
   // freed lock.state so peers can re-acquire. Server mode only; timer opt-in (unref'd).
   var reaper = (lockManager && hub) ? createReaper(lockManager, {
@@ -474,13 +553,14 @@ function createServer(opts) {
       });
     }
   }) : null;
-  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity, review));
+  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity, review, rung));
   if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode
   server.__store = store;
   server.__blockStore = blockStore;
   server.__hub = hub;
   server.__sync = sync;
   server.__identity = identity;
+  server.__rung = rung;
   server.__review = review;
   server.__lockManager = lockManager;
   server.__reaper = reaper;
