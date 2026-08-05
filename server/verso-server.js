@@ -101,7 +101,61 @@ try { SourceDoc = require("../src/source-doc.js"); } catch (e) { SourceDoc = nul
 var SRC_DOC_PREFIX = "src:";
 function libraryDocId(masterId) { return SRC_DOC_PREFIX + masterId; }
 
-function assembleLibrary(store, blockStore) {
+// ---- the hydration set (platform-pivot 35) ---------------------------------
+// WHY THIS EXISTS. platform-pivot-32 made the library shared and its writes per-node, which was
+// the CORRECTNESS half of James's loading decision. This is the SCALING half he actually chose:
+// "Products up front, source documents on demand. Source documents are the big, growing pile --
+// they load as you open them. Start stays fast as the library grows."
+//
+// THE CONSTRAINT THAT DECIDES THE DESIGN. `readLibrary()` is synchronous by the seam's contract,
+// and src/editor/source-link.js's render resolver reads `master.doc` DURING canvas render for
+// every source-linked block in the open design document. So "load a source document when the
+// author opens it" is not sufficient on its own: a design document's first render depends on the
+// bodies of every source document it links into, and a body that is not there yet renders a
+// BLANK BLOCK -- which does not look like an error, it looks like empty content. That is the
+// worst failure mode available here.
+//
+// So the bootstrap ships the library SHELL (every master's metadata, topic bodies omitted) plus
+// the bodies of exactly the set the first render can need, computed here where the documents
+// already are. Everything else is fetched on demand by GET /api/library/topic/:id.
+//
+// PURE (registry + open-doc ids in, id set out) so the rule is testable without a store.
+function hydrationSet(registry, openDocIds) {
+  var need = Object.create(null);
+  var docs = [];
+  if (registry && typeof registry === "object") {
+    var ids = (Array.isArray(openDocIds) && openDocIds.length) ? openDocIds : Object.keys(registry);
+    ids.forEach(function (id) { if (registry[id]) docs.push(registry[id]); });
+  }
+  docs.forEach(function (d) {
+    (function walkPages(doc) {
+      ((doc && doc.pages) || []).forEach(function (p) {
+        (function walk(list) {
+          (list || []).forEach(function (b) {
+            if (!b || typeof b !== "object") return;
+            if (b.sourceLink && b.sourceLink.masterId) need[b.sourceLink.masterId] = true;
+            ["children", "columns", "items", "blocks", "cells"].forEach(function (k) { if (Array.isArray(b[k])) walk(b[k]); });
+          });
+        })(p.blocks);
+      });
+    })(d);
+  });
+  return Object.keys(need);
+}
+
+// One topic's body, materialized from its block rows. Null when there are no rows -- the caller
+// decides whether that means "keep what the blob had" or "nothing to send".
+function topicDoc(blockStore, id) {
+  if (!blockStore || !SourceDoc) return null;
+  var doc = null;
+  try { doc = blockStore.materializeDoc(libraryDocId(id)); } catch (e) { return null; }
+  if (!doc) return null;
+  try { return SourceDoc.toJSON(SourceDoc.fromBlockDoc(doc)); } catch (e) { return null; }
+}
+
+// opts.hydrate = the ids whose bodies to include. Omitted entirely -> every topic is hydrated,
+// which is the pre-35 behaviour and what a caller with no open-doc context still gets.
+function assembleLibrary(store, blockStore, opts) {
   var raw = null;
   try { raw = store.getKv("authoring.library"); } catch (e) { return null; }
   if (raw == null) return null;
@@ -109,15 +163,27 @@ function assembleLibrary(store, blockStore) {
   var lib;
   try { lib = JSON.parse(raw); } catch (e) { return raw; }
   var comps = (lib && lib.components) || {};
+  var only = (opts && opts.hydrate) ? opts.hydrate : null;
+  var wanted = null;
+  if (only) { wanted = Object.create(null); only.forEach(function (id) { wanted[id] = true; }); }
   Object.keys(comps).forEach(function (id) {
     var m = comps[id];
     if (!m || m.kind !== "topic") return;
-    var doc = null;
-    try { doc = blockStore.materializeDoc(libraryDocId(id)); } catch (e) { doc = null; }
+    if (wanted && !wanted[id]) {
+      // NOT hydrated. The body is dropped and the master is FLAGGED, so a reader can tell
+      // "not loaded yet" from "genuinely empty" -- without the flag, an un-hydrated source
+      // document is indistinguishable from one an author emptied, and the app would happily
+      // render the blank.
+      delete m.doc;
+      m.__deferred = true;
+      return;
+    }
+    var body = topicDoc(blockStore, id);
     // A topic whose rows are absent keeps whatever body the blob carried. Dropping it
     // would present an empty source document as a real one, and the author would edit
     // into the void.
-    if (doc) { try { m.doc = SourceDoc.toJSON(SourceDoc.fromBlockDoc(doc)); } catch (e) {} }
+    if (body) m.doc = body;
+    delete m.__deferred;   // hydrated: never leave a stale "not loaded" mark on a body we sent
   });
   return JSON.stringify(lib);
 }
@@ -127,7 +193,14 @@ function sendBootstrap(res, config, store, blockStore, principal) {
   if (principal) {
     try { data.registry = store.getRegistry(); } catch (e) {}
     try { data.products = store.getKv("authoring.products"); } catch (e) {}
-    try { data.library = assembleLibrary(store, blockStore); } catch (e) {}
+    // Products up front (small, bounded); source documents on demand (the big, growing pile) --
+    // except the ones the first render cannot do without. See hydrationSet above.
+    try {
+      var reg = null, open = null;
+      try { reg = JSON.parse(store.getRegistry() || "{}"); } catch (e) { reg = null; }
+      try { open = JSON.parse(store.getKv("authoring.openDocIds") || "null"); } catch (e) { open = null; }
+      data.library = assembleLibrary(store, blockStore, { hydrate: hydrationSet(reg, open) });
+    } catch (e) {}
   }
   var body = buildBootstrap(config, data, principal);
   res.writeHead(200, {
@@ -359,6 +432,20 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung) {
       if (!identity.principalCan(principal, cap, scope)) {
         return sendJson(res, 403, { ok: false, error: "not permitted (" + cap + ")", role: principal.role });
       }
+    }
+
+    // --- one source document's body, on demand (platform-pivot 35) -------------
+    // The other half of the deferred library: the bootstrap ships the shell plus the first
+    // render's hydration set, and this fetches the rest as an author opens them. A read, so it
+    // needs `view` -- capFor already answers that for any /api route that is not named below.
+    if (rest.indexOf("library/topic/") === 0 && method === "GET") {
+      var topicId = decodeURIComponent(rest.slice("library/topic/".length));
+      if (!topicId) return sendJson(res, 400, { ok: false, error: "missing topic id" });
+      var body = topicDoc(blockStore, topicId);
+      // A topic with no rows is reported as such rather than as an empty document: the client
+      // must be able to tell "there is nothing here" from "this did not load", or it will render
+      // a blank and call it content.
+      return sendJson(res, 200, { ok: true, id: topicId, doc: body, empty: !body });
     }
 
     // --- roles + people (platform-pivot 37) ------------------------------------
@@ -624,5 +711,6 @@ function startServer(config, cb) {
 
 module.exports = {
   createServer: createServer, makeHandler: makeHandler, startServer: startServer,
-  buildBootstrap: buildBootstrap, assembleLibrary: assembleLibrary, libraryDocId: libraryDocId
+  buildBootstrap: buildBootstrap, assembleLibrary: assembleLibrary, libraryDocId: libraryDocId,
+  hydrationSet: hydrationSet, topicDoc: topicDoc
 };

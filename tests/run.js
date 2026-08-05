@@ -3091,6 +3091,115 @@ section("platform-pivot 17/18/20 identity");
   }
 })();
 
+// ---- platform-pivot 35: source documents on demand ------------------------------
+// The scaling half of James's loading decision. The whole ticket turns on ONE hazard: the canvas
+// render resolver reads master.doc DURING render, so a body that has not arrived renders a BLANK
+// BLOCK -- which does not look like a failure, it looks like content somebody deleted. Every test
+// here is about never confusing "not loaded" with "empty".
+section("platform-pivot 35 source documents on demand");
+(function () {
+  try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> on-demand library tests skipped"); return; }
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+
+  // --- the hydration set: what the FIRST render cannot do without ---
+  var reg = {
+    "C-1": { meta: { code: "C-1" }, pages: [{ id: "p1", blocks: [
+      { id: "b1", type: "paragraph", sourceLink: { masterId: "top-a", markId: "m1" } },
+      { id: "b2", type: "row", children: [{ id: "b3", type: "paragraph", sourceLink: { masterId: "top-b", markId: "m2" } }] }
+    ] }] },
+    "C-2": { meta: { code: "C-2" }, pages: [{ id: "p2", blocks: [
+      { id: "b4", type: "paragraph", sourceLink: { masterId: "top-c", markId: "m3" } }
+    ] }] }
+  };
+  var openOnly = srv.hydrationSet(reg, ["C-1"]);
+  ok("35: the set is every source document linked into the OPEN documents", openOnly.sort().join() === "top-a,top-b");
+  ok("35: and it reaches links nested inside containers, not just top-level blocks", openOnly.indexOf("top-b") >= 0);
+  ok("35: a document that is not open contributes nothing", openOnly.indexOf("top-c") === -1);
+  ok("35: with both open, both contribute", srv.hydrationSet(reg, ["C-1", "C-2"]).sort().join() === "top-a,top-b,top-c");
+  // No open-doc pointer is the conservative case: hydrate from EVERYTHING rather than guess, since
+  // guessing wrong here is the blank-block failure.
+  ok("35: no open-doc pointer -> every document is considered", srv.hydrationSet(reg, null).sort().join() === "top-a,top-b,top-c");
+  ok("35: an empty registry needs nothing", srv.hydrationSet({}, ["C-1"]).length === 0);
+  ok("35: and a doc with no source links needs nothing",
+    srv.hydrationSet({ "C-9": { pages: [{ blocks: [{ id: "x", type: "paragraph" }] }] } }, ["C-9"]).length === 0);
+
+  // --- the shell: bodies omitted, and FLAGGED ---
+  var os = require("os");
+  __async.push((async function () {
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-ondemand-"));
+    var server, base;
+    await new Promise(function (r) { server = srv.startServer({ mode: "local", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "v.sqlite") }, function (s) { base = "http://127.0.0.1:" + s.address().port; r(); }); });
+    try {
+      var store = server.__store, bs = server.__blockStore;
+      var SD = require(path.join(ROOT, "src/source-doc.js"));
+      // two source documents, both with real bodies in the block store
+      ["top-a", "top-c"].forEach(function (id) {
+        var model = SD.fromSections({ sections: [{ heading: "H " + id, body: "Body of " + id }] });
+        bs.importDoc(srv.libraryDocId(id), SD.toBlockDoc(model), "seed");
+      });
+      store.setKv("authoring.library", JSON.stringify({ components: {
+        "top-a": { kind: "topic", name: "A" }, "top-c": { kind: "topic", name: "C" },
+        "cmp-1": { kind: "component", name: "not a topic" }
+      } }));
+
+      var full = JSON.parse(srv.assembleLibrary(store, bs));
+      ok("35: with no hydration set, every topic still carries its body (the pre-35 behaviour)",
+        !!full.components["top-a"].doc && !!full.components["top-c"].doc);
+
+      var shell = JSON.parse(srv.assembleLibrary(store, bs, { hydrate: ["top-a"] }));
+      ok("35: a hydrated topic carries its body", !!shell.components["top-a"].doc);
+      ok("35: and carries no stale 'not loaded' mark", shell.components["top-a"].__deferred === undefined);
+      ok("35: a deferred topic carries NO body", shell.components["top-c"].doc === undefined);
+      // The flag is the whole safety mechanism: without it, deferred and empty are the same shape.
+      ok("35: but IS flagged, so deferred can never be mistaken for empty", shell.components["top-c"].__deferred === true);
+      ok("35: the metadata survives, so the shell still lists the document", shell.components["top-c"].name === "C");
+      ok("35: a non-topic component is untouched by any of this", shell.components["cmp-1"].kind === "component");
+
+      // --- the on-demand route ---
+      var j = await (await fetch(base + "/api/library/topic/top-c")).json();
+      ok("35: the deferred body is fetchable on demand", j.ok === true && j.id === "top-c" && !!j.doc);
+      ok("35: and it is the SAME body the eager path would have sent",
+        JSON.stringify(j.doc) === JSON.stringify(full.components["top-c"].doc));
+      var none = await (await fetch(base + "/api/library/topic/nope")).json();
+      ok("35: a topic with no rows reports empty rather than an empty document",
+        none.ok === true && none.doc === null && none.empty === true);
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+
+  // --- the client seam ---
+  var sh = src("src/store-http.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("35: the client hydrates by id, and splices the body into the LIVE store so the ~36 existing readers keep working",
+    /window\.__versoHydrateTopic = hydrateTopic/.test(sh) && /window\.LibraryStore\.components\[id\]/.test(sh));
+  ok("35: two clicks make one request", /if \(hydrating\[id\]\) return hydrating\[id\];/.test(sh));
+  ok("35: an already-loaded topic is a no-op", /if \(!isDeferred\(id\)\) return Promise\.resolve\(null\);/.test(sh));
+  ok("35: a topic the server says is genuinely empty stops looking unloaded, or every reader would ask forever",
+    /delete m\.__deferred;/.test(sh));
+
+  // THE DATA-LOSS QUESTION, and the two things that answer it. A save while a body is deferred
+  // must never write that source document back as an emptied one.
+  ok("35: splitLibrary only collects a topic that HAS a body, so a deferred one writes no rows",
+    /if \(m\.kind === "topic" && m\.doc\) \{ topics\[id\] = m\.doc; delete copy\.doc; \}/.test(sh));
+  ok("35: and the transport flag is stripped on write, so 'not loaded' is never persisted",
+    /delete copy\.__deferred;/.test(sh));
+
+  // --- the client callers that could meet a non-hydrated master ---
+  var ss = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("35: opening a source document waits for its body instead of rendering a blank",
+    /function hydrateIfDeferred\(id, then\)/.test(ss) && /Loading this source document/.test(ss));
+  ok("35: the master is still resolved first, so a deferred body cannot be mistaken for a MISSING document and mint a second one",
+    ss.indexOf("var master = ensureUnifiedDocForActiveProduct();") < ss.indexOf("hydrateIfDeferred(master.id"));
+  // Export is the one path that would otherwise rebuild from the old per-topic content and hand
+  // the author a file that silently disagrees with what is on screen.
+  ok("35: export refuses to fabricate from a deferred master, and fetches instead",
+    /return "deferred";/.test(ss) && /if \(model === "deferred"\)/.test(ss));
+
+  ok("35: the bootstrap asks for the hydration set rather than everything",
+    /hydrate: hydrationSet\(reg, open\)/.test(src("server/verso-server.js")));
+})();
+
 // ---- platform-pivot 36: the cutover UI -----------------------------------------
 // platform-pivot-33 built and PROVED the engine, then deliberately wired nothing to it. This is
 // the entry point, done once, carefully. The tests that matter are the two refusals: the real
@@ -20253,7 +20362,13 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(es));
 
   // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
-  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(es));
+  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,700}__sourceActiveTopicId = master\.id;/.test(es));
+  // platform-pivot 35 sits between those two lines: the body may not be in the page yet, and the
+  // stage must WAIT for it rather than render the blank. Asserted here, beside the claim it
+  // qualifies, so the two cannot drift apart.
+  ok("...and waits for a deferred body before rendering, rather than showing a blank one",
+    /if \(master && hydrateIfDeferred\(master\.id, renderSourceStage\)\)/.test(es) &&
+    /Loading this source document/.test(es));
   ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = activeSourceMaster\(\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
   ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(es) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(es));
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(es));

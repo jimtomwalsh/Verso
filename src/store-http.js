@@ -153,6 +153,12 @@
       var copy = {}, k;
       for (k in m) if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
       if (m.kind === "topic" && m.doc) { topics[id] = m.doc; delete copy.doc; }
+      // __deferred is a TRANSPORT flag the bootstrap sets, not a property of the library.
+      // Writing it back would persist "not loaded" into the stored shell, where it would
+      // outlive the page that could not load it. A master with no doc simply has no rows
+      // written -- splitLibrary already only collects a topic that HAS a body, which is what
+      // stops a deferred source document being saved back as an emptied one.
+      delete copy.__deferred;
       shell.components[id] = copy;
     });
     Object.keys(lib || {}).forEach(function (k) { if (k !== "components") shell[k] = lib[k]; });
@@ -276,6 +282,59 @@
   // signed-out server sees an empty world, and an empty world is indistinguishable from
   // a fresh one unless something says otherwise.
   if (authRequired) reportSignedOut(false);
+
+  // ---- source documents on demand (platform-pivot 35) ----------------------
+  // The bootstrap ships the library SHELL plus the bodies the first render needs (the server
+  // computes that set -- see hydrationSet in verso-server.js). Everything else arrives here,
+  // one source document at a time, as an author opens it.
+  //
+  // ASYNC ON PURPOSE, and safe to be: readLibrary() is synchronous by contract because the
+  // editor reads it at BOOT, and the first render's bodies are already in the page by then.
+  // Every later body is fetched in response to a click, where a promise costs nothing.
+  //
+  // A hydrated body is spliced into the in-page library cache, so the ~36 existing
+  // `libComponents()[id].doc` readers keep working unchanged -- which is the whole reason this
+  // is a cache seam rather than 36 call-site rewrites.
+  var hydrating = {};   // id -> the in-flight promise, so two clicks make one request
+  function libraryShell() {
+    try { return libraryCache ? JSON.parse(libraryCache) : null; } catch (e) { return null; }
+  }
+  // Is this master a body we have not loaded yet? The server FLAGS them rather than leaving
+  // them merely absent: without the flag a deferred source document is indistinguishable from
+  // one an author emptied, and the app would render the blank and call it content.
+  function isDeferred(id) {
+    var lib = libraryShell();
+    var m = lib && lib.components && lib.components[id];
+    return !!(m && m.__deferred && !m.doc);
+  }
+  function hydrateTopic(id) {
+    if (!id) return Promise.resolve(null);
+    if (!isDeferred(id)) return Promise.resolve(null);   // already here, or not a deferred topic
+    if (hydrating[id]) return hydrating[id];
+    hydrating[id] = fetch(apiUrl(base, "library/topic", id), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        delete hydrating[id];
+        if (!j || !j.ok) return null;
+        var lib = libraryShell();
+        var m = lib && lib.components && lib.components[id];
+        if (!m) return null;
+        // `empty: true` means the server has no rows for it. Clearing the flag WITHOUT a body
+        // is the honest outcome: there is genuinely nothing, and it must stop looking unloaded
+        // or every reader would ask again forever.
+        if (j.doc) m.doc = j.doc;
+        delete m.__deferred;
+        libraryCache = JSON.stringify(lib);
+        // Splice into the LIVE store too, so the readers that already hold it see the body.
+        var live = window.LibraryStore && window.LibraryStore.components && window.LibraryStore.components[id];
+        if (live) { if (j.doc) live.doc = j.doc; delete live.__deferred; }
+        return j.doc || null;
+      })
+      .catch(function () { delete hydrating[id]; return null; });
+    return hydrating[id];
+  }
+  window.__versoHydrateTopic = hydrateTopic;
+  window.__versoTopicDeferred = isDeferred;
 
   // Async API surface for later phases (transport #08, migration #05). Not wired into
   // the sync media facet yet -- that async rework is Phase 2, not this ticket.
