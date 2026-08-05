@@ -778,6 +778,92 @@
       });
       return row;
     }
+    // uio-S-M06 (2.2b). The document-level classification banner: collapsible, stating what the
+    // whole document resolves to and what that means, above the prose rather than beside it.
+    //
+    // It is the SAME resolver everything else uses. The chain is uio-F07's, at the document rung
+    // rather than a mark, so a document with no classification of its own reads whatever its
+    // Product says — and it names which. Nothing here computes a level.
+    //
+    // COLLAPSED IT STILL SPEAKS. One summary line carries the three things a reader needs before
+    // reading: whether it may leave, who may read it, and whether it is waiting on a sign-off. A
+    // banner you have to open to learn you are handling controlled material is not a banner.
+    //
+    // IN READ MODE IT DE-EMPHASISES RATHER THAN DISAPPEARING. A reader still needs to know the
+    // content is restricted; what they do not need is the danger tint shouting through a document
+    // they are only reading.
+    var __sourceClassBannerOpen = false;
+    function buildSourceClassificationBanner(topic) {
+      var C = window.VersoClassification, SD = window.SourceDoc;
+      if (!C || !SD || !topic) return null;
+      var levels = E.classificationLevels ? E.classificationLevels() : [];
+      if (!levels.length) return null;
+      var pid = activeSourceProductId();
+      var spec = E.classificationSpec({
+        product: (pid && window.ProductsStore) ? window.ProductsStore[pid] : null,
+        doc: topic
+      });
+      var res = E.resolveScoped(E.classificationChain(spec), C.CLASSIFICATION_PROP,
+        { at: "course", choose: C.mostRestrictive(levels) });
+      if (!res.found) return null;
+      var rules = C.ruleSet(levels, res.value);
+      var lvl = C.levelById(levels, res.value);
+      // The least restrictive level is the ordinary case. A banner on every document is wallpaper,
+      // and wallpaper is what you stop seeing — so an unrestricted document says nothing at all.
+      var rank = C.rankOf(levels, res.value);
+      var floor = levels.length ? levels[0].rank : null;
+      if (rank === floor && rules && rules.external === C.EXTERNAL_ALLOWED) return null;
+
+      var tone = rules && rules.external === C.EXTERNAL_ALLOWED ? "warn" : "danger";
+      var bar = h("div", "source-classbanner source-classbanner--" + tone +
+        (__sourceMode === "read" ? " is-quiet" : "") + (__sourceClassBannerOpen ? " is-open" : ""));
+      bar.setAttribute("data-source-classbanner", "1");
+      var head = h("button", "source-classbanner__head"); head.type = "button";
+      head.setAttribute("aria-expanded", __sourceClassBannerOpen ? "true" : "false");
+      var glyph = h("span", "source-classbanner__glyph"); glyph.innerHTML = window.Icon ? window.Icon("shield") : "";
+      head.appendChild(glyph);
+      head.appendChild(h("span", "source-classbanner__name", (lvl && lvl.name) || String(res.value)));
+      head.appendChild(h("span", "source-classbanner__summary", classBannerSummary(rules, res)));
+      var chev = h("span", "source-classbanner__chev"); chev.innerHTML = window.Icon ? window.Icon("chevron-down") : "";
+      head.appendChild(chev);
+      head.addEventListener("click", function () { __sourceClassBannerOpen = !__sourceClassBannerOpen; renderSourceArticle(); });
+      bar.appendChild(head);
+      if (__sourceClassBannerOpen) {
+        var body = h("div", "source-classbanner__body");
+        var view = SD.restrictionView({ id: "doc", type: "restricted" }, res, levels, rules);
+        (view ? view.rows : []).forEach(function (r) {
+          var row = h("div", "source-classbanner__rule");
+          row.appendChild(h("span", "source-classbanner__rule-k", r.label));
+          row.appendChild(h("span", "source-classbanner__rule-v", r.value));
+          // The prototype's `blocked` / `due` tags: the two rules that STOP something, said as
+          // tags rather than left for the reader to infer from the sentence.
+          if (r.key === "external" && rules.external !== C.EXTERNAL_ALLOWED) row.appendChild(h("span", "source-classbanner__tag source-classbanner__tag--blocked", "blocked"));
+          if (r.key === "approverCapability" && rules.approverCapability) row.appendChild(h("span", "source-classbanner__tag source-classbanner__tag--due", "due"));
+          body.appendChild(row);
+        });
+        var acts = h("div", "source-classbanner__actions");
+        if (window.VersoUI && window.VersoUI.Button) {
+          acts.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", label: "View classification",
+            title: "Open the Product panel, where this document's classification is set",
+            onClick: function () { revealSourceProductPanel(); } }));
+        }
+        body.appendChild(acts);
+        bar.appendChild(body);
+      }
+      return bar;
+    }
+    // The collapsed line: may it leave · who may read it · does it owe a sign-off. Three facts,
+    // in that order, because that is the order they matter in to someone about to send something.
+    function classBannerSummary(rules, res) {
+      var C = window.VersoClassification;
+      if (!rules) return "";
+      var bits = [rules.external === C.EXTERNAL_ALLOWED ? "May leave" : "Withheld externally"];
+      bits.push((rules.internal && rules.internal.length) ? "readable internally" : "named readers only");
+      if (rules.approverCapability) bits.push("sign-off required");
+      if (res && !res.overridden && res.scopeLabel) bits.push("from " + res.scopeLabel);
+      return bits.join(" · ");
+    }
+
     // spec 2d: the Source-stage variant bar on a Product's unified document -- the column-toggle chips
     // (when variants are declared) plus a "Manage variants" entry that is ALWAYS shown, so you can
     // declare the FIRST variant on a Product that has none yet (the piece that was missing: nothing
@@ -1413,6 +1499,10 @@
       // spec 2d: on a variant-bearing Product, a chip row picks which variants are shown as columns.
       // Flagship-only (no chips active) reads exactly as before; turning a variant on splits the
       // diverged nodes into columns. The column view is a read-oriented comparison (no inline edit yet).
+      // uio-S-M06: what this whole DOCUMENT is classified as, above everything it contains. A
+      // restricted passage says so on the passage (uio-S-C06); a restricted DOCUMENT has to say so
+      // before you read a word of it, because "may this leave" is a fact about the whole thing.
+      if (topic.sourceMaster) { var cbar = buildSourceClassificationBanner(topic); if (cbar) col.appendChild(cbar); }
       if (topic.sourceMaster) { var vbar = buildSourceVariantBar(topic); if (vbar) col.appendChild(vbar); }
       var showCols = topic.sourceMaster && __sourceActiveVariants.length > 0;
       // /verso-frontend fix: make the editable->read-only mode switch legible when comparing variants.
@@ -1587,6 +1677,12 @@
       // disagree about which one you are in.
       var col = art.closest ? art.closest(".source-doc__col") : null;
       if (col) SOURCE_MODES.forEach(function (m) { col.classList.toggle("source-doc__col--" + m, __sourceMode === m); });
+      // uio-S-M06: the classification banner reads the mode at BUILD time, and a mode change does
+      // not rebuild the article (that would drop the caret and re-render every node). So the one
+      // place that applies the mode to the document's presentation applies this too — otherwise
+      // switching to Read left the banner shouting through a document you were only reading.
+      var banner = col && col.querySelector("[data-source-classbanner]");
+      if (banner) banner.classList.toggle("is-quiet", __sourceMode === "read");
     }
     // When LOCKED the blocks are contentEditable=false, so a real click can't place a caret in them
     // and a keystroke lands on <body>, never reaching the article's keydown guard -- so no "source

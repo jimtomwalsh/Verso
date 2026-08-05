@@ -532,3 +532,34 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 /* Scroll-spy was specified and invisible. A 2px accent rail on the current section is the
    smallest thing that answers "where am I" without competing with selection. */
 .source-toc__row.is-current { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* ---- uio-S-M06: the document's classification, above everything it contains -----------------
+   A restricted PASSAGE says so on the passage; a restricted DOCUMENT has to say so before you read
+   a word of it. Collapsed it still carries the three facts that matter before reading, because a
+   banner you must open to learn you are handling controlled material is not a banner. */
+.source-classbanner { margin: 0 0 var(--space-3, 6px); border-radius: var(--radius-sm, 4px); border: 1px solid var(--warning); background: var(--mark-note-wash); }
+.source-classbanner--danger { border-color: var(--danger); background: var(--danger-quiet); }
+/* Read mode DE-EMPHASISES rather than hiding it. A reader still needs to know the content is
+   controlled; what they do not need is the tint shouting through a document they are only reading. */
+.source-classbanner.is-quiet { background: transparent; border-color: var(--border-subtle); opacity: 0.75; }
+.source-classbanner__head {
+  display: flex; align-items: center; gap: var(--space-2, 4px); width: 100%;
+  padding: var(--space-2, 4px) var(--space-3, 6px);
+  background: none; border: 0; color: inherit; cursor: pointer; text-align: left; font: inherit;
+}
+.source-classbanner__glyph { display: inline-flex; flex: 0 0 auto; }
+.source-classbanner__glyph svg { width: 13px; height: 13px; }
+.source-classbanner__name { flex: 0 0 auto; font-size: var(--text-xs); font-weight: var(--weight-bold, 700); text-transform: uppercase; letter-spacing: 0.05em; }
+.source-classbanner__summary { min-width: 0; flex: 1 1 auto; font-size: var(--text-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-classbanner__chev { flex: 0 0 auto; display: inline-flex; transition: transform 120ms; }
+.source-classbanner__chev svg { width: 13px; height: 13px; }
+.source-classbanner.is-open .source-classbanner__chev { transform: rotate(180deg); }
+.source-classbanner__body { padding: 0 var(--space-3, 6px) var(--space-3, 6px); }
+.source-classbanner__rule { display: flex; align-items: baseline; gap: var(--space-2, 4px); font-size: var(--text-xs); }
+.source-classbanner__rule-k { flex: 0 0 var(--field-label-w, 76px); color: var(--text-tertiary, var(--text-secondary)); }
+.source-classbanner__rule-v { min-width: 0; color: var(--text-secondary); }
+/* The two rules that STOP something say so as a tag, rather than leaving the reader to infer it. */
+.source-classbanner__tag { flex: 0 0 auto; padding: 0 var(--space-1, 2px); border-radius: var(--radius-xs, 2px); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--weight-bold, 700); }
+.source-classbanner__tag--blocked { color: var(--danger); border: 1px solid var(--danger); }
+.source-classbanner__tag--due { color: var(--warning); border: 1px solid var(--warning); }
+.source-classbanner__actions { margin-top: var(--space-2, 4px); }
