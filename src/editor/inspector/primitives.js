@@ -35,7 +35,7 @@
     var E = kernel.need(
       "h", "pushHistory", "panelSection", "sectionGroup", "getBlockStyles", "alignSeg",
       "ensureBlockToolbar", "colourControl", "inspector", "doc", "blockToolbarSep",
-      "scheduleSave", "buildFontPicker", "colorField", "isEmbeddableFont"
+      "scheduleSave", "buildFontPicker", "colorField", "isEmbeddableFont", "setInspector"
     );
     // The stable half: function declarations editor.js never reassigns, aliased once so the moved
     // bodies read exactly as they did. `inspector`, `doc` and `blockToolbarSep` are deliberately
@@ -467,6 +467,99 @@
     // The colour rung is the "same idea, different keys" seam in use: a bag stores colour as one
     // of colorToken / colorLight+colorDark / color, so the rung normalises to the colorField
     // shape and the resolver never learns that four keys are one property.
+    // uio-F07. Classification: System (the deployment default) -> Product -> Course -> Page ->
+    // Block. THE SECOND AXIS THE F03 HEADER PREDICTED, and it costs exactly what that header said
+    // it would: a property key and a chain whose rungs read this axis's own storage. Nothing in
+    // the resolver learns that classification exists.
+    //
+    // Its one difference from every other chain is the `choose()` the caller passes with it
+    // (`VersoClassification.mostRestrictive`): the deepest rung does NOT simply win, because a
+    // block may only tighten what it inherits. That rule lives in resolution rather than only in
+    // the picker, so a looser value written by an import or an older build does not apply either.
+    //
+    // `spec`: { defaultLevelId, product, doc, page, block } — each rung the object that stores its
+    // own classification, absent rungs simply left out.
+    var CLASSIFICATION_PROP_KEY = "classificationId";
+    function classificationChain(spec) {
+      spec = spec || {};
+      var PROP = (window.VersoClassification && window.VersoClassification.CLASSIFICATION_PROP) || CLASSIFICATION_PROP_KEY;
+      function rung(scope, label, bag) {
+        return {
+          scope: scope, label: label,
+          read: function (prop) {
+            if (prop !== PROP || !bag) return NOT_SET;
+            var v = bag[PROP];
+            return (v === undefined || v === null || v === "") ? NOT_SET : v;
+          }
+        };
+      }
+      return scopeChain([
+        { scope: "system", label: "Default", read: function (prop) {
+            return (prop === PROP && spec.defaultLevelId) ? spec.defaultLevelId : NOT_SET;
+          } },
+        spec.product ? rung("product", "Product", spec.product) : null,
+        spec.doc ? rung("course", "Document", spec.doc) : null,
+        spec.page ? rung("page", "Page", spec.page) : null,
+        spec.block ? rung("block", "Block", spec.block) : null
+      ]);
+    }
+
+    // The ONE classification row, rendered identically at every rung. Product, document, page and
+    // block all call this, so the four surfaces can never phrase the same fact differently or
+    // disagree about what a block is allowed to pick.
+    //
+    // The picker offers ONLY levels at or above what this rung inherits, because the model's rule
+    // is that a rung may tighten and never loosen. Resolution enforces it too (the `choose()`
+    // below), so the control is the courtesy and the resolver is the guarantee.
+    //
+    // spec: { defaultLevelId, product, doc, page, block } — the same shape classificationChain takes
+    // opts: { at (the rung being edited), host, write(levelId), clear(), levels }
+    function classificationRow(spec, opts) {
+      opts = opts || {};
+      var C = window.VersoClassification;
+      if (!C) return null;
+      var levels = opts.levels || [];
+      var PROP = C.CLASSIFICATION_PROP;
+      var chain = classificationChain(spec);
+      var at = opts.at || "block";
+      var res = resolveScoped(chain, PROP, { at: at, choose: C.mostRestrictive(levels) });
+      // What this rung would resolve to with its OWN value removed: the floor a pick may not go
+      // below, and the value Reset restores.
+      var inheritedSpec = {};
+      for (var k in spec) if (spec.hasOwnProperty(k)) inheritedSpec[k] = spec[k];
+      var ownBag = spec[at === "course" ? "doc" : at];
+      var stashed;
+      if (ownBag && ownBag[PROP] !== undefined) { stashed = ownBag[PROP]; delete ownBag[PROP]; }
+      var inheritedRes = resolveScoped(classificationChain(inheritedSpec), PROP, { at: at, choose: C.mostRestrictive(levels) });
+      if (stashed !== undefined) ownBag[PROP] = stashed;
+      var offered = C.allowedOverrides(levels, inheritedRes.value);
+      var name = function (id) { return C.levelName(levels, id); };
+
+      var host = opts.host || E.inspector;
+      var _ins = E.inspector; E.setInspector(host);
+      try {
+        var sel = dsSelect(offered.map(function (l) { return [l.name, l.id]; }), res.value || "", function (v) {
+          pushHistory();
+          if (!v || v === inheritedRes.value) { if (opts.clear) opts.clear(); }
+          else if (opts.write) opts.write(v);
+        });
+        settingsRow({
+          label: "Classification", control: sel, host: host,
+          inherit: { res: res, format: name, onReset: function () { pushHistory(); if (opts.clear) opts.clear(); } }
+        });
+        // The rule set, stated rather than implied. An author choosing a level is deciding who may
+        // read it and whether it may leave, and those are the two things the name alone never says.
+        var rules = C.ruleSet(levels, res.value);
+        if (rules) {
+          host.appendChild(h("div", "insp-hint",
+            (rules.external === C.EXTERNAL_ALLOWED ? "May leave the organisation." : "Withheld from external packages.") +
+            " " + (rules.internal && rules.internal.length ? "Readable internally." : "Readable only by named people.") +
+            (rules.approverCapability ? " Needs sign-off before release." : "")));
+        }
+      } finally { E.setInspector(_ins); }
+      return res;
+    }
+
     /* @ec03-start */
     var TEXT_COLOR_PROP = "__colorField";
     function textColorOf(bag) {
@@ -844,7 +937,7 @@
     // io when wired in tickets 8-9; until then only the gallery/kit calls this.)
     // handlers = { moveUp, moveDown, duplicate, remove } for the actions row (a missing
     // handler renders its button disabled).
-    var CONTAINER_ROW_ORDER = ["align", "width", "padding", "gap", "fill", "stroke", "radius", "spacing", "actions"];
+    var CONTAINER_ROW_ORDER = ["align", "width", "padding", "gap", "fill", "stroke", "radius", "spacing", "classification", "actions"];
     // The canonical io.get/io.set key contract — the ONLY keys renderContainerChrome
     // reads/writes. Blocks wiring their own io (tickets 8-9) map these exact keys onto
     // their model fields, so the stringly-typed keys have one source of truth.
@@ -932,6 +1025,27 @@
         // Radius closes the Appearance section.
         if (want("radius", true)) {
           ap.appendChild(iconField(Icon("radius"), { value: get("radius"), unit: "px", step: 1, min: 0, max: 100, title: "Corner radius", onchange: function (v) { set("radius", num(v)); } }).wrap);
+        }
+      }
+      // 3b. Classification (uio-F07) — what this block may leave in, and to whom. It lands here
+      // rather than in one block type's panel because it applies to every block that has a box
+      // around it, which is the whole point of this function. A block may only TIGHTEN what its
+      // page classifies; the picker offers nothing looser and the resolver would refuse it anyway.
+      // Opt-out via decl so a block that cannot be withheld on its own (a sub-field, a nav
+      // control) does not offer a promise the exporter cannot keep.
+      // It is a `section()` like every other section in this function, NOT a buffered
+      // sectionGroup: this builder appends imperatively and is called outside any
+      // beginSections()/endSections() pair, so a buffered section here goes into a stream nobody
+      // flushes and silently never renders. (It did. Only the browser caught it.)
+      if (want("classification", true) && typeof handlers.classificationSpec === "function") {
+        var cSpec = handlers.classificationSpec();
+        if (cSpec) {
+          var cBody = section("Classification", { defaultOpen: false });
+          classificationRow(cSpec, {
+            at: "block", host: cBody, levels: handlers.classificationLevels(),
+            write: handlers.setClassification,
+            clear: function () { handlers.setClassification(null); }
+          });
         }
       }
       // 4. Actions — move / duplicate / split / delete. These live in the CANVAS overlay
@@ -1219,7 +1333,7 @@
       resolveScoped: resolveScoped, resetPlan: resetPlan, resetTooltip: resetTooltip,
       inheritedTooltip: inheritedTooltip, overrideCount: overrideCount, rollupLabel: rollupLabel,
       tallyResolution: tallyResolution, inheritanceTail: inheritanceTail, onOffLabel: onOffLabel,
-      blockBoxChain: blockBoxChain, gateScopeChain: gateScopeChain,
+      blockBoxChain: blockBoxChain, gateScopeChain: gateScopeChain, classificationChain: classificationChain, classificationRow: classificationRow,
       textStyleChain: textStyleChain, measureTextBaseline: measureTextBaseline,
       cssColorToHex: cssColorToHex, weightLabel: weightLabel,
       settingsRow: settingsRow, crossRefRow: crossRefRow, fieldRow: fieldRow,

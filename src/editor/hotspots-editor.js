@@ -29,7 +29,8 @@
       "segmentedLive", "fieldRow", "walkPageBlocks", "duplicateBlock", "deleteBlockByRef", "clearBlockContentAction",
       "canSplitAtBlock", "splitPageAtBlock", "line", "renderImageVariantVersions", "optionalRow", "colorFieldFlat",
       "panelSection", "confirmModal", "scheduleSave", "sweepAllAssets", "tourBoardIsOpen", "openTourBuilder",
-      "tourMakeMarker", "renderTourNodes", "renderTourInspector"
+      "tourMakeMarker", "renderTourNodes", "renderTourInspector",
+      "classificationSpec", "classificationLevels", "productOf", "mount"
     );
     // The stable half: function declarations and constants editor.js never reassigns, aliased once
     // so the moved body reads exactly as it did.
@@ -204,7 +205,24 @@
         // Split-page (slice) tool: only when this is a top-level block below the first
         // (canSplitAtBlock). The old floating toolbar that hosted it was retired in the
         // two-level migration, so it lives in the panel Actions row (single source now).
-        split: canSplitAtBlock(block) ? function () { splitPageAtBlock(block); } : null };
+        split: canSplitAtBlock(block) ? function () { splitPageAtBlock(block); } : null,
+        // uio-F07: the block rung of the classification ladder. The spec is built HERE, where the
+        // block's page and document are actually known, so the shared row never has to go looking
+        // for a block's context.
+        classificationSpec: function () {
+          if (typeof E.classificationSpec !== "function") return null;
+          var pi = (typeof E.findPageOfBlock === "function") ? E.findPageOfBlock(block) : -1;
+          return E.classificationSpec({
+            product: E.productOf(E.doc), doc: E.doc,
+            page: (pi >= 0 && E.doc.pages) ? E.doc.pages[pi] : null,
+            block: block
+          });
+        },
+        classificationLevels: function () { return E.classificationLevels(); },
+        setClassification: function (id) {
+          if (id) block.classificationId = id; else delete block.classificationId;
+          E.mount(); reselectBlockNode(block);
+        } };
     }
     // #88: an image figure's ONLY appearance is its box stroke — render's shared
     // applyBlockAppearance reads block.box.border/borderColor/borderWidth (the image

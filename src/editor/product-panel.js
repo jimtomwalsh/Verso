@@ -116,7 +116,7 @@
     var E = kernel.need(
       "h", "registry", "libComponents", "openDocIds", "switchDoc", "saveOpenDocIds",
       "f04DocFacts", "showContextMenu", "saveRegistry", "doc", "openSourceTopicId",
-      "promoteToProductModal"
+      "promoteToProductModal", "classificationRow", "classificationSpec", "classificationLevels", "saveProducts"
     );
     var h = E.h;
 
@@ -158,6 +158,10 @@
       return b;
     }
 
+    // A classification write repaints THIS panel in place rather than reaching for a global
+    // re-render: the panel is the only thing whose text changed, and the two entry points below
+    // both land here anyway.
+    function repaint(host, m) { renderInto(host, m); }
     function renderInto(host, m) {
       host.innerHTML = "";
       if (!m || !m.present) return;
@@ -180,6 +184,21 @@
       }
 
       body.appendChild(line("Product", h("span", "prodpanel__value", m.productName)));
+
+      // uio-F07 — classification is ANCHORED here. Product is the rung the model is set at, and
+      // every document, page and block below it inherits unless it tightens. So the control lives
+      // beside the Product's name rather than in a settings drawer: the thing being classified and
+      // the thing doing the classifying are the same object.
+      var product = (window.ProductsStore || {})[m.productId];
+      if (product && typeof E.classificationRow === "function") {
+        var cWrap = h("div", "prodpanel__classification");
+        E.classificationRow(E.classificationSpec({ product: product }), {
+          at: "product", host: cWrap, levels: E.classificationLevels(),
+          write: function (id) { product.classificationId = id; E.saveProducts(); repaint(host, m); },
+          clear: function () { delete product.classificationId; E.saveProducts(); repaint(host, m); }
+        });
+        body.appendChild(cWrap);
+      }
 
       if (m.isPrimary) {
         body.appendChild(line("Primary source", h("span", "prodpanel__value prodpanel__value--self", "This document")));

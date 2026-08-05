@@ -45,6 +45,13 @@
   // to a local stand-in and the footer hands that namespace to module.exports.
   var window = (typeof globalThis !== "undefined" && globalThis.window) || Object.create(null);
 
+  // The one sibling this file reads: uio-F07's classification model, whose `normalizeLevels` runs
+  // on every read of the classification facet. Wired EXPLICITLY, because under `require` each
+  // module gets its own window stand-in and a cross-module global resolves to undefined there.
+  // In the browser the load order does the wiring for free.
+  var classification = (typeof window !== "undefined" && window.VersoClassification) || null;
+  function use(mod) { classification = mod || classification; return VersoStorage; }
+
   // ---- 1. the keys ---------------------------------------------------------
   var KEYS = {
     registry: "authoring.registry",       // the doc-of-record: every course, by code
@@ -52,7 +59,8 @@
     openDocs: "authoring.openDocIds",     // doc-session: which tabs are open
     backend: "authoring.storageBackend",  // "browser" | "file" | "http" -- see commitBackend
     library: "authoring.library",         // shared component library (#18)
-    products: "authoring.products"        // Product containers (Product Rail #1)
+    products: "authoring.products",       // Product containers (Product Rail #1)
+    classification: "authoring.classification"  // classification levels + the default (uio-F07)
   };
 
   // ---- 2. the durable-write core (pure) ------------------------------------
@@ -143,12 +151,13 @@
   }
 
   // ---- 3. the adapter swap -------------------------------------------------
-  // A facet is one content type with its own key and its own read/write pair. Three of them, and
+  // A facet is one content type with its own key and its own read/write pair. Four of them, and
   // an adapter may implement any subset (store-http.js implements only the registry).
   var FACETS = {
     registry: { key: KEYS.registry, read: "readRegistry", write: "writeRegistry" },
     library: { key: KEYS.library, read: "readLibrary", write: "writeLibrary" },
-    products: { key: KEYS.products, read: "readProducts", write: "writeProducts" }
+    products: { key: KEYS.products, read: "readProducts", write: "writeProducts" },
+    classification: { key: KEYS.classification, read: "readClassification", write: "writeClassification" }
   };
 
   // Pure selector: flag value + injected adapter -> chosen adapter. A flipped flag with NO
@@ -255,6 +264,12 @@
     var browserAdapter = env.adapter || makeBrowserAdapter(storage);
     var injected = env.injected || function () { return window.__storageAdapter; };
     var assetStore = env.assetStore || function () { return window.AssetStore || null; };
+    // uio-F07. The classification model, injected rather than reached for: this file normalises a
+    // stored level set on the way out, and under `require` each module gets its own window
+    // stand-in, so a cross-module global would resolve to undefined and a stored set would
+    // silently fall back to the seed -- in the tests only, which is the worst place for a
+    // difference to live. `use()` above is the explicit wiring; env wins over it.
+    var classificationModel = env.classificationModel || function () { return classification; };
     var hoist = env.hoist || defaultHoist;
     // Save suppression (#69, the clobber-proof cutover): while a browser->file migration is
     // switching backends EVERY durable write must be a no-op, so a stale in-memory registry can
@@ -361,6 +376,29 @@
       try { return adapterFor("products").writeProducts(JSON.stringify(products)); }
       catch (e) { return { ok: false, error: e }; }
     }
+    // uio-F07. The classification levels a deployment runs on: { levels, defaultLevelId }. Read
+    // through the same facet seam as everything else, and NORMALISED on the way out, because the
+    // "a block may only tighten" guard is built on rank and a broken set must never quietly become
+    // a permissive one. A store with nothing in it, or a set normalize refuses, gets the seed.
+    function loadClassification() {
+      var C = classificationModel();
+      if (!C) return { levels: [], defaultLevelId: "", errors: ["classification model not loaded"] };
+      var raw = null;
+      try {
+        var txt = adapterFor("classification").readClassification();
+        if (txt) raw = JSON.parse(txt);
+      } catch (e) {}
+      if (!raw || !raw.levels) return { levels: C.seedLevels(), defaultLevelId: C.DEFAULT_LEVEL_ID, errors: [], seeded: true };
+      var norm = C.normalizeLevels(raw.levels, raw.defaultLevelId);
+      return { levels: norm.levels, defaultLevelId: norm.defaultLevelId, errors: norm.errors, seeded: !norm.ok };
+    }
+    function saveClassification(cfg) {
+      try {
+        return adapterFor("classification").writeClassification(JSON.stringify({
+          levels: (cfg && cfg.levels) || [], defaultLevelId: (cfg && cfg.defaultLevelId) || ""
+        }));
+      } catch (e) { return { ok: false, error: e }; }
+    }
 
     return {
       KEYS: KEYS,
@@ -385,11 +423,14 @@
       loadLibrary: loadLibrary,
       saveLibrary: saveLibrary,
       loadProducts: loadProducts,
-      saveProducts: saveProducts
+      saveProducts: saveProducts,
+      loadClassification: loadClassification,
+      saveClassification: saveClassification
     };
   }
 
   var VersoStorage = {
+    use: use,
     KEYS: KEYS,
     FACETS: FACETS,
     isQuotaExceeded: isQuotaExceeded,

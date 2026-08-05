@@ -78,7 +78,7 @@ function buildBootstrap(config, data, principal) {
       kind: principal.kind, role: principal.role, name: principal.name,
       email: principal.email || null, breakGlass: !!principal.breakGlass
     }) + ";");
-    // The three facets the StorageBackend declares, inlined. Each is ABSENT rather than
+    // The four facets the StorageBackend declares, inlined. Each is ABSENT rather than
     // empty when the server holds nothing, so the client can tell "server has nothing
     // yet" from "server did not answer" -- the difference between seeding a fresh install
     // and silently discarding somebody's work.
@@ -86,6 +86,7 @@ function buildBootstrap(config, data, principal) {
     if (d.registry != null) lines.push("window.__versoServerRegistryB64 = " + jsLit(b64(d.registry)) + ";");
     if (d.products != null) lines.push("window.__versoServerProductsB64 = " + jsLit(b64(d.products)) + ";");
     if (d.library != null) lines.push("window.__versoServerLibraryB64 = " + jsLit(b64(d.library)) + ";");
+    if (d.classification != null) lines.push("window.__versoServerClassificationB64 = " + jsLit(b64(d.classification)) + ";");
   }
   return lines.join("\n") + "\n";
 }
@@ -200,6 +201,10 @@ function sendBootstrap(res, config, store, blockStore, principal, identity) {
   if (principal) {
     try { data.registry = store.getRegistry(); } catch (e) {}
     try { data.products = store.getKv("authoring.products"); } catch (e) {}
+    // uio-F07: classification levels are deployment-wide and tiny, so they take the products
+    // posture exactly. On a shared server they MUST be shared -- a per-client copy would let two
+    // authors classify the same content against different rule sets.
+    try { data.classification = store.getKv("authoring.classification"); } catch (e) {}
     // Products up front (small, bounded); source documents on demand (the big, growing pile) --
     // except the ones the first render cannot do without. See hydrationSet above.
     try {

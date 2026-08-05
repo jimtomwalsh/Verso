@@ -360,6 +360,10 @@
        one primary per product, plus hand-attached extras. Pure, DOM-free; must precede editor.js,
        whose Source stage and Edit source panel resolve through it. -->
   <script src="src/source-ownership.js"></script>
+  <!-- uio-F07: what content may leave, and to whom. Pure and DOM-free; the LEVELS are data, the
+       rule keys are code. Must precede src/editor/storage.js, which normalises a stored level set
+       through it on every read of the classification facet. -->
+  <script src="src/classification.js"></script>
   <script src="src/publish-queue.js"></script>
   <script src="src/publish-presets.js"></script>
   <script src="src/publish-paths.js"></script>

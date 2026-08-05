@@ -1203,6 +1203,34 @@
   window.ProductsStore = loadProducts();
   function saveProducts() { Store.saveProducts(window.ProductsStore); }
 
+  // uio-F07 — the classification levels this deployment runs on, read once at boot through the
+  // storage facet and normalised on the way out. Every surface that classifies anything reads
+  // THIS, so Source, Edit and Publish cannot resolve the same content against different rule sets.
+  // A store that holds nothing, or a set normalize refuses, hands back the neutral seed rather
+  // than a guess -- a broken classification set must never quietly become a permissive one.
+  var ClassificationConfig = Store.loadClassification();
+  window.ClassificationConfig = ClassificationConfig;   // browser probe + export read it
+  function classificationLevels() { return ClassificationConfig.levels || []; }
+  // The Product rung's bag: the Product record a document is tagged to, or null when it is
+  // untagged. Untagged is not an error -- uio-W13 settled that it reads as a fact -- it just
+  // means the ladder has one fewer rung and the document inherits the deployment default.
+  function productOf(d) {
+    var pid = d && d.meta && d.meta.productId;
+    return (pid && window.ProductsStore && window.ProductsStore[pid]) || null;
+  }
+  // The spec every classification surface hands the shared row: the deployment default, then each
+  // rung's own bag. A rung the caller has no object for is simply left out of the ladder.
+  function classificationSpec(parts) {
+    parts = parts || {};
+    return {
+      defaultLevelId: ClassificationConfig.defaultLevelId,
+      product: parts.product || null,
+      doc: parts.doc || null,
+      page: parts.page || null,
+      block: parts.block || null
+    };
+  }
+
   // ---- Product Rail facts -> src/editor/product-rail.js (arch-P3-05) ---------------------------
   // Alignment, drift, where-used, outputs: the four facts that follow a document across Source,
   // Edit and Publish. The layer INVENTS nothing -- it turns the primitives below into one phrasing
@@ -4823,6 +4851,8 @@
   var onOffLabel = VE.bind("onOffLabel");
   var blockBoxChain = VE.bind("blockBoxChain");
   var gateScopeChain = VE.bind("gateScopeChain");
+  var classificationChain = VE.bind("classificationChain");
+  var classificationRow = VE.bind("classificationRow");
   var textStyleChain = VE.bind("textStyleChain");
   var measureTextBaseline = VE.bind("measureTextBaseline");
   var weightLabel = VE.bind("weightLabel");
@@ -6544,6 +6574,11 @@
     headerFooterSummary: headerFooterSummary,
     onOffLabel: onOffLabel,
     gateScopeChain: gateScopeChain,
+    classificationChain: classificationChain,
+    classificationRow: classificationRow,
+    classificationLevels: classificationLevels,
+    classificationSpec: classificationSpec,
+    productOf: productOf,
     textStyleChain: textStyleChain,
     measureTextBaseline: measureTextBaseline,
     weightLabel: weightLabel,

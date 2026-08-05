@@ -28,11 +28,17 @@
   // ---- PanelLayout: the ranking + collapse store (pure) --------------------
   var PanelLayout = (function () {
     var KEY = "verso.panelLayout";
-    var TAXONOMY = ["Type", "Content", "Appearance", "Layout", "Spacing", "Behaviour", "Light/Dark", "Advanced"];
+    // uio-F07 added "Classification" — what content may leave and to whom. It is not Appearance,
+    // Layout or Behaviour, and filing it under Advanced would bury a governance fact in a drawer
+    // named for developer settings. It sits after Behaviour because it is about the content's
+    // disposition rather than how it looks or acts, and it opens COLLAPSED: most blocks simply
+    // inherit, and a section that always shows an inherited value is the pre-expanded wall the
+    // spine forbids. An OVERRIDDEN one wears the accent dot, so tightening is visible folded.
+    var TAXONOMY = ["Type", "Content", "Appearance", "Layout", "Spacing", "Behaviour", "Classification", "Light/Dark", "Advanced"];
     // #164 (panel-ia §5 / interaction-feel §1 — shallow by default): advanced/optional section
     // types open COLLAPSED on first paint, revealed on intent. Core types (Type…Behaviour) stay
     // open. The author's explicit open/close still wins (recorded for these types, see setCollapsed).
-    var DEFAULT_COLLAPSED = { "Light/Dark": true, "Advanced": true };
+    var DEFAULT_COLLAPSED = { "Classification": true, "Light/Dark": true, "Advanced": true };
     // uio-F05: the settings sheet is ONE scroll of sections (it lost its nav rail), so its
     // sections open COLLAPSED — a 15-section wall is the "pre-expanded wall" the spine forbids.
     // Collapsed headers ARE the browse affordance; openSettingsSection expands the one you asked
