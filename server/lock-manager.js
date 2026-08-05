@@ -33,7 +33,13 @@ function createLockManager(opts) {
 
   function docReg(docId) { return registry[docId] || (registry[docId] = { content: {}, structure: {} }); }
   function ns(docId, cls) { var d = docReg(docId); return d[cls === "structure" ? "structure" : "content"]; }
-  function canEdit(client) { return !!EDIT_ROLES[roleOf(client)]; }
+  // Capability first (platform-pivot 37): role TITLES are admin-defined now, so a name-based
+  // gate stops offering locks the moment someone renames "Author". EDIT_ROLES stays as the
+  // fallback for a client carrying only a seeded name, and for local mode's implicit owner.
+  function canEdit(client) {
+    if (client && Array.isArray(client.capabilities)) return client.capabilities.indexOf("edit") >= 0;
+    return !!EDIT_ROLES[roleOf(client)];
+  }
   // local convenience: an envelope stamped with this manager's clock (never seq-stamped)
   function lockEnv(type, docId, blockId, payload) { return envelope(type, docId, blockId, null, null, now(), payload); }
 

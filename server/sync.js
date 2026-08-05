@@ -63,10 +63,13 @@ function createSyncHub(blockStore, opts) {
     subs(docId).forEach(function (c) { if (c !== except) { try { c.transport.send(env); } catch (e) {} } });
   }
 
-  function connect(transport, author, role) {
-    // role comes from the RESOLVED session/token (never self-declared) so the hub's
-    // capability gates (edit/lock via roleOf -> client.role) are authoritative.
-    var client = { transport: transport, author: author || null, role: role || null, docId: null };
+  function connect(transport, author, role, capabilities) {
+    // role + capabilities come from the RESOLVED session/token (never self-declared) so the
+    // hub's edit gates are authoritative. The CAPABILITY list is what canEdit reads: since
+    // platform-pivot 37 a role's title is admin-defined, so a name-based gate would start
+    // denying edits the moment someone renamed "Author".
+    var client = { transport: transport, author: author || null, role: role || null,
+                   capabilities: Array.isArray(capabilities) ? capabilities.slice() : null, docId: null };
     clients.push(client);
     transport.onMessage(function (env) { handle(client, env); });
     transport.onDrop(function () { disconnect(client); });
@@ -225,8 +228,14 @@ function createSyncHub(blockStore, opts) {
     if (r && r.reply) client.transport.send(r.reply);
   }
 
+  // Capability first, seeded names as the fallback (platform-pivot 37). A client whose
+  // session resolved a real role carries its capability list; local mode's implicit owner and
+  // any older caller that passes only a name still land on EDIT_ROLES.
   var EDIT_ROLES = { admin: true, author: true };
-  function canEdit(client) { return !!EDIT_ROLES[roleOf(client)]; }
+  function canEdit(client) {
+    if (client && Array.isArray(client.capabilities)) return client.capabilities.indexOf("edit") >= 0;
+    return !!EDIT_ROLES[roleOf(client)];
+  }
 
   // Structural op (ticket 14). The ONE real conflict: a delete/move-out touching a block
   // another user holds a CONTENT lock on is REFUSED -- never evicts the editor. A reorder

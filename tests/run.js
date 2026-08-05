@@ -1224,6 +1224,63 @@ section("arch-P3-01 editor storage");
   ok("the flag has exactly one writer, and it is named", /function commitBackend\(value\) \{ return writeStore\(storage, KEYS\.backend, value\); \}/.test(src("src/editor/storage.js")));
   ok("the guarded cutover is what calls it", /setFlag = opts\.setFlag \|\| function \(vv\) \{ Store\.commitBackend\(vv\); \}/.test(src("src/editor/assets.js")));
 
+  // THE SEAM IS THE ONLY DOOR (platform-pivot 07). The cutover ratchet above guards ONE key.
+  // This guards all six, against every file, in both directions: a doc-of-record key may be
+  // named in a raw localStorage call in src/editor/storage.js and nowhere else. That is the
+  // ticket's "no call site references the old blob storage path" made permanent -- the last one
+  // was persist.js clearing the registry by hand for "Reset Workspace", which on the file and
+  // http backends cleared nothing and told the author otherwise.
+  // Scoped to raw localStorage calls on purpose: store-http.js names "authoring.products" and
+  // "authoring.library" as SERVER kv keys, which is the seam working, not going round it.
+  var DOC_OF_RECORD = ["authoring.registry", "authoring.library", "authoring.products",
+                       "authoring.activeDocId", "authoring.openDocIds", "authoring.storageBackend"];
+  var SRC_FILES = [];
+  (function walk(dir) {
+    fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).forEach(function (e) {
+      var rel = dir + "/" + e.name;
+      if (e.isDirectory()) return walk(rel);
+      if (/\.js$/.test(e.name)) SRC_FILES.push(rel);
+    });
+  })("src");
+  var trespassers = [];
+  SRC_FILES.forEach(function (f) {
+    if (f === "src/editor/storage.js") return;
+    var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    DOC_OF_RECORD.forEach(function (key) {
+      var re = new RegExp("localStorage\\s*\\.\\s*(getItem|setItem|removeItem)\\s*\\(\\s*[\"']" + key.replace(".", "\\.") + "[\"']");
+      if (re.test(code)) trespassers.push(f + " -> " + key);
+    });
+  });
+  ok("no file outside the storage seam reads or writes a doc-of-record key directly" +
+     (trespassers.length ? " (" + trespassers.join(", ") + ")" : ""), trespassers.length === 0);
+  ok("the ratchet is looking at the whole of src/, not a hand-kept list", SRC_FILES.length > 40);
+
+  // Reset means the same thing in all three postures, because it goes through the adapter.
+  var resetAdapter = STORAGE.makeMemoryAdapter();
+  var resetting = STORAGE.create({ storage: resetAdapter.storage, adapter: resetAdapter, hoist: function () {} });
+  resetting.saveRegistry({ "C-1": { meta: { code: "C-1" } }, "C-2": { meta: { code: "C-2" } } });
+  resetting.saveOpenDocIds(["C-1", "C-2"]);
+  resetting.saveActiveDocId("C-2");
+  var reset = resetting.resetWorkspace({ registry: { "SAMPLE": { meta: { code: "SAMPLE" } } } });
+  ok("resetWorkspace reports its outcome as a value", reset.ok === true && reset.count === 1);
+  ok("reset writes the seed through the SAME adapter every other write uses",
+    Object.keys(resetting.getRegistry()).join() === "SAMPLE" &&
+    Object.keys(JSON.parse(resetAdapter.data[STORAGE.KEYS.registry])).join() === "SAMPLE");
+  ok("reset repoints the open tabs and the active doc at the seed",
+    resetting.getOpenDocIds([]).join() === "SAMPLE" && resetting.getActiveDocId(null) === "SAMPLE");
+  // A refused write must leave the workspace exactly as it was -- reset is destructive, so it
+  // reports rather than half-completing.
+  var blocked = STORAGE.create({ storage: STORAGE.makeMemoryAdapter().storage, suppressed: function () { return true; }, hoist: function () {} });
+  blocked.saveOpenDocIds(["KEEP"]);
+  var refused = blocked.resetWorkspace({ registry: { "SAMPLE": {} } });
+  ok("a refused reset changes nothing and names the stage",
+    refused.ok === false && refused.stage === "suppressed" && blocked.getOpenDocIds([]).join() === "KEEP");
+  ok("persist.js's Reset button calls the editor, and refuses out loud when it cannot",
+    /window\.Editor\.resetWorkspace\(\)/.test(src("src/persist.js")) &&
+    /if \(!res \|\| !res\.ok\)/.test(src("src/persist.js")));
+  ok("editor.js seeds the reset with the sample course and nothing else",
+    /seedRegistry\[window\.SAMPLE_DOC\.meta\.code\] = window\.SAMPLE_DOC;[\s\S]{0,120}Store\.resetWorkspace\(/.test(src("src/editor.js")));
+
   // editor.js reaches for both the render context and the storage seam as it LOADS, so every page
   // that loads editor.js has to load them first. kit.html is the one that is easy to forget: it
   // boots editor.js in __KIT_MODE, and arch-P1 wired the render context into index.html alone,
@@ -1767,6 +1824,41 @@ section("platform-pivot 33 pre-flight backup + guarded cutover");
     // live hand-flip is the 2026-07-12 clobber.
     ok("33: the cutover writes no storage key itself (commitBackend is the one writer)",
       !/setItem\s*\(/.test(mig));
+  })();
+
+  // --- platform-pivot 07: the terminal drain of the retired asset blob ---
+  // The blob writer is gone, so this only ever runs one way: read what an older build left in
+  // localStorage, put it somewhere durable, drop the key. Every failure mode keeps the key,
+  // because the key is the only copy of that media until the puts land.
+  (function () {
+    function env(over) {
+      var s = { read: function () { return s.raw; }, remove: function () { s.raw = null; s.removed = true; },
+                has: function (id) { return !!s.store[id]; }, put: function (id, rec) { s.store[id] = rec; },
+                raw: null, store: {}, removed: false };
+      Object.keys(over || {}).forEach(function (k) { s[k] = over[k]; });
+      return s;
+    }
+    var e = env({ raw: JSON.stringify({ a: { data: "d1" }, b: { data: "d2" } }) });
+    var r = M.drainLegacyAssetBlob(e);
+    ok("07: every record in the old blob is moved", r.ok === true && r.moved === 2 && e.store.a.data === "d1" && e.store.b.data === "d2");
+    ok("07: and only then is the old key dropped", r.removed === true && e.removed === true && e.raw === null);
+    ok("07: a second run is a no-op", M.drainLegacyAssetBlob(e).moved === 0);
+
+    var dup = env({ raw: JSON.stringify({ a: { data: "old" } }) });
+    dup.store.a = { data: "current" };
+    M.drainLegacyAssetBlob(dup);
+    ok("07: a record already in the live store is not overwritten by the old copy", dup.store.a.data === "current");
+
+    var nothing = M.drainLegacyAssetBlob(env());
+    ok("07: no old key is success with nothing to do", nothing.ok === true && nothing.moved === 0 && nothing.removed === false);
+
+    var junk = M.drainLegacyAssetBlob(env({ raw: "{not json" }));
+    ok("07: an unreadable blob is reported and the key kept", junk.ok === false && junk.removed === false);
+
+    var breaks = env({ raw: JSON.stringify({ a: {}, b: {} }), put: function (id) { if (id === "b") throw new Error("full"); } });
+    var br = M.drainLegacyAssetBlob(breaks);
+    ok("07: a failed put keeps the old key, so the media is never lost between stores",
+      br.ok === false && br.removed === false && breaks.removed === false && breaks.raw !== null);
   })();
 })();
 
@@ -2957,19 +3049,19 @@ section("platform-pivot 17/18/20 identity");
     var u2 = idn.findOrCreateUser("bob@x.com", "Bob");
     ok("18: a later unknown identity -> VIEWER (JIT)", u2.role === "viewer" && idn.findOrCreateUser("bob@x.com").id === u2.id);
     var adminP = { principal: u1.id, role: "admin", kind: "user" };
-    ok("18: admin elevates bob to author", idn.setRole(adminP, u2.id, "author").ok && idn.getUser(u2.id).role === "author");
+    ok("18: admin elevates bob to author", idn.setRole(adminP, u2.id, "author").ok && idn.getUser(u2.id).role === "Author");
     ok("17: a non-admin cannot assign roles", idn.setRole({ role: "author", kind: "user" }, u2.id, "admin").ok === false);
     // 17: local-accounts adapter + session lifecycle
     idn.registerLocalAccount("carol@x.com", "Carol", "pw123", "author");
     var login = idn.login(idn.localAccountsAdapter, { email: "carol@x.com", password: "pw123" });
-    ok("17: local login mints a session; resolves to {principal, role}", login && idn.resolveSession(login.token).role === "author");
+    ok("17: local login mints a session; resolves to {principal, role}", login && idn.resolveSession(login.token).role === "Author");
     ok("17: wrong password -> no login", idn.login(idn.localAccountsAdapter, { email: "carol@x.com", password: "no" }) === null);
     clock = 1000 + 2000;
     ok("17: an expired session resolves to null", idn.resolveSession(login.token) === null);
     // 18: break-glass admin works during an IdP outage (adapter throws)
     idn.ensureBreakGlass("root@local", "breakpw");
     var brokenSSO = { name: "oidc", authenticate: function () { throw new Error("IdP unreachable"); } };
-    ok("18: break-glass logs in while SSO is configured AND the IdP fails", idn.login(brokenSSO, { email: "root@local", password: "breakpw" }).user.role === "admin");
+    ok("18: break-glass logs in while SSO is configured AND the IdP fails", idn.login(brokenSSO, { email: "root@local", password: "breakpw" }).user.role === "Admin");
     // 20: guest link tokens (a guest link must pin a checkpoint -- snapshot id is carried)
     var link = idn.issueLink(adminP, { docId: "C-1", checkpointId: 1, version: "v1", displayName: "Ext", expiresAt: clock + 100000 });
     var g = idn.authorizeGuest(link.token);
@@ -3289,6 +3381,308 @@ section("platform-pivot 19 auth rungs");
   ok("19: no rung is built in local mode", /identity && config\.mode === "server"\) \? authRungs\.createRung/.test(src("server/verso-server.js")));
 })();
 
+// ---- platform-pivot 37: composable roles over a fixed capability vocabulary ----
+// The point of the ticket is one sentence: once a role's TITLE is admin-defined, every guard
+// stated in titles is a guard that a rename silently removes. So the tests that matter most
+// here are the ones that rename a role and then re-assert the invariant.
+section("platform-pivot 37 composable roles");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> composable-role tests skipped"); return; }
+  var os = require("os");
+  var ID = require(path.join(ROOT, "server/identity.js"));
+
+  ok("37: the capability vocabulary is fixed, and it is the eight that shipped",
+    ID.CAPABILITIES.join() === "view,comment,edit,publish,promote,manageUsers,serverConfig,issueLinks");
+  ok("37: the seeded matrix is DERIVED from the seeded roles, so the two cannot drift",
+    ID.SEED_ROLES.every(function (r) {
+      return ID.CAPABILITIES.every(function (c) {
+        return ID.can(r.id.slice(5), c) === (r.capabilities.indexOf(c) >= 0);
+      });
+    }));
+
+  function fresh(fn) {
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-roles-"));
+    var clock = 1000;
+    var idn = ID.createIdentity({ dbPath: path.join(tmp, "id.sqlite"), now: function () { return clock; }, linkSecret: "s" });
+    try { fn(idn, function (n) { clock = n; }); }
+    finally { try { idn.close(); } catch (e) {} try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
+  }
+  // The actor every test acts as: a real bootstrap admin, resolved the way the app resolves one.
+  function withAdmin(idn) {
+    var u = idn.findOrCreateUser("root@x", "Root");
+    return { principal: u.id, kind: "user", capabilities: idn.capabilitiesOf(u.id, null) };
+  }
+
+  // --- seeding: a fresh server behaves exactly as it did before the amendment ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var listed = idn.listRoles(admin);
+    ok("37: a fresh server seeds the four defaults", listed.ok && listed.roles.map(function (r) { return r.name; }).join() === "Admin,Author,Reviewer,Viewer");
+    ok("37: seeded holders and the default role come back with them",
+      listed.defaultRoleId === "role_viewer" && listed.roles.filter(function (r) { return r.isDefault; }).length === 1);
+    ok("37: and each seeded role holds exactly the pre-amendment capability set",
+      listed.roles.every(function (r) {
+        var seed = ID.SEED_ROLES.filter(function (s) { return s.id === r.id; })[0];
+        return seed && seed.capabilities.join() === r.capabilities.join();
+      }));
+    ok("37: a fresh server's capability list is served with the roles", listed.capabilities.join() === ID.CAPABILITIES.join());
+  });
+
+  // --- composition: arbitrary name, arbitrary subset, nothing outside the vocabulary ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var made = idn.createRole(admin, { name: "Technical Authority", capabilities: ["view", "comment", "publish"] });
+    ok("37: an admin composes a role in their own vocabulary", made.ok && made.role.name === "Technical Authority");
+    ok("37: it holds exactly the subset asked for", made.role.capabilities.join() === "view,comment,publish");
+    ok("37: a capability outside the vocabulary is rejected",
+      idn.createRole(admin, { name: "X", capabilities: ["view", "approveEverything"] }).ok === false);
+    ok("37: a nameless role is rejected", idn.createRole(admin, { name: "  ", capabilities: [] }).ok === false);
+    ok("37: duplicate capabilities collapse rather than doubling",
+      idn.createRole(admin, { name: "Dupe", capabilities: ["view", "view", "comment"] }).role.capabilities.join() === "view,comment");
+    // capability resolution follows the composition, not the title
+    var bob = idn.findOrCreateUser("bob@x", "Bob");
+    idn.assignRole(admin, bob.id, made.role.id, null);
+    ok("37: a holder resolves to exactly that role's capabilities", idn.capabilitiesOf(bob.id, null).join() === "view,comment,publish");
+    ok("37: and a capability it does not hold is denied", idn.principalCan({ kind: "user", capabilities: idn.capabilitiesOf(bob.id, null) }, "edit") === false);
+    ok("37: a non-manager cannot compose roles",
+      idn.createRole({ kind: "user", capabilities: ["view", "edit"] }, { name: "Sneak", capabilities: ["serverConfig"] }).ok === false);
+  });
+
+  // --- rename is not a permissions change ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var bob = idn.findOrCreateUser("bob@x", "Bob");
+    idn.setRole(admin, bob.id, "author");
+    var before = idn.capabilitiesOf(bob.id, null).join();
+    var renamed = idn.updateRole(admin, "role_author", { name: "Content Designer" });
+    ok("37: a role renames", renamed.ok && renamed.role.name === "Content Designer");
+    ok("37: renaming changes no capability its holders have", idn.capabilitiesOf(bob.id, null).join() === before);
+    ok("37: the holder's displayed role follows the new name", idn.roleNameOf(bob.id) === "Content Designer");
+    ok("37: and the rename does not touch anyone else", idn.capabilitiesOf(admin.principal, null).indexOf("manageUsers") >= 0);
+  });
+
+  // --- the never-locked-out floor, capability-based, on all four paths ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var bob = idn.findOrCreateUser("bob@x", "Bob");   // seeded Viewer
+    ok("37: exactly one person holds the floor to begin with", idn.floorHolders().length === 1);
+
+    var r1 = idn.updateRole(admin, "role_admin", { capabilities: ["view", "edit"] });
+    ok("37: (a) editing the last floor-holding role to drop the floor is REFUSED", r1.ok === false && r1.invariant === "lastCapabilityHolder");
+    ok("37: ...and it changed nothing", idn.capabilitiesOf(admin.principal, null).indexOf("serverConfig") >= 0);
+
+    var r2 = idn.deleteRole(admin, "role_admin");
+    ok("37: (b) deleting that role is REFUSED", r2.ok === false);
+
+    var r3 = idn.assignRole(admin, admin.principal, "role_viewer", null);
+    ok("37: (c) reassigning its last holder is REFUSED", r3.ok === false && r3.invariant === "lastCapabilityHolder");
+    ok("37: ...and the last holder still holds it", idn.capabilitiesOf(admin.principal, null).indexOf("manageUsers") >= 0);
+
+    var r4 = idn.removeUser(admin, admin.principal);
+    ok("37: (d) removing its last holder is REFUSED", r4.ok === false);
+    ok("37: ...and the user is still there", !!idn.getUser(admin.principal));
+    ok("37: the refusal names what it protects, not who currently holds it",
+      /manage users and server configuration/.test(r4.error) && !/admin/i.test(r4.error));
+
+    // give someone else the floor, and every path opens
+    idn.assignRole(admin, bob.id, "role_admin", null);
+    ok("37: with a second floor-holder the reassignment goes through", idn.assignRole(admin, admin.principal, "role_viewer", null).ok === true);
+    ok("37: and the floor is still held", idn.floorHolders().length === 1);
+  });
+
+  // THE CASE A TITLE-BASED GUARD FAILS, and the reason this ticket exists.
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    ok("37: rename the protecting role to something Verso has never heard of",
+      idn.updateRole(admin, "role_admin", { name: "Technical Authority" }).ok === true);
+    var after = idn.removeUser(admin, admin.principal);
+    ok("37: the floor STILL refuses after the rename (a name-based guard would not)", after.ok === false);
+    ok("37: and still refuses to strip the renamed role's capabilities",
+      idn.updateRole(admin, "role_admin", { capabilities: ["view"] }).ok === false);
+    ok("37: the floor is counted in capabilities, so the rename is invisible to it", idn.floorHolders().length === 1);
+  });
+
+  // --- scope: NULL everywhere in v1, resolution order real and tested ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var bob = idn.findOrCreateUser("bob@x", "Bob");
+    idn.setRole(admin, bob.id, "reviewer");
+    ok("37: with no scoped assignment, every scope resolves to the global one",
+      idn.capabilitiesOf(bob.id, null).join() === "view,comment" && idn.capabilitiesOf(bob.id, "prod-A").join() === "view,comment");
+    idn.assignRole(admin, bob.id, "role_author", "prod-A");
+    ok("37: a directly-written scoped assignment wins inside its scope", idn.capabilitiesOf(bob.id, "prod-A").indexOf("edit") >= 0);
+    ok("37: and leaves every other scope on the global assignment",
+      idn.capabilitiesOf(bob.id, "prod-B").join() === "view,comment" && idn.capabilitiesOf(bob.id, null).join() === "view,comment");
+    ok("37: a user can never collect two GLOBAL assignments", (function () {
+      idn.assignRole(admin, bob.id, "role_viewer", null);
+      return idn.capabilitiesOf(bob.id, null).join() === "view";
+    })());
+  });
+
+  // --- the default-role floor: reaching the URL can never grant write access ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    ok("37: nominating a role that can edit as the default is REFUSED", idn.setDefaultRole(admin, "role_author").ok === false);
+    ok("37: ...and the default is unchanged", idn.defaultRoleId() === "role_viewer");
+    ok("37: a view+comment role is an acceptable default", idn.setDefaultRole(admin, "role_reviewer").ok === true);
+    var jit = idn.findOrCreateUser("new@x", "New");
+    ok("37: a just-in-time user lands in the nominated default", idn.capabilitiesOf(jit.id, null).join() === "view,comment");
+    ok("37: and the default role cannot be edited up into edit either",
+      idn.updateRole(admin, "role_reviewer", { capabilities: ["view", "comment", "edit"] }).ok === false);
+    ok("37: nor deleted while it is the default", idn.deleteRole(admin, "role_reviewer").ok === false);
+  });
+
+  // --- guardrails are warnings the server computes, not blocks the UI infers ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var empty = idn.createRole(admin, { name: "Placeholder", capabilities: [] });
+    ok("37: a zero-capability role is created, with a warning rather than a refusal",
+      empty.ok === true && empty.warnings.some(function (w) { return w.code === "empty"; }));
+    ok("37: the empty warning says what it means for the people in it", /view, edit, or comment/.test(empty.warnings[0].message));
+    var second = idn.createRole(admin, { name: "Ops", capabilities: ["view", "serverConfig"] });
+    ok("37: a SECOND role gaining serverConfig warns", second.warnings.some(function (w) { return w.code === "serverConfigSpread"; }));
+    var listed = idn.listRoles(admin);
+    ok("37: the warnings come back with the list, so the panel renders rather than infers",
+      listed.roles.filter(function (r) { return r.warnings.length; }).length >= 2);
+    // Both serverConfig holders now warn -- the point is that the spread is flagged wherever
+    // it appears, not that the "original" one is exempt.
+    ok("37: the spread warning is on every serverConfig role once there is more than one",
+      listed.roles.filter(function (r) { return r.capabilities.indexOf("serverConfig") >= 0; })
+        .every(function (r) { return r.warnings.some(function (w) { return w.code === "serverConfigSpread"; }); }));
+  });
+  // ...and a server with ONE serverConfig role is quiet, which is what makes the warning mean
+  // something when it does appear.
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    ok("37: a lone serverConfig role raises no spread warning",
+      idn.listRoles(admin).roles.every(function (r) { return !r.warnings.some(function (w) { return w.code === "serverConfigSpread"; }); }));
+  });
+
+  // --- a role in use cannot be deleted out from under its holders ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var bob = idn.findOrCreateUser("bob@x", "Bob");
+    idn.setRole(admin, bob.id, "author");
+    var del = idn.deleteRole(admin, "role_author");
+    ok("37: deleting a role people still hold is refused, and says how many", del.ok === false && del.holders === 1);
+    idn.setRole(admin, bob.id, "role_viewer");
+    ok("37: once empty it deletes", idn.deleteRole(admin, "role_author").ok === true);
+    ok("37: and the people list still resolves everyone", idn.listUsers(admin).users.every(function (u) { return !!u.role; }));
+  });
+
+  // --- the legacy surface keeps working, which is what let this land without a rewrite ---
+  fresh(function (idn) {
+    var admin = withAdmin(idn);
+    var bob = idn.findOrCreateUser("bob@x", "Bob");
+    ok("37: setRole still takes a seeded NAME", idn.setRole(admin, bob.id, "author").ok === true);
+    ok("37: and a role id", idn.setRole(admin, bob.id, "role_reviewer").ok === true);
+    idn.updateRole(admin, "role_reviewer", { name: "Checker" });
+    ok("37: and a role's CURRENT name after a rename", idn.setRole(admin, bob.id, "Checker").ok === true);
+    ok("37: an unknown role is still an unknown role", idn.setRole(admin, bob.id, "nope").ok === false);
+    ok("37: a resolved principal carries capabilities, not just a title",
+      (function () {
+        idn.registerLocalAccount("carol@x", "Carol", "pw", "author");
+        var s = idn.login(idn.localAccountsAdapter, { email: "carol@x", password: "pw" });
+        var p = idn.resolveSession(s.token);
+        return p.capabilities.indexOf("edit") >= 0 && p.role === "Author" && p.roleId === "role_author";
+      })());
+  });
+
+  // --- the edit gates downstream read capabilities, so a rename cannot revoke editing ---
+  (function () {
+    var SY = require(path.join(ROOT, "server/sync.js"));
+    var LM = require(path.join(ROOT, "server/lock-manager.js"));
+    var lm = LM.createLockManager({});
+    ok("37: lock-manager offers a lock on the capability, whatever the title says",
+      lm.canEdit({ role: "Technical Authority", capabilities: ["view", "edit"] }) === true &&
+      lm.canEdit({ role: "Technical Authority", capabilities: ["view"] }) === false);
+    ok("37: a client with no resolved capabilities still falls back to the seeded names",
+      lm.canEdit({ role: "author" }) === true && lm.canEdit({ role: "viewer" }) === false);
+    ok("37: sync.js passes capabilities from the resolved session into the hub",
+      /function connect\(transport, author, role, capabilities\)/.test(src("server/sync.js")) &&
+      /capabilities\.indexOf\("edit"\) >= 0/.test(src("server/sync.js")));
+    ok("37: and sync-wire hands them over on both transports",
+      (src("server/sync-wire.js").match(/principal\.capabilities/g) || []).length === 2);
+    ok("37: local mode is untouched -- an unnamed client is still edit-capable",
+      SY.createSyncHub && lm.canEdit({}) === true);
+  })();
+
+  // --- local mode: none of this runs at all (Law 4) ---
+  (function () {
+    var vs = src("server/verso-server.js");
+    ok("37: identity is created only in server mode, so local has no roles to check",
+      /config\.mode === "server"\) \? createIdentity/.test(vs));
+    ok("37: and the local principal is the single implicit owner",
+      /config\.mode !== "server" \|\| !identity\) return \{ principal: "owner", role: "admin"/.test(vs));
+  })();
+
+  // --- the pointer the ticket asks for, so nobody re-derives the contradiction ---
+  ok("37: identity.js names the amended spec section it was reconciled to",
+    /3-identity\.spec\.md/.test(src("server/identity.js")) && /Role model \(from 02, amended/.test(src("server/identity.js")));
+
+  // --- over HTTP, behind the same boundary as everything else ---
+  (function () {
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    var tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-roles-http-"));
+    __async.push((async function () {
+      var server, base;
+      await new Promise(function (resolve) {
+        server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp2, "verso.sqlite"), linkSecret: "s" }, function (s) { base = "http://127.0.0.1:" + s.address().port; resolve(); });
+      });
+      try {
+        var idn = server.__identity;
+        idn.registerLocalAccount("boss@x", "Boss", "pw", "admin");
+        idn.registerLocalAccount("hand@x", "Hand", "pw", "author");
+        async function cookieFor(email) {
+          var r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: email, password: "pw" }) });
+          return (r.headers.get("set-cookie") || "").split(";")[0];
+        }
+        var boss = await cookieFor("boss@x"), hand = await cookieFor("hand@x");
+
+        var r = await fetch(base + "/api/roles", { headers: { cookie: boss } });
+        var j = await r.json();
+        ok("37: GET /api/roles lists the seeded four with their capabilities", r.status === 200 && j.roles.length === 4 && j.capabilities.length === 8);
+
+        r = await fetch(base + "/api/roles", { headers: { cookie: hand } });
+        ok("37: someone without manageUsers cannot even read the roles", r.status === 403);
+        r = await fetch(base + "/api/users", { headers: { cookie: hand } });
+        ok("37: nor the people list, which names every account", r.status === 403);
+
+        r = await fetch(base + "/api/roles", { method: "POST", headers: { cookie: boss }, body: JSON.stringify({ name: "Technical Authority", capabilities: ["view", "comment", "publish"] }) });
+        var made = await r.json();
+        ok("37: POST /api/roles composes a role", r.status === 200 && made.ok && made.role.name === "Technical Authority");
+
+        r = await fetch(base + "/api/roles/" + made.role.id, { method: "PATCH", headers: { cookie: boss }, body: JSON.stringify({ name: "Design Authority" }) });
+        ok("37: PATCH renames without touching capabilities",
+          (await r.json()).role.capabilities.join() === "view,comment,publish");
+
+        var handUser = idn.listUsers({ kind: "user", capabilities: ["manageUsers"] }).users.filter(function (u) { return u.email === "hand@x"; })[0];
+        r = await fetch(base + "/api/users/" + handUser.id + "/role", { method: "PUT", headers: { cookie: boss }, body: JSON.stringify({ roleId: made.role.id }) });
+        ok("37: PUT assigns a person to it", (await r.json()).ok === true);
+        ok("37: and the assignment is what decides their capabilities", idn.capabilitiesOf(handUser.id, null).join() === "view,comment,publish");
+
+        r = await fetch(base + "/api/roles/" + made.role.id, { method: "DELETE", headers: { cookie: boss } });
+        j = await r.json();
+        ok("37: deleting a role someone still holds is refused with a reason, not a 500", r.status === 409 && j.ok === false && j.holders === 1);
+
+        // the floor, over the wire
+        var bossUser = idn.listUsers({ kind: "user", capabilities: ["manageUsers"] }).users.filter(function (u) { return u.email === "boss@x"; })[0];
+        r = await fetch(base + "/api/users/" + bossUser.id, { method: "DELETE", headers: { cookie: boss } });
+        j = await r.json();
+        ok("37: removing the last floor-holder is refused over HTTP too", r.status === 409 && j.invariant === "lastCapabilityHolder");
+        ok("37: and the account is still there afterwards", !!idn.getUser(bossUser.id));
+
+        r = await fetch(base + "/api/roles/default", { method: "PUT", headers: { cookie: boss }, body: JSON.stringify({ roleId: "role_author" }) });
+        ok("37: nominating an edit-capable default is refused over HTTP", r.status === 409);
+      } finally {
+        try { server.close(); } catch (e) {}
+        try { fs.rmSync(tmp2, { recursive: true, force: true }); } catch (e) {}
+      }
+    })());
+  })();
+})();
+
 // ---- platform-pivot 17: identity boundary over HTTP (server mode) --------------
 section("platform-pivot 17 identity boundary");
 (function () {
@@ -3345,7 +3739,7 @@ section("platform-pivot 17 identity boundary");
       ok("17: a guest token is denied an unscoped route (registry) -- 403", r.status === 403);
       // /auth/me reflects the principal
       r = await fetch(base + "/auth/me", { headers: { cookie: cookie } }); j = await r.json();
-      ok("17: /auth/me resolves the session principal", j.principal && j.principal.role === "author");
+      ok("17: /auth/me resolves the session principal", j.principal && j.principal.role === "Author");
       // review-fix: the /sync write path flows through the SAME boundary (no bypass)
       r = await fetch(base + "/sync/send", { method: "POST", body: JSON.stringify({ clientId: "x", envelope: { type: "block.change", docId: "C-1", blockId: "b1" } }) });
       ok("SEC: an unauthenticated /sync/send is rejected (401) -- no boundary bypass", r.status === 401);
@@ -4960,27 +5354,100 @@ section("YY asset-seam");
   ok("embed hoist round-trips", decodeURIComponent(puts[0].slice(puts[0].indexOf(",") + 1)) === "<b>hi</b>");
 
   // store
+  // platform-pivot 07 rewrote this from "assert against source text with the localStorage
+  // fallback doing the work" to driving the REAL hydrate -> drain -> put path against a fake
+  // IndexedDB. That matters here specifically: the fallback used to make `put` succeed with no
+  // IDB at all, so the test never once exercised the store the app actually ships on.
   var ptxt = src("src/persist.js");
-  var pe = ptxt.indexOf("placeholder: PLACEHOLDER"); pe = ptxt.indexOf("};", pe) + 2;
-  var pblock = ptxt.slice(ptxt.indexOf("var ASSET_KEY"), pe);
-  var lsStore = {}, failNext = false;
-  var fakeLS = { getItem: function (k) { return k in lsStore ? lsStore[k] : null; }, setItem: function (k, v) { if (failNext) { var e = new Error("full"); e.name = "QuotaExceededError"; throw e; } lsStore[k] = v; } };
-  var n = 0, fakeURL = { createObjectURL: function () { return "blob:" + (++n); }, revokeObjectURL: function () {} };
-  var pw = { Editor: { reportSaveFailure: function () {} }, console: console };
-  new Function("window", "localStorage", "URL", "Blob", "atob", pblock)(pw, fakeLS, fakeURL, function () {}, function (s) { return Buffer.from(s, "base64").toString("binary"); });
-  var AS = pw.AssetStore;
+  var pe = ptxt.indexOf("idbReady: function ()"); pe = ptxt.indexOf("};", pe) + 2;
+  var pblock = ptxt.slice(ptxt.indexOf("var PLACEHOLDER"), pe);
+
+  // A fake IndexedDB. Every request completes on flush() rather than at once, because the real
+  // code assigns its handlers AFTER open()/openCursor() returns -- firing synchronously would
+  // pass against an implementation the browser would never run.
+  function makeFakeIDB(seed) {
+    var rows = {}; Object.keys(seed || {}).forEach(function (k) { rows[k] = seed[k]; });
+    var pending = [];
+    var objectStore = {
+      put: function (rec, id) { rows[id] = rec; },
+      delete: function (id) { delete rows[id]; },
+      openCursor: function () {
+        var req = {}, keys = Object.keys(rows), i = 0;
+        pending.push(function () {
+          (function step() {
+            if (i >= keys.length) { req.result = null; return req.onsuccess && req.onsuccess(); }
+            var k = keys[i++];
+            req.result = { key: k, value: rows[k], continue: step };
+            req.onsuccess && req.onsuccess();
+          })();
+        });
+        return req;
+      }
+    };
+    var db = { transaction: function () { return { objectStore: function () { return objectStore; } }; } };
+    return {
+      rows: rows,
+      api: { open: function () { var r = { result: db }; pending.push(function () { r.onsuccess && r.onsuccess(); }); return r; } },
+      flush: function () { var guard = 0; while (pending.length && guard++ < 50) { pending.shift()(); } }
+    };
+  }
+  function bootAssets(opts) {
+    opts = opts || {};
+    var lsStore = {};
+    if (opts.legacy) lsStore["authoring.assets"] = JSON.stringify(opts.legacy);
+    var fakeLS = {
+      getItem: function (k) { return k in lsStore ? lsStore[k] : null; },
+      setItem: function (k, v) { lsStore[k] = v; },
+      removeItem: function (k) { delete lsStore[k]; }
+    };
+    var n = 0, fakeURL = { createObjectURL: function () { return "blob:" + (++n); }, revokeObjectURL: function () {} };
+    var idb = opts.noIDB ? null : makeFakeIDB(opts.seed);
+    var pw = {
+      Editor: { reportSaveFailure: function () {} }, console: console,
+      indexedDB: idb ? idb.api : null,
+      Migration: require(path.join(ROOT, "src/migration.js")).Migration
+    };
+    new Function("window", "localStorage", "URL", "Blob", "atob", "indexedDB", pblock)(
+      pw, fakeLS, fakeURL, function () {}, function (s) { return Buffer.from(s, "base64").toString("binary"); },
+      idb ? idb.api : undefined);
+    var hydrated = false;
+    pw.AssetStore.hydrate(function () { hydrated = true; });
+    if (idb) idb.flush();
+    return { AS: pw.AssetStore, ls: lsStore, idb: idb, hydrated: function () { return hydrated; } };
+  }
+
+  var boot = bootAssets();
+  ok("hydrate completes and IndexedDB is the backer", boot.hydrated() === true && boot.AS.idbReady() === true);
+  var AS = boot.AS;
   var id = AS.put("data:image/png;base64,AAAA", { mime: "image/png" });
   ok("put id + dedupe", !!id && AS.put("data:image/png;base64,AAAA", {}) === id);
   var svg = AS.put("data:image/svg+xml;utf8,<svg/>", { mime: "image/svg+xml" });
   ok("svg url -> data:", AS.url(svg).slice(0, 5) === "data:");
   ok("raster url -> blob:", AS.url(id).slice(0, 5) === "blob:");
-  failNext = true;
-  var realErr = console.error; console.error = function () {}; // expected quota log
-  ok("quota put -> null", AS.put("data:image/png;base64,BBBB", {}) === null);
-  console.error = realErr;
-  failNext = false;
+  ok("a put record reaches IndexedDB, per record", boot.idb.rows[id] && boot.idb.rows[id].mime === "image/png");
   AS.sweep([svg]);
   ok("sweep removes unref", !AS.has(id) && AS.has(svg));
+  ok("sweep deletes the IndexedDB record too", !boot.idb.rows[id] && !!boot.idb.rows[svg]);
+
+  // platform-pivot 07: the retired localStorage blob. There is no writer left, so `put` with no
+  // IndexedDB declines rather than opening a second store -- the caller keeps its inline data:
+  // URL (migrateDocMedia is documented non-destructive) and the registry write owns durability.
+  var bare = bootAssets({ noIDB: true });
+  ok("with no IndexedDB, put declines instead of writing a localStorage blob",
+    bare.AS.put("data:image/png;base64,CCCC", {}) === null && bare.ls["authoring.assets"] === undefined);
+  ok("nothing in persist.js writes the retired asset key",
+    !/setItem\s*\([^)]*authoring\.assets/.test(ptxt) && !/var ASSET_KEY/.test(ptxt) && !/function persistFallback/.test(ptxt));
+
+  // ...and a machine that still holds the old blob has it drained into IndexedDB exactly once,
+  // then the key removed. Media is never stranded by the retirement.
+  var legacyRec = { data: "data:image/png;base64,DDDD", mime: "image/png", name: null, w: null, h: null };
+  var drained = bootAssets({ legacy: { "leg-1": legacyRec }, seed: { "kept-1": legacyRec } });
+  ok("the legacy blob is drained into IndexedDB", drained.AS.has("leg-1") && drained.idb.rows["leg-1"].data === legacyRec.data);
+  ok("draining leaves records already in IndexedDB alone", drained.AS.has("kept-1"));
+  ok("the retired key is removed once it is empty", drained.ls["authoring.assets"] === undefined);
+  var reboot = bootAssets({ legacy: { "leg-1": legacyRec }, noIDB: true });
+  ok("with nowhere to drain to, the old key is left alone rather than deleted",
+    reboot.ls["authoring.assets"] !== undefined);
 })();
 
 // ---- tour source MediaTransport: pure time/mark helpers ------------------
