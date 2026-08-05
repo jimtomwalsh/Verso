@@ -6109,7 +6109,13 @@
     sectionGroup: sectionGroup,
     selectRow: selectRow,
     iconField: iconField,
-    History: History
+    History: History,
+    // The ONE chrome popover (platform-pivot 39 needs it for the account menu). Provided
+    // rather than re-implemented: it already owns the layer stack, Escape, click-outside,
+    // focus return, anchoring and the flip-above-when-there-is-no-room case. A second
+    // popover implementation is how two popovers end up dismissing differently.
+    openChromePop: openChromePop,
+    closeChromePop: closeChromePop
   });
   // doc and selection are REPLACED, not mutated -- a doc swap (setDoc, undo, a collab frame)
   // rebinds `doc` wholesale, and every click rebinds `selection`. They go through getters so a
@@ -6722,6 +6728,7 @@
     deleteCourse: VE.bind("deleteCourse")
   });
   window.VersoFiles.install(VE);   // the Files destination: every document, from both stores
+  window.VersoAccountMenu.install(VE);   // which account am I signed in as -- server mode only
   // uio-W04: shell.js needs to mount Files when that destination is entered, and a need() resolves
   // against provide() -- never against another module's expose(). So bind here, provide the
   // forwarder, and the dispatch happens at call time (kernel.js rule 4).

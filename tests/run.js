@@ -1526,9 +1526,15 @@ section("platform-pivot 34 server-mode bootstrap");
   ok("34: signed in -> authRequired false", w.__versoServerAuthRequired === false);
   ok("34: registry arrives base64-inlined, byte-faithful",
     Buffer.from(w.__versoServerRegistryB64, "base64").toString("utf8") === reg);
-  ok("34: the principal is named (kind/role/name only)",
+  // The principal carries exactly what the account menu (platform-pivot 39) needs to answer
+  // "which account am I using" -- and nothing else. Notably NO capability list and no token:
+  // the server decides permissions regardless of what the page holds, and a capability list in
+  // the page invites a client-side check that looks authoritative and is not.
+  ok("34: the principal is named, and carries only what names it",
     w.__versoServerPrincipal.role === "author" && w.__versoServerPrincipal.name === "Ada" &&
-    Object.keys(w.__versoServerPrincipal).sort().join(",") === "kind,name,role");
+    Object.keys(w.__versoServerPrincipal).sort().join(",") === "breakGlass,email,kind,name,role");
+  ok("34: and never the capability list or anything secret",
+    !("capabilities" in w.__versoServerPrincipal) && !/token|secret|password/i.test(JSON.stringify(w.__versoServerPrincipal)));
 
   // --- signed out: the mode still arrives, the data does not ---
   // This is the ticket's whole point. If a signed-out client learned nothing, store-http
@@ -2991,6 +2997,80 @@ section("platform-pivot 17/18/20 identity");
     try { idn.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+})();
+
+// ---- platform-pivot 39: the account menu + break-glass marking -----------------
+// Small surface, one job: it is the only place a person can confirm WHICH account they are
+// using. The case it exists for is an IT admin who signed in on the emergency account during
+// an outage and never signed back out, so the tests that matter are the break-glass ones.
+section("platform-pivot 39 account menu");
+(function () {
+  var AM = require(path.join(ROOT, "src/editor/account-menu.js")).VersoAccountMenu;
+
+  var ada = { kind: "user", name: "Ada Lovelace", email: "ada@corp.invalid", role: "Author", breakGlass: false };
+  var root = { kind: "user", name: "Break-glass admin", email: "root@local", role: "Admin", breakGlass: true };
+
+  // --- it appears only where there is an account ---
+  ok("39: never in local mode -- there is no principal to show", AM.shouldMount({}) === false);
+  ok("39: nor for a guest, who holds a link and not an account",
+    AM.shouldMount({ __versoServerUrl: "http://s", __versoServerPrincipal: { kind: "guest" } }) === false);
+  ok("39: it mounts for a signed-in user",
+    AM.shouldMount({ __versoServerUrl: "http://s", __versoServerPrincipal: ada }) === true);
+
+  // --- what it shows ---
+  var m = AM.accountModel(ada, "oidc", "Northwind");
+  ok("39: name, email and the role's NAME", m.name === "Ada Lovelace" && m.email === "ada@corp.invalid" && m.role === "Author");
+  ok("39: and how they signed in", m.method === "Signed in with Northwind sign-in");
+  ok("39: an unset organisation falls back rather than naming anyone",
+    AM.accountModel(ada, "oidc", null).method === "Signed in with your organisation sign-in");
+  ok("39: the Windows rung says so", AM.accountModel(ada, "iwa", "Northwind").method === "Signed in with your Windows account");
+  ok("39: a local-accounts deployment says so", AM.accountModel(ada, "local", null).method === "Signed in with the local admin account");
+  ok("39: an ordinary account carries no warning strip", m.strip === null && m.breakGlass === false);
+
+  // --- THE POINT OF THE TICKET ---
+  var bg = AM.accountModel(root, "oidc", "Northwind");
+  ok("39: the break-glass session is marked, verbatim", bg.strip === "Local admin account, in use");
+  ok("39: and it says the LOCAL method even on an SSO deployment -- reporting the rung there would hide exactly this case",
+    bg.method === "Signed in with the local admin account");
+  ok("39: the flag travels so the avatar can differ too", bg.breakGlass === true);
+  ok("39: the avatar is visually distinct, not merely labelled",
+    /account-av--breakglass/.test(src("src/editor/account-menu.js")) && /\.account-av--breakglass/.test(src("styles/editor/14-collab.css")));
+
+  // --- the restraint is a decision, not an omission ---
+  // Comments stripped, INCLUDING trailing ones: this module explains in prose that it shows a
+  // role name "never a capability", and a gate that reads its own explanation as a violation
+  // is a gate that punishes documenting the decision. The `:` guard leaves URLs alone.
+  var js = src("src/editor/account-menu.js")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("39: the role is shown by name only -- no capability list, no permissions screen",
+    !/capabilit/i.test(js) && !/permission/i.test(js));
+  ok("39: and no seeded role title is hard-coded, so a rename needs no code change",
+    !/"admin"|"author"|"reviewer"|"viewer"|"Admin"|"Author"|"Reviewer"|"Viewer"/.test(js));
+  ok("39: a renamed role shows through unchanged",
+    AM.accountModel({ kind: "user", name: "X", role: "Technical Authority" }, "local", null).role === "Technical Authority");
+
+  // --- initials, which is all the avatar has room for ---
+  ok("39: initials come from the name", AM.initialsOf("Ada Lovelace") === "AL" && AM.initialsOf("Prince") === "PR");
+  ok("39: and a nameless account still draws something", AM.initialsOf("") === "?" && AM.initialsOf(null) === "?");
+
+  // --- the surface is the spine's popover, not a second implementation ---
+  ok("39: it opens the SAME chrome popover the storage dot does",
+    /kernel\.need\("h", "openChromePop", "closeChromePop"\)/.test(src("src/editor/account-menu.js")) &&
+    /E\.openChromePop\(anchor/.test(src("src/editor/account-menu.js")));
+  ok("39: which editor.js provides rather than the module re-rolling one",
+    /openChromePop: openChromePop/.test(src("src/editor.js")));
+  ok("39: sign out is the only action, and it is a canonical Button",
+    /window\.VersoUI\.Button\(/.test(js) && (js.match(/onClick:/g) || []).length === 1);
+  ok("39: and it ends the server session rather than just clearing the page",
+    /\/auth\/logout/.test(js) && /method: "POST"/.test(js));
+
+  // --- wiring ---
+  ok("39: the module is installed, and loaded on both pages",
+    /window\.VersoAccountMenu\.install\(VE\)/.test(src("src/editor.js")) &&
+    /editor\/account-menu\.js/.test(src("index.html")) && /editor\/account-menu\.js/.test(src("kit.html")));
+  ok("39: the principal carries what the menu needs",
+    /breakGlass: !!principal\.breakGlass/.test(src("server/verso-server.js")) &&
+    /__versoServerRung/.test(src("server/verso-server.js")));
 })();
 
 // ---- platform-pivot 38: the signed-out state inside the app -------------------
