@@ -342,6 +342,48 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
   }
   function isObjectMark(m) { return m && m.anchor && m.anchor.len == null; }
 
+  // ---- uio-S-M04 (SRC-10): what condition a section is in --------------------
+  // The outline said where you were and nothing about what was there. Badges counted HEADINGS,
+  // which is rarely what a reviewer needs; the questions the review loop actually asks are which
+  // sections carry open comments, stale alternates, or broken anchors.
+  //
+  // Returns headingKey -> { total, open, stale, broken, restricted } for every heading that owns
+  // at least one mark. A heading with nothing gets no entry, so a row draws a dot only when there
+  // is something to say — silence over noise, the same rule the cross-stage facts follow.
+  //
+  // `open` counts comment marks that are not resolved. Resolution lives on the topic's comment
+  // threads, which this file does not own, so the caller passes an isResolved(mark) predicate; a
+  // caller that has no thread data omits it and every comment counts as open.
+  function marksByHeading(model, isResolved) {
+    var out = {};
+    (model && model.marks || []).forEach(function (m) {
+      if (!m || !m.anchor) return;
+      var hk = headingKeyForNode(model, m.anchor.nodeKey);
+      if (!hk) return;
+      var e = out[hk] || (out[hk] = { total: 0, open: 0, stale: 0, broken: 0, restricted: 0 });
+      e.total++;
+      if (m.broken) e.broken++;
+      else if (m.stale) e.stale++;
+      if (m.type === "restricted") e.restricted++;
+      if (m.type === "comment" && !(isResolved && isResolved(m))) e.open++;
+    });
+    return out;
+  }
+  // One dot per row, and its tone is the MOST URGENT thing in that section — a row cannot wear
+  // four dots without becoming a chart. Broken beats stale beats an open comment beats mere
+  // presence, because that is the order a reviewer would deal with them in.
+  function headingMarkDot(stat) {
+    if (!stat || !stat.total) return null;
+    var bits = [];
+    if (stat.broken) bits.push(stat.broken + " broken");
+    if (stat.stale) bits.push(stat.stale + " stale");
+    if (stat.open) bits.push(stat.open + " open comment" + (stat.open === 1 ? "" : "s"));
+    if (stat.restricted) bits.push(stat.restricted + " restricted");
+    if (!bits.length) bits.push(stat.total + " mark" + (stat.total === 1 ? "" : "s"));
+    var tone = stat.broken ? "broken" : stat.stale ? "stale" : stat.open ? "open" : "quiet";
+    return { tone: tone, title: bits.join(" · "), count: stat.total };
+  }
+
   // ---- uio-S-C06: restriction, as a fact about a passage --------------------
   // A restricted mark states what the passage resolves to and WHERE that came from. It does not
   // resolve anything itself: the level comes down uio-F07's ladder, which lives in the editor
@@ -1735,7 +1777,7 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
@@ -1756,7 +1798,7 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,

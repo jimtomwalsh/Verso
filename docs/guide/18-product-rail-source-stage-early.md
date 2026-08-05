@@ -209,6 +209,13 @@ In this mode:
   "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
   an alternate opens its card at the top of the right panel, showing the **base vs the alternate**,
   a status dot, and Edit / Delete.
+- **The rail switches between Outline and Marks.** One column, two views: **Outline** is how you
+  move around the document, **Marks** is the list of everything annotated in it. The Marks tab
+  carries its count, so you can see there is something to answer without switching to find out.
+  Outline rows carry a small dot when their section has something to report — red for a broken
+  anchor, amber for a stale alternate, yellow for an open comment, grey for anything else.
+  Hover it for the detail. A section with nothing to report shows nothing. The section you are
+  reading takes a blue rail down its left edge.
 - **One card, in one place.** Whatever you click — an alternate, a linked passage, a restricted one
   — its card opens at the **top of the right panel**, above the mark list. One card is open at a
   time, so opening another replaces it, and no card ever sits on top of the prose you are reading.

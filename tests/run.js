@@ -7399,7 +7399,11 @@ section("#159/#163 frontend conformance gate");
       // (the 4 legit uses: canvas inspector x2 + the theme bg token + its token-picker option).
       bgLabel: n(/"Background"/g, c),                  // "Background" label literals (floor = 4 legit)
       // panel-ia §2: the box outline is "Stroke" everywhere (#157) — never "Border"/"Outline".
-      strokeLabel: n(/"(?:Border|Border colour|Outline)"/g, c) // divergent outline labels (want 0)
+      // "Outline" has a SECOND sense in this app that has nothing to do with a box: the document
+      // outline in the Source rail (uio-S-M04's Outline / Marks switch). This metric is about the
+      // STROKE label, so a nav-tab option is not one of its subjects — excluded by name, not by
+      // loosening the pattern, so every other appearance still counts.
+      strokeLabel: n(/"(?:Border|Border colour|Outline)"/g, c.replace(/label: "Outline"/g, "")) // divergent outline labels (want 0)
     };
   }
   // Baselines: the converged floor per metric. `dir` = which way is improvement.
@@ -17278,6 +17282,70 @@ section("uio-F03 scope + inheritance model");
 // the reading column, and three surfaces were answering one question.
 // uio-S-M03 (SRC-09): 760px at 13px is ~95 characters a line, past the band prose is comfortable
 // at. Working and reading are different tasks and should not share a measure.
+// uio-S-M04 (SRC-10): "the outline shows position but not condition". Badges counted HEADINGS,
+// which is rarely what a reviewer needs; nothing said which sections carry open comments, stale
+// alternates or broken anchors. And the outline and the mark list sat on OPPOSITE SIDES of the
+// screen, so "which section is this mark in" meant reading left and right at once.
+section("uio-S-M04 the rail says condition, and shares its column with the marks");
+(function () {
+  var SD;
+  try { SD = require(path.join(ROOT, "src/source-doc.js")); } catch (e) { ok("require source-doc", false); return; }
+  var es = src("src/editor/source-stage.js");
+  var css = EDITOR_CSS;
+  var model = {
+    nodes: [{ key: "h1", type: "heading", level: 1, text: "Detection" }, { key: "p1", type: "paragraph", text: "abc" },
+            { key: "h2", type: "heading", level: 1, text: "Response" }, { key: "p2", type: "paragraph", text: "def" },
+            { key: "h3", type: "heading", level: 1, text: "Quiet" }],
+    marks: [{ id: "a", type: "comment", anchor: { nodeKey: "p1", start: 0, len: 1 } },
+            { id: "b", type: "alternate", stale: true, anchor: { nodeKey: "p1", start: 1, len: 1 } },
+            { id: "c", type: "restricted", anchor: { nodeKey: "p2", start: 0, len: 1 } }]
+  };
+
+  // --- the model ---
+  ok("marks attribute to the section they sit in", (function () {
+    var by = SD.marksByHeading(model);
+    return by.h1.total === 2 && by.h1.stale === 1 && by.h1.open === 1 && by.h2.restricted === 1;
+  })());
+  ok("a section with nothing gets no entry, so a row draws nothing", SD.marksByHeading(model).h3 === undefined);
+  // Resolution lives on the topic's comment threads, which the pure model does not own.
+  ok("a resolved comment stops counting as open", (function () {
+    var by = SD.marksByHeading(model, function (m) { return m.id === "a"; });
+    return by.h1.open === 0 && by.h1.total === 2;
+  })());
+  // One dot, and its tone is the most urgent thing there — a row cannot wear four dots without
+  // becoming a chart.
+  ok("the dot takes the most urgent tone: broken > stale > open > presence", (function () {
+    var t = function (st) { var d = SD.headingMarkDot(st); return d && d.tone; };
+    return t({ total: 3, broken: 1, stale: 1, open: 1 }) === "broken" &&
+      t({ total: 2, broken: 0, stale: 1, open: 1 }) === "stale" &&
+      t({ total: 1, broken: 0, stale: 0, open: 1 }) === "open" &&
+      t({ total: 1, broken: 0, stale: 0, open: 0 }) === "quiet";
+  })());
+  ok("its title names every condition, so the colour is never carrying the meaning alone",
+    SD.headingMarkDot(SD.marksByHeading(model).h1).title === "1 stale · 1 open comment");
+  ok("nothing to report draws nothing", SD.headingMarkDot(null) === null && SD.headingMarkDot({ total: 0 }) === null);
+
+  // --- the wiring ---
+  ok("the trailing slot carries the CONDITION, not a count of headings",
+    /trailing: markDot\(ch\.key\),/.test(es) && !/trailing: count \? U\.Badge\(\{ children: String\(count\)/.test(es));
+  ok("child rows carry it too", /depth: \(k\.level >= 3 \? 2 : 1\), trailing: markDot\(k\.key\)/.test(es));
+  ok("resolution comes from the topic's threads, not guessed in the pure model",
+    /SD\.marksByHeading\(model, function \(mk\) \{[\s\S]{0,240}sourceCommentsForMark\(master, mk\.id\)/.test(es));
+
+  // --- one column, two views ---
+  ok("the rail switches between Outline and Marks", /value: "outline", label: "Outline"/.test(es) &&
+    /value: "marks", label: "Marks " \+ \(navCounts\.all \|\| 0\)/.test(es));
+  ok("Outline is the default — it is how you move around a document", /var __sourceNavTab = "outline";/.test(es));
+  ok("the Marks tab states its count without being opened", /var navCounts = SD\.markCounts\(model\);/.test(es));
+  ok("the switch is the canonical SegmentedControl", /if \(U\.SegmentedControl\) \{\s*\n\s*var sw = h\("div", "source-nav__tabs"\);/.test(es));
+  ok("the scroll-spy is finally visible, as a 2px accent rail",
+    /\.source-toc__row\.is-current \{ box-shadow: inset 2px 0 0 var\(--accent\); \}/.test(css));
+  ok("each dot tone is a DS token, never a raw hue",
+    /\.source-toc__dot--broken \{ background: var\(--danger\); \}/.test(css) &&
+    /\.source-toc__dot--stale \{ background: var\(--warning\); \}/.test(css) &&
+    /\.source-toc__dot--open \{ background: var\(--mark-note\); \}/.test(css));
+})();
+
 section("uio-S-M03 a capped measure, and a wider one for reading");
 (function () {
   var es = src("src/editor/source-stage.js");
@@ -20368,8 +20436,14 @@ section("Source v2: one consolidated right panel (spec 2c section 3)");
   // uio-S-M02 put the passage's docked card ABOVE the document's list: the card answers "what is
   // attached to this passage", the list answers "what is attached to this document", and the
   // narrower question reads first. Marks is still the first SECTION.
-  ok("the info panel leads with the docked card, then the Marks section (the navigator)",
-    /var cardHost = h\("div", "source-card-dock"\); host\.appendChild\(cardHost\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(es));
+  // uio-S-M04 moved the mark LIST to the nav rail, beside the outline. This panel keeps what is
+  // about the passage you clicked (the docked card) plus history and provenance — and the list is
+  // NOT duplicated here, because "one place per question" is the rule the redesign runs on.
+  ok("the info panel leads with the docked card, and does not repeat the mark list",
+    /var cardHost = h\("div", "source-card-dock"\); host\.appendChild\(cardHost\);/.test(es) &&
+    // one CALL, in the rail — the definition is the other match
+    (es.match(/renderSourceMarksSection\(host, model\); return; \}/g) || []).length === 1 &&
+    es.indexOf("renderSourceMarksSection(host, ensureSourceDocModel(topic))") === -1);
   ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(es));
   ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(es));
   ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));

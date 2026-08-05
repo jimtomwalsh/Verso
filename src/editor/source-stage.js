@@ -248,6 +248,12 @@
     // Source + Comments; the on-demand overlay drawer is retired. One doc-bar control shows/hides it.
     var __sourceInfoOpen = true;     // the one consolidated right panel is shown (default) or hidden
     var __sourceMarksFilter = "all"; // the Marks-section filter: all | alternate | link | comment
+    // uio-S-M04 (SRC-10). The outline and the mark list were on OPPOSITE SIDES of the screen, so
+    // "which section is this mark in" meant reading left and right at once. They share the rail
+    // now, one at a time. Outline is the default: it is how you move around a document, and Marks
+    // is where you go when you have a review question. The tab is labelled with its live count, so
+    // you can see there is something to answer without switching to find out.
+    var __sourceNavTab = "outline";  // outline | marks
     var __sourceActiveMarkId = null; // the mark whose row is highlighted (selected in the panel/article)
     // uio-S-M02: ONE card at a time, docked. These three used to be independent, so an alternate
     // card and a where-used card could sit in the margin together answering different questions
@@ -612,6 +618,33 @@
       var U = window.VersoUI, SD = window.SourceDoc;
       if (!U || !U.TreeItem || !SD) return;
       var model = ensureSourceDocModel(master);
+      // uio-S-M04: one column, two views. The switch carries the mark count so the Marks tab
+      // states there is something to answer without being opened.
+      var navCounts = SD.markCounts(model);
+      if (U.SegmentedControl) {
+        var sw = h("div", "source-nav__tabs");
+        sw.appendChild(U.SegmentedControl({
+          size: "sm",
+          options: [{ value: "outline", label: "Outline" },
+                    { value: "marks", label: "Marks " + (navCounts.all || 0) }],
+          value: __sourceNavTab,
+          onChange: function (v) { __sourceNavTab = v; renderSourceTopicList(); }
+        }));
+        host.appendChild(sw);
+      }
+      if (__sourceNavTab === "marks") { renderSourceMarksSection(host, model); return; }
+      // uio-S-M04: what condition each section is in. Resolution lives on the topic's comment
+      // threads, so the predicate comes from here rather than the pure model.
+      var byHeading = SD.marksByHeading(model, function (mk) {
+        var thread = sourceCommentsForMark(master, mk.id);
+        return thread.length > 0 && thread.every(function (c) { return c.done; });
+      });
+      function markDot(key) {
+        var d = SD.headingMarkDot(byHeading[key]); if (!d) return null;
+        var dot = h("span", "source-toc__dot source-toc__dot--" + d.tone);
+        dot.title = d.title;
+        return dot;
+      }
       var q = __sourceSearchQuery || "";
       // Recompute the live hits (the count/cycle source of truth) and the set of headings that own
       // one: headingKeyForNode of a heading-text hit is that heading itself, so this covers both
@@ -652,7 +685,10 @@
         var chapterRow = U.TreeItem({
           label: ch.text || "Untitled chapter", depth: 0,
           expandable: count > 0, expanded: open,
-          trailing: count ? U.Badge({ children: String(count), tone: "neutral", size: "sm" }) : null,
+          // uio-S-M04: the trailing slot used to carry a count of HEADINGS — "rarely what a
+          // reviewer needs to know" (SRC-10). It carries the section's CONDITION now, and only
+          // when there is a condition to report; a chapter with nothing in it says nothing.
+          trailing: markDot(ch.key),
           onToggle: function () { __sourceOpenChapters[ch.key] = !open; renderSourceTopicList(); },
           onSelect: function () { scrollSourceToNode(ch.key); }
         });
@@ -662,7 +698,7 @@
         wireSourceChapterDrag(chapterRow, ch.key);
         host.appendChild(chapterRow); rendered++;
         if (open) kids.forEach(function (k) {
-          var kr = U.TreeItem({ label: k.text || "Untitled", depth: (k.level >= 3 ? 2 : 1), onSelect: function () { scrollSourceToNode(k.key); } });
+          var kr = U.TreeItem({ label: k.text || "Untitled", depth: (k.level >= 3 ? 2 : 1), trailing: markDot(k.key), onSelect: function () { scrollSourceToNode(k.key); } });
           kr.classList.add("source-toc__row");
           kr.setAttribute("data-toc-key", k.key);
           kr.title = k.text || "";
@@ -1120,7 +1156,11 @@
       // the same question. One host, at the top of the panel that already answers "what is attached
       // to this document", so the passage's card sits above the document's list.
       var cardHost = h("div", "source-card-dock"); host.appendChild(cardHost);
-      if (hasDoc) renderSourceMarksSection(host, ensureSourceDocModel(topic));
+      // uio-S-M04 (SRC-10) MOVED the mark list to the nav rail, beside the outline it belongs
+      // next to. It is not duplicated here: "one place per question" is the rule the whole Source
+      // redesign runs on, and a list in two columns is the failure it names. This panel keeps what
+      // is about the PASSAGE you clicked (the docked card) and the document's history and
+      // provenance; the rail answers "what is in this document, and where".
       // History
       renderHistoryTimeline(host, topic);
       // Legacy section topics have no marks tabs -- keep their standalone Linked-in list. Comments are
