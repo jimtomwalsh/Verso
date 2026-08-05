@@ -686,9 +686,14 @@
       saveRegistry(reg); // the alternate marks on the master persist via the lock's own commit
     }
     function finalizeSourceLock(topic, opts) {
+      opts = opts || {};
       flushSourceEditSession(topic, { prompt: opts.prompt });
       lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
       applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+      // uio-S-M01: leaving Edit for Read or Review lands the new mode HERE, once the lock has
+      // actually completed. The base-edit impact modal sits in the middle of this path, so a mode
+      // set before it would leave you reading a document the modal is still asking about.
+      if (typeof opts.onLocked === "function") opts.onLocked();
     }
     function revertSourceEditSession(topic) {
       var SD = window.SourceDoc;
@@ -714,7 +719,10 @@
         cancelLabel: "Cancel edit",
         extras: [forkBtn],
         onPrimary: function () { resolved = true; shell.modal.close(); finalizeSourceLock(topic, opts); sourceToast("Updated " + n + " linked place" + (n === 1 ? "" : "s") + "."); },
-        onClose: function () { if (resolved) return; revertSourceEditSession(topic); } // Cancel / Escape / scrim = revert
+        // Cancel / Escape / scrim = revert. uio-S-M01: a revert ALSO ends with the prose locked, so
+        // the mode has to land here too — otherwise the switch would still read Edit over a document
+        // that is no longer editable, which is the one thing the three modes exist to prevent.
+        onClose: function () { if (resolved) return; revertSourceEditSession(topic); if (typeof opts.onLocked === "function") opts.onLocked(); }
       });
       shell.body.appendChild(h("div", "insp-hint", "Update all — the linked copies re-resolve to your new wording. Keep as-is — freeze their current wording as an alternate, then your source moves on. Cancel — undo this edit."));
     }

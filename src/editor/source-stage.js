@@ -224,9 +224,23 @@
     // (SourceDoc JSON). Legacy section topics render the shipped article unchanged -- additive, no
     // regression. The live SourceDoc model is cached per topic so its owned undo stack survives
     // re-renders; edits persist back to topic.doc.
-    var __sourceUnlocked = false;    // base prose editable? (annotation is always live)
+    // uio-S-M01. THREE MODES, ONE SOURCE OF TRUTH. The stage used to carry two independent
+    // booleans -- prose-unlocked and marks-shown -- which between them describe four states, one of
+    // which (editing the prose with the marks hidden) is a trap: you edit around annotations you
+    // cannot see. Naming the three real states removes it by construction.
+    //
+    //   read    prose locked,   marks hidden   -- the document as it reads
+    //   review  prose locked,   marks live     -- annotate without touching the base
+    //   edit    prose UNLOCKED, marks live     -- change the signed-off prose
+    //
+    // The two booleans below are DERIVED from it and stay as the names ~40 call sites already use;
+    // nothing reads the mode directly except the switch, the chip and setSourceMode.
+    var SOURCE_MODES = ["read", "review", "edit"];
+    var SOURCE_MODE_KEY = "verso.sourceMode";
+    var __sourceMode = "review";     // a document opens locked with its marks live
+    var __sourceUnlocked = false;    // = __sourceMode === "edit"   (base prose editable)
     var __sourceEditSession = null;  // buffered prose-edit deltas during an unlock->lock cycle (History commit collapse)
-    var __sourceShowMarks = true;    // marks painted + status dots visible
+    var __sourceShowMarks = true;    // = __sourceMode !== "read"  (marks painted + status dots)
     var __sourceDocModel = null;     // the live SourceDoc model for __sourceDocModelTopicId
     var __sourceDocModelTopicId = null;
     var __sourceMarksEngine = null;  // the SourceMarks painting engine bound to the mounted article
@@ -267,8 +281,21 @@
     // list to manage, so the topic-management actions -- select / delete / move / reorder / needs-
     // review -- are gone (cleanup, spec 2c section 7.6). What remains: Markdown import always, plus
     // "New topic" only in the empty-Product onboarding path (no document yet).
+    // uio-S-M01: the mode persists per client, like every other view preference, but EDIT never
+    // survives a reload -- coming back to a document with its signed-off prose already unlocked is
+    // not a preference, it is a hazard. A stored "edit" restores as Review.
+    function restoreSourceMode() {
+      var v = null;
+      try { v = localStorage.getItem(SOURCE_MODE_KEY); } catch (e) {}
+      if (SOURCE_MODES.indexOf(v) === -1 || v === "edit") v = "review";
+      __sourceMode = v;
+      __sourceUnlocked = false;
+      __sourceShowMarks = v !== "read";
+    }
+    restoreSourceMode();
     function renderSourceToolbar() {
       if (typeof document === "undefined") return;
+      paintSourceMode();
       var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
       host.innerHTML = "";
       if (!window.VersoUI || !window.VersoUI.IconButton) return;
@@ -676,7 +703,10 @@
             __sourceActiveVariants = []; // a different topic may have a different variant set
             __sourceEditingCell = null; // don't carry an in-progress edit across topics
             __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind the doc model to the new topic
-            __sourceUnlocked = false; // every topic opens locked (base prose protected by default)
+            // uio-S-M01: switching document drops out of Edit, because "unlocked" is a decision
+            // about a particular document's prose and must not ride along to the next one. Review
+            // rather than Read, so a document you open still shows its annotations.
+            __sourceUnlocked = false; __sourceMode = "review"; __sourceShowMarks = true;
             renderSourceTopicList();
             renderSourceArticle();
           });
@@ -1578,6 +1608,73 @@
       finalizeSourceLock(topic, opts);
     }
 
+    // uio-S-M01. Switch mode. Every mode change goes through here, so the two derived booleans are
+    // never set from anywhere else and the impossible pairing cannot be reached.
+    //
+    // Leaving EDIT still runs the full lock path — the linked-passage impact warning, the History
+    // commit collapse — because "Read" and "Review" both mean the prose is locked, and locking is
+    // the same act however you asked for it. That is why this defers to setSourceUnlocked(false)
+    // and finishes in the callback rather than flipping the flag itself.
+    function setSourceMode(next, opts) {
+      opts = opts || {};
+      if (SOURCE_MODES.indexOf(next) === -1) return;
+      if (next === __sourceMode) { paintSourceMode(); return; }
+      var was = __sourceMode;
+      function land() {
+        __sourceMode = next;
+        __sourceShowMarks = next !== "read";
+        try { localStorage.setItem(SOURCE_MODE_KEY, next); } catch (e) {}
+        if (!__sourceShowMarks) closeSourceCommentThread();
+        applySourceLockState();
+        repaintSourceMarks();
+        var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+        if (topic) renderSourceCommentPins(topic);
+        refreshSourceSelBar(); updateSourceDocBar(); paintSourceMode();
+        // A mode change announces itself: three modes that look similar at a glance need to say
+        // which one you just entered, and the chip alone is easy to miss mid-scroll.
+        if (!opts.silent && was !== next) sourceToast(SOURCE_MODE_META[next].toast);
+      }
+      if (was === "edit") {
+        // setSourceUnlocked(false) may open the base-edit impact modal; it only lands the mode once
+        // the lock actually completes, so cancelling the modal leaves you in Edit where you were.
+        setSourceUnlocked(false, { onLocked: land });
+        return;
+      }
+      if (next === "edit") { setSourceUnlocked(true); land(); return; }
+      land();
+    }
+    // What each mode locks, said in the author's words. The chip is not decoration: three modes
+    // that differ only in what is editable need to name what is editable.
+    // `tone` is a Badge tone: the chip is a read-only status fact, and the spine draws those as the
+    // canonical quiet Badge, never a bespoke chip. Only EDIT takes a non-neutral tone, because only
+    // Edit puts signed-off prose at risk — a colour on all three would say nothing.
+    var SOURCE_MODE_META = {
+      read:   { label: "Read",   chip: "Reading — marks hidden",   tone: "neutral", toast: "Read mode. Marks are hidden and the prose is locked." },
+      review: { label: "Review", chip: "Prose locked · marks live", tone: "neutral", toast: "Review mode. Annotate freely; the base prose stays locked." },
+      edit:   { label: "Edit",   chip: "Prose unlocked",            tone: "danger",  toast: "Edit mode. The signed-off prose is now editable." }
+    };
+    // The switch + chip in the top bar (zone 2, beside the document's other live switches). Rebuilt
+    // rather than mutated, like every other zone-2 control.
+    function paintSourceMode() {
+      if (typeof document === "undefined") return;
+      var host = document.getElementById("source-mode-switch"); if (!host) return;
+      host.innerHTML = "";
+      if (!activeSourceMaster()) return;   // nothing open: no mode to be in
+      var U = window.VersoUI;
+      if (U && U.SegmentedControl) {
+        host.appendChild(U.SegmentedControl({
+          size: "sm",
+          options: SOURCE_MODES.map(function (m) { return { value: m, label: SOURCE_MODE_META[m].label }; }),
+          value: __sourceMode,
+          onChange: function (v) { setSourceMode(v); }
+        }));
+      }
+      var meta = SOURCE_MODE_META[__sourceMode];
+      host.appendChild(U && U.Badge
+        ? U.Badge({ tone: meta.tone, size: "sm", quiet: true, children: meta.chip })
+        : h("span", null, meta.chip));
+    }
+
     // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
     // The block the next insert lands AFTER (spec 2b §6 / handoff C2: "after the currently selected
     // block"): the object-selected node, else the block under the caret/selection, else the doc's last
@@ -1637,16 +1734,16 @@
     function buildSourceDocBar(topic) {
       var U = window.VersoUI;
       var bar = h("div", "source-docbar");
-      var lockBtn = U && U.IconButton ? U.IconButton({ icon: __sourceUnlocked ? "lock-open" : "lock", label: __sourceUnlocked ? "Lock the source prose" : "Unlock to edit the source prose", active: __sourceUnlocked, onClick: function () { setSourceUnlocked(!__sourceUnlocked); } }) : h("button", null, "Lock");
-      lockBtn.classList.add("source-docbar__btn");
-      var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
-      var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); if (!__sourceShowMarks) closeSourceCommentThread(); renderSourceCommentPins(topic); updateSourceDocBar(); } }) : h("button", null, "Marks");
-      marksBtn.classList.add("source-docbar__btn");
+      // uio-S-M01 RETIRED the lock toggle and the marks eye from this bar. Both were halves of the
+      // mode, expressed as two independent switches floating over the prose, and between them they
+      // could reach a state the three named modes make unreachable. The mode switch in the top bar
+      // is the one control now, and this bar keeps only what is genuinely an INSERT action plus the
+      // panel toggle -- verbs about the document, not statements about what it is.
       // ONE control for the ONE consolidated right panel (Marks + History + Source + Comments) --
       // replaces the old all-marks-drawer toggle that stacked a second surface over the info aside.
       var panelBtn = U && U.IconButton ? U.IconButton({ icon: "columns-2", label: __sourceInfoOpen ? "Hide the details panel" : "Show the details panel", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Panel");
       panelBtn.classList.add("source-docbar__btn");
-      bar.appendChild(lockLbl); bar.appendChild(lockBtn);
+
       // Insert image / table -- base-content mutations, so shown ONLY when unlocked (the same rule as
       // the selection bar's rich-text buttons). Each drops a new node after the current block.
       if (__sourceUnlocked && U && U.IconButton) {
@@ -1656,7 +1753,7 @@
         tblBtn.classList.add("source-docbar__btn");
         bar.appendChild(imgBtn); bar.appendChild(tblBtn);
       }
-      bar.appendChild(marksBtn); bar.appendChild(panelBtn);
+      bar.appendChild(panelBtn);
       bar.setAttribute("data-source-docbar", "1");
       return bar;
     }
@@ -2182,15 +2279,15 @@
     // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
     function revealSourceMark(m) {
       __sourceActiveMarkId = m.id;
-      // You clicked a mark (or an alternate) -- if marks are hidden, show them so the highlight
-      // you jumped to is actually visible (source-right-panel-consolidation part 4). Flip the flag
-      // before repaint (repaintSourceMarks reads it) and refresh pins + doc-bar toggle after.
+      // You clicked a mark (or an alternate) -- if marks are hidden, the highlight you jumped to
+      // would be invisible. uio-S-M01: hidden marks now MEAN Read mode, so this is a mode change
+      // and goes through setSourceMode rather than flipping the boolean behind the mode's back.
+      // It announces itself like any other, because you did just leave Read.
       var wasHidden = !__sourceShowMarks;
-      if (wasHidden) __sourceShowMarks = true;
+      if (wasHidden) setSourceMode("review");
       if (__sourceMarksEngine) { __sourceMarksEngine.setActive(m.id); repaintSourceMarks(); }
       if (!__sourceInfoOpen) { __sourceInfoOpen = true; applySourceInfoVisibility(); updateSourceDocBar(); }
       var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
-      if (wasHidden) { renderSourceCommentPins(topic); updateSourceDocBar(); }
       if (topic) renderSourceInfoPanel(topic);
       var host = document.getElementById("source-stage-article");
       var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
