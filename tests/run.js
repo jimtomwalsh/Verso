@@ -17239,6 +17239,127 @@ section("uio-F03 scope + inheritance model");
 // built to carry, so the thing under test is as much "it did NOT build a second inheritance path"
 // as it is the model itself. Titles are data, the rule keys are code, and rank is the whole
 // ordering — the "a rung may only tighten" guarantee rests on nothing else.
+// uio-S-C06: the Source-side surface of uio-F07. Restricted is the fourth mark type S-C01
+// deliberately left out until there was data behind it. The thing under test is that Source
+// STATES the classification rather than computing a second version of it, and that the fourth
+// type does not borrow a third type's colour or its code path.
+section("uio-S-C06 restricted mark + classification badges");
+(function () {
+  var SD, C;
+  try { SD = require(path.join(ROOT, "src/source-doc.js")); C = require(path.join(ROOT, "src/classification.js")); }
+  catch (e) { ok("require source-doc + classification", false); return; }
+  var st = src("src/editor/source-stage.js");
+  var sm = src("src/source-marks.js");
+  var css = EDITOR_CSS;
+  var tok = src("design-system/tokens/colors.css");
+
+  // --- the model ---
+  ok("restricted is a real mark type, not a flag on another one", (function () {
+    var m = SD.create ? null : null;
+    var model = { nodes: [{ key: "n1", type: "paragraph", text: "abc" }], marks: [] };
+    var mk = SD.addMark(model, { type: "restricted", anchor: { nodeKey: "n1", start: 0, len: 3 } });
+    return mk.type === "restricted" && SD.markMeta(mk).label === "Restricted" && SD.markMeta(mk).cls === "sd-mark-restricted";
+  })());
+  ok("an unknown type still falls back, so this is an addition and not a re-shuffle",
+    SD.markMeta({ type: "nope" }).label === "Mark");
+  ok("the counts carry a restricted key, so the segment cannot disagree with the list", (function () {
+    var c = SD.markCounts({ marks: [{ type: "restricted" }, { type: "restricted" }, { type: "comment" }] });
+    return c.restricted === 2 && c.comment === 1 && c.all === 3;
+  })());
+
+  // --- the view: Source SHAPES the answer, it does not resolve it ---
+  var levels = C.seedLevels();
+  function view(m, over, at) {
+    var res = { found: true, value: over || "class_internal", overridden: !!at, scopeLabel: at || "Product" };
+    return SD.restrictionView(m, res, levels, C.ruleSet(levels, res.value));
+  }
+  ok("the card states what applies and whose decision it was", (function () {
+    var v = view({ id: "m1", type: "restricted" });
+    return v.levelName === "Internal" && v.inherited === true && v.fromLabel === "Product";
+  })());
+  ok("a value set on the passage itself says so rather than staying silent", (function () {
+    var v = view({ id: "m1", type: "restricted" }, "class_restricted", "Block");
+    return v.inherited === false && v.levelName === "Restricted";
+  })());
+  ok("the rule set is four rows in uio-F07's own order", (function () {
+    var v = view({ id: "m1", type: "restricted" });
+    return v.rows.map(function (r) { return r.key; }).join(",") === C.RULE_KEYS.join(",");
+  })());
+  ok("the rows say what the rule MEANS, not what it is called", (function () {
+    var v = view({ id: "m1", type: "restricted" });
+    return v.rows[0].value === "Withheld from external packages" && v.rows[1].value === "Readable internally";
+  })());
+  ok("nothing resolving draws nothing, rather than a blank card",
+    SD.restrictionView({ id: "m", type: "restricted" }, { found: false }, levels, null) === null &&
+    SD.restrictionView({ id: "m", type: "comment" }, { found: true, value: "class_open" }, levels, {}) === null);
+
+  // --- sign-off is a REQUEST, never an approval ---
+  ok("a request records who and when, against the level it was asked about", (function () {
+    var m = { id: "m1", type: "restricted" };
+    var s = SD.requestSignoff(m, "someone", "2026-08-05", "class_internal");
+    return s.requestedBy === "someone" && s.requestedAt === "2026-08-05" && s.levelId === "class_internal";
+  })());
+  ok("re-requesting is a no-op — 'has anyone asked?' has one answer", (function () {
+    var m = { id: "m1", type: "restricted" };
+    SD.requestSignoff(m, "first", "2026-08-01");
+    SD.requestSignoff(m, "second", "2026-09-09");
+    return m.signoff.requestedBy === "first" && m.signoff.requestedAt === "2026-08-01";
+  })());
+  ok("nothing here can record an APPROVAL", !/approvedBy|approvedAt|signoff\.approved/.test(src("src/source-doc.js")));
+  ok("a blank requester is allowed, because a standalone install has no identity",
+    SD.requestSignoff({ id: "m", type: "restricted" }, "", "2026-08-05").requestedBy === "");
+
+  // --- what the Publish gate will read ---
+  ok("restrictedParts hands uio-F07's documentDisposition exactly what it takes", (function () {
+    var model = { marks: [{ id: "a", type: "restricted", classificationId: "class_internal" }, { id: "b", type: "comment" }] };
+    var parts = SD.restrictedParts(model, function (m) { return m.classificationId; });
+    var d = C.documentDisposition(levels, parts, "external");
+    return parts.length === 1 && parts[0].id === "a" && d.withheld.join(",") === "a";
+  })());
+
+  // --- it does not resolve a second time ---
+  ok("Source resolves through the SAME chain and resolver the inspector uses",
+    /E\.resolveScoped\(E\.classificationChain\(spec\), C\.CLASSIFICATION_PROP,\s*\n?\s*\{ at: "block", choose: C\.mostRestrictive\(levels\) \}\)/.test(st) &&
+    !/function resolveSourceClassification/.test(st));
+  ok("its rungs are the deployment default, the Product, the source document and the mark",
+    /product: \(pid && window\.ProductsStore\) \? window\.ProductsStore\[pid\] : null,\s*\n\s*doc: activeSourceMaster\(\),\s*\n\s*block: m/.test(st));
+
+  // --- the fourth type gets its OWN colour and its own code path ---
+  ok("restricted has its own DS tokens and takes the danger ink",
+    /--mark-restricted:\s*var\(--danger\);/.test(tok) && /--mark-restricted-wash:/.test(tok));
+  ok("the highlight and the row ink read those tokens",
+    /::highlight\(sd-restricted\) \{ background-color: var\(--mark-restricted-wash\)/.test(css) &&
+    /\.sd-mark-restricted \{ color: var\(--mark-restricted\); \}/.test(css));
+  ok("it has its own underline treatment, so the hue is not doing the work alone",
+    /::highlight\(sd-restricted\)[^}]*text-decoration: underline double/.test(css));
+  ok("the filter gained the fourth segment", /\{ key: "restricted", label: "Restricted"/.test(st));
+
+  // --- the figure badge ---
+  ok("a classified figure states it ON the figure", /function renderSourceClassBadges\(\)[\s\S]{0,900}?source-classbadge/.test(st));
+  ok("the badge rides the marks toggle, so turning marks off gives the document as it reads",
+    /if \(!__sourceShowMarks \|\| !__sourceDocModel\) return;/.test(st) &&
+    (st.match(/renderSourceClassBadges\(\);/g) || []).length >= 2);
+  ok("the badge is redrawn, not accumulated", /querySelectorAll\("\.source-classbadge"\), function \(b\) \{ b\.remove\(\); \}/.test(st));
+
+  // --- the card reuses the stage's one card anatomy ---
+  ok("the card is the alternate/where-used shell, not a third card",
+    /h\("aside", "source-altpanel source-restrictpanel"\)/.test(st) &&
+    /source-altpanel__head/.test(st) && /source-altpanel__close/.test(st));
+  ok("Escape closes it, on its own handler like its siblings",
+    /function onSourceRestrictPanelKey\(e\) \{ if \(e\.key === "Escape"\)/.test(st));
+  ok("Classification ROUTES to the panel that owns the value rather than offering a second one",
+    /revealSourceProductPanel\(\)/.test(st) && !/classificationRow\(/.test(st));
+  ok("Request sign-off is disabled when the level needs none, and once it has been asked",
+    /disabled: pending \|\| !rv\.signoffNeeded/.test(st));
+  ok("the requester is the same principal the account menu reads",
+    /var p = window\.__versoServerPrincipal;/.test(st) && /p\.kind === "user"/.test(st));
+  ok("marking a passage restricted takes no composer — there is nothing to write",
+    /if \(cmd === "restricted"\)[\s\S]{0,700}?SD\.addMark\(__sourceDocModel, \{ type: "restricted", anchor: ranchor \}\)/.test(st) &&
+    !/openSourceComposer\("restricted"/.test(st));
+  ok("marking the same passage twice reopens the mark it already has, not a second one",
+    /var rmk = existing \|\| SD\.addMark/.test(st));
+})();
+
 section("uio-F07 classification + export control");
 (function () {
   var C;
@@ -17249,8 +17370,9 @@ section("uio-F07 classification + export control");
   var L = C.seedLevels();
 
   // --- the model ---
-  ok("the rule keys are code, and there are exactly four of them",
-    C.RULE_KEYS.join(",") === "internal,external,editCapability,approverCapability");
+  // external leads: it is the consequential one, and every surface states them in this order.
+  ok("the rule keys are code, and there are exactly four of them, external first",
+    C.RULE_KEYS.join(",") === "external,internal,editCapability,approverCapability");
   ok("the seed is neutral and ranked, least restrictive first",
     L.map(function (l) { return l.rank; }).join(",") === "0,1,2" && L[0].id === C.DEFAULT_LEVEL_ID);
   // The one thing a deployment is guaranteed to change. A guard that reads a name protects nothing.
@@ -17550,12 +17672,19 @@ section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette"
   ok("the count + path ride the 11px chrome baseline, not the 10px badge size", /\.source-drawer__row-count \{[^}]*font-size: var\(--text-xs\)/.test(css) && /\.source-drawer__row-where \{[^}]*font-size: var\(--text-xs\)/.test(css));
 
   // --- SRC-07: a fixed palette, defined in the DS, with no hue doing two jobs ---
-  ok("the mark palette lives in the DS tokens", /--mark-link:\s*var\(--accent\);[\s\S]{0,420}--mark-focus-wash:/.test(tok));
+  ok("the mark palette lives in the DS tokens", /--mark-link:\s*var\(--accent\);[\s\S]*--mark-focus-wash:/.test(tok));
   ok("alternate is the components purple, note is warning yellow", /--mark-alt:\s*var\(--component\);/.test(tok) && /--mark-note:\s*var\(--yellow-500\);/.test(tok));
   ok("highlights read the palette tokens (no hardcoded mark hues)", /::highlight\(sd-link\) \{ background-color: var\(--mark-link-wash\)/.test(css) && /::highlight\(sd-alt\) \{ background-color: var\(--mark-alt-wash\)/.test(css) && /::highlight\(sd-comment\) \{ background-color: var\(--mark-note-wash\)/.test(css));
-  ok("the focus wash is hueless so it can't read as a fourth mark type", /::highlight\(sd-active\) \{ background-color: var\(--mark-focus-wash\); \}/.test(css));
+  // uio-S-C06 made restricted the fourth type, so the focus wash must not read as a FIFTH.
+  ok("the focus wash is hueless so it can't read as another mark type", /::highlight\(sd-active\) \{ background-color: var\(--mark-focus-wash\); \}/.test(css));
   ok("row type ink comes from the same palette", /\.sd-mark-link \{ color: var\(--mark-link\); \}/.test(css) && /\.sd-mark-alt \{ color: var\(--mark-alt\); \}/.test(css) && /\.sd-mark-comment \{ color: var\(--mark-note\); \}/.test(css));
-  ok("active/stale LAYER over the type tint instead of replacing it", /reg\[m\.type === "link" \? "link" : m\.type === "comment" \? "comment" : "alt"\]\.add\(r\);\s*\n\s*if \(m\.stale\) reg\.stale\.add\(r\);\s*\n\s*if \(m\.id === activeId\) reg\.active\.add\(r\);/.test(sm));
+  // The claim is that the TYPE tint paints first and stale/active go on top of it — not the exact
+  // expression that picks the set. uio-S-C06 replaced a chain of ternaries whose default sent an
+  // unrecognised type to the alternate set (so a fourth type would have painted purple) with a
+  // table, which is a better implementation of the same claim.
+  ok("active/stale LAYER over the type tint instead of replacing it", /var set = HL_FOR_TYPE\[m\.type\];\s*\n\s*if \(set\) reg\[set\]\.add\(r\);\s*\n\s*if \(m\.stale\) reg\.stale\.add\(r\);\s*\n\s*if \(m\.id === activeId\) reg\.active\.add\(r\);/.test(sm));
+  ok("the set is chosen from a TABLE, so an unmapped type paints nothing rather than something",
+    /HL_FOR_TYPE = \{ link: "link", comment: "comment", alternate: "alt", restricted: "restricted" \}/.test(sm));
 })();
 
 // uio-P-C02 (PUB-03): the Publish button is the accent primary only when it has rows to run;
