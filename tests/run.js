@@ -17286,6 +17286,39 @@ section("uio-F03 scope + inheritance model");
 // which is rarely what a reviewer needs; nothing said which sections carry open comments, stale
 // alternates or broken anchors. And the outline and the mark list sat on OPPOSITE SIDES of the
 // screen, so "which section is this mark in" meant reading left and right at once.
+// uio-S-M05 (SRC-12): "no downstream consequence is visible while writing". Source exists to
+// protect the documents downstream of it, and the one screen where the approved source is
+// maintained said nothing about how exposed it is.
+section("uio-S-M05 downstream consequence, visible while writing");
+(function () {
+  var es = src("src/editor/source-stage.js");
+  var css = EDITOR_CSS;
+
+  // VERIFIED FIRST, because half of this ticket already shipped: the variant chips above the
+  // article (SRC-12's second half, "so comparison mode is discoverable rather than remembered")
+  // are buildVariantPillsRow, built with spec 2d's variant bar. Only the readout was missing.
+  ok("the variant chips above the article already exist — this ticket did not rebuild them",
+    /function buildVariantPillsRow\(topic\)/.test(es) && /U\.ToggleChip\(\{\s*\n?\s*label: v,/.test(es) &&
+    /function buildSourceVariantBar\(topic\)/.test(es));
+
+  // It COMPUTES NOTHING. Both facts come from uio-F04's one resolver and are drawn by uio-F04's
+  // one drawer, so Source, Edit and Publish cannot state the same number differently.
+  ok("the readout reads F04's resolver rather than computing its own",
+    /var facts = E\.f04ProductFacts\(pid, master\.id\); if \(!facts\) return;/.test(es) &&
+    !/function sourceAlignment|rollUpAlignment/.test(es));
+  ok("and F04's one drawer draws it, so it is the canonical quiet Badge",
+    /var al = E\.f04Badge\(facts\.alignment, "srcexposure__badge"\);/.test(es) &&
+    /var behind = E\.f04Badge\(facts\.behind, "srcexposure__badge"\);/.test(es));
+  // A fact with nothing to say renders nothing: f04Badge returns null and this appends nothing.
+  // That is the silence-over-noise rule doing its job, not a special case written here.
+  ok("a fact with nothing to say renders nothing, with no special case here",
+    /if \(al\) host\.appendChild\(al\);/.test(es) && /if \(behind\) host\.appendChild\(behind\);/.test(es));
+  ok("it sits beside the mode, in the bar that already answers what you are working on",
+    /paintSourceExposure\(host\);/.test(es) && /function paintSourceExposure\(host\)/.test(es));
+  ok("nothing open, or no product, means nothing to be exposed about",
+    /var master = activeSourceMaster\(\); if \(!master\) return;\s*\n\s*var pid = activeSourceProductId\(\); if \(!pid\) return;/.test(es));
+})();
+
 section("uio-S-M04 the rail says condition, and shares its column with the marks");
 (function () {
   var SD;
