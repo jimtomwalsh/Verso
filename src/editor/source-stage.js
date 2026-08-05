@@ -249,8 +249,11 @@
     var __sourceInfoOpen = true;     // the one consolidated right panel is shown (default) or hidden
     var __sourceMarksFilter = "all"; // the Marks-section filter: all | alternate | link | comment
     var __sourceActiveMarkId = null; // the mark whose row is highlighted (selected in the panel/article)
-    var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
-    var __sourceWhereUsedMarkId = null; // the link mark shown in the pinned where-used ("Linked in N") panel
+    // uio-S-M02: ONE card at a time, docked. These three used to be independent, so an alternate
+    // card and a where-used card could sit in the margin together answering different questions
+    // about different spans. Opening one now closes the others by construction.
+    var __sourceAltPanelMarkId = null; // the alternate mark shown in the docked card
+    var __sourceWhereUsedMarkId = null; // the link mark shown in the docked card ("Linked in N")
     var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
     // Source v2 (unified-toc): the left rail is ONE document TOC of the active Product's unified
     // doc (chapters + nested headings) instead of a per-topic list. Chapter twirl state (a key set
@@ -1110,6 +1113,13 @@
       // standalone Source "Linked in" block and the duplicate comments accordion are retired here --
       // each mark type now appears in exactly one place (source-right-panel-consolidation parts 2-3).
       var hasDoc = topicHasDoc(topic);
+      // uio-S-M02 (SRC-03, Moderate). The audit's through-line: "what is attached to THIS PASSAGE —
+      // one card, docked, never over the prose". There used to be three cards, each floating in the
+      // right margin, each pinned to its own span, each tracking scroll independently. They could
+      // stack, they covered the reading column at narrow widths, and three surfaces were answering
+      // the same question. One host, at the top of the panel that already answers "what is attached
+      // to this document", so the passage's card sits above the document's list.
+      var cardHost = h("div", "source-card-dock"); host.appendChild(cardHost);
       if (hasDoc) renderSourceMarksSection(host, ensureSourceDocModel(topic));
       // History
       renderHistoryTimeline(host, topic);
@@ -1132,6 +1142,13 @@
           });
         }
       }
+      // uio-S-M02: this function REBUILDS the panel, which empties the dock with it. So whichever
+      // card is open re-renders into the fresh dock, the same way the pinned cards used to re-pin
+      // after an article re-render. Without this a card vanishes the moment anything touches the
+      // panel — which is most things, since revealing a mark re-renders it.
+      if (__sourceRestrictMarkId) renderSourceRestrictPanel(topic);
+      else if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic);
+      else if (__sourceAltPanelMarkId) renderSourceAltPanel(topic);
       applySourceInfoVisibility();
     }
     // Show or hide the one consolidated panel (its single doc-bar toggle). Hidden -> the reading
@@ -1825,8 +1842,22 @@
       __sourceAltPanelMarkId = markId;
       renderSourceAltPanel(topic);
     }
-    // Pin a gutter card (alternate panel / comment thread) to a mark's span: absolute within the
-    // scrolling article, so it tracks the span on scroll for free. Shared by both margin surfaces.
+    // uio-S-M02: opening a card closes the other two. One question at a time about one passage.
+    function claimSourceCard(which) {
+      if (which !== "alt") { __sourceAltPanelMarkId = null; var a = document.querySelector("[data-source-altpanel]"); if (a) a.remove(); }
+      if (which !== "where") { __sourceWhereUsedMarkId = null; var w = document.querySelector("[data-source-wherepanel]"); if (w) w.remove(); }
+      if (which !== "restrict") { __sourceRestrictMarkId = null; var r = document.querySelector("[data-source-restrictpanel]"); if (r) r.remove(); }
+    }
+    // Where a card mounts: the dock at the top of the consolidated panel. Falls back to nothing
+    // rather than to the article — a card must never go back to floating over the prose.
+    function sourceCardDock() {
+      var info = document.getElementById("source-stage-info");
+      return info ? info.querySelector(".source-card-dock") : null;
+    }
+    // Pin the COMMENT THREAD to its mark's span: absolute within the scrolling article, so it
+    // tracks the span on scroll for free. uio-S-M02 took the three mark cards off this — a comment
+    // thread is a conversation beside the line it is about, which is a different thing from a card
+    // stating what is attached to a passage.
     function pinCardToSpan(el, markId) {
       if (!el || !__sourceMarksEngine) return;
       var model = __sourceDocModel, SD = window.SourceDoc;
@@ -1835,7 +1866,6 @@
       var rect = __sourceMarksEngine.rectFor(m); if (!rect) return;
       el.style.top = Math.max(8, rect.top - host.getBoundingClientRect().top + host.scrollTop) + "px";
     }
-    function positionSourceAltPanel() { pinCardToSpan(document.querySelector("[data-source-altpanel]"), __sourceAltPanelMarkId); }
     // Where-used panel (spec 3.1): selecting a LINKED span opens a read-only card pinned in the
     // right gutter -- "Linked in N" with a breadcrumb pill per destination (Document > Section >
     // Location), clickable to navigate out to the course. Source only DISPLAYS links; creating them
@@ -1892,7 +1922,6 @@
       __sourceRestrictMarkId = markId;
       renderSourceRestrictPanel(topic);
     }
-    function positionSourceRestrictPanel() { pinCardToSpan(document.querySelector("[data-source-restrictpanel]"), __sourceRestrictMarkId); }
     // The card. It states what applies and whose decision it was, then the rule set as rows, then
     // two actions. It reuses the alternate/where-used card shell wholesale, so a third card in this
     // stage is not a third card anatomy.
@@ -1904,7 +1933,8 @@
       var m = SD.markById(model, __sourceRestrictMarkId);
       if (!m || m.type !== "restricted") { __sourceRestrictMarkId = null; return; }
       var rv = sourceRestrictionFor(m);
-      var host = document.getElementById("source-stage-article"); if (!host) return;
+      claimSourceCard("restrict");
+      var host = sourceCardDock(); if (!host) return;   // uio-S-M02: docked, never over the prose
       var panel = h("aside", "source-altpanel source-restrictpanel"); panel.setAttribute("data-source-restrictpanel", "1");
       panel.setAttribute("aria-label", "Classification");
       var head = h("div", "source-altpanel__head");
@@ -1964,7 +1994,7 @@
         }
       }
       host.appendChild(panel);
-      positionSourceRestrictPanel();
+
       document.addEventListener("keydown", onSourceRestrictPanelKey);
     }
     // Who asked. The identity layer may not be present at all (standalone, offline, signed out),
@@ -1994,7 +2024,6 @@
       __sourceWhereUsedMarkId = markId;
       renderSourceWherePanel(topic);
     }
-    function positionSourceWherePanel() { pinCardToSpan(document.querySelector("[data-source-wherepanel]"), __sourceWhereUsedMarkId); }
     function renderSourceWherePanel(topic) {
       var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
       document.removeEventListener("keydown", onSourceWherePanelKey);
@@ -2002,7 +2031,8 @@
       if (!model || !__sourceWhereUsedMarkId) return;
       var m = SD.markById(model, __sourceWhereUsedMarkId);
       if (!m || m.type !== "link") { __sourceWhereUsedMarkId = null; return; }
-      var host = document.getElementById("source-stage-article"); if (!host) return;
+      claimSourceCard("where");
+      var host = sourceCardDock(); if (!host) return;   // uio-S-M02: docked, never over the prose
       // 10: the REAL, live where-used -- every block/span in any document that links this passage,
       // walked from the registry (placement links carry no stored crumb list). Each row jumps to the
       // exact block in Edit; an alternate can be pushed to all or a chosen subset of these locations.
@@ -2040,7 +2070,7 @@
         }
       }
       host.appendChild(panel);
-      positionSourceWherePanel();
+
       document.addEventListener("keydown", onSourceWherePanelKey);
     }
     // 10: push a forked wording to the documents that link a passage. Sets altId on each chosen
@@ -2085,7 +2115,8 @@
       if (!model || !__sourceAltPanelMarkId) return;
       var m = SD.markById(model, __sourceAltPanelMarkId);
       if (!m || m.type !== "alternate") { __sourceAltPanelMarkId = null; return; }
-      var host = document.getElementById("source-stage-article"); if (!host) return;
+      claimSourceCard("alt");
+      var host = sourceCardDock(); if (!host) return;   // uio-S-M02: docked, never over the prose
       var status = SD.markStatus(m);
       var panel = h("aside", "source-altpanel"); panel.setAttribute("data-source-altpanel", "1");
       panel.setAttribute("aria-label", "Alternate rendition");
@@ -2135,7 +2166,7 @@
       actions.appendChild(del);
       panel.appendChild(actions);
       host.appendChild(panel);
-      positionSourceAltPanel();
+
       document.removeEventListener("keydown", onSourceAltPanelKey);
       document.addEventListener("keydown", onSourceAltPanelKey);
     }
@@ -2375,8 +2406,13 @@
             revealSourceMark(m);
             // a linked row opens the card that holds its destination list -- the instances the row
             // deliberately no longer enumerates (SRC-01).
+            // uio-S-M02: EVERY row opens its own card, in the one dock. Linked and restricted
+            // already did; an alternate row used to reveal the mark and leave you to find its card
+            // by clicking the span, which is the "three surfaces answering the same question"
+            // problem in miniature.
             if (m.type === "link" && topic) syncSourceWherePanel(topic, m.id);
-            if (m.type === "restricted") syncSourceRestrictPanel(topic, m.id);
+            else if (m.type === "restricted") syncSourceRestrictPanel(topic, m.id);
+            else if (m.type === "alternate" && topic) syncSourceAltPanel(topic, m.id);
           });
           listWrap.appendChild(row);
         });

@@ -204,12 +204,17 @@ In this mode:
   particular course needs to say a span differently, add an **alternate** — the same meaning, no new
   information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or
   "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
-  an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
-  showing the **base vs the alternate**, a status dot, and Edit / Delete.
+  an alternate opens its card at the top of the right panel, showing the **base vs the alternate**,
+  a status dot, and Edit / Delete.
+- **One card, in one place.** Whatever you click — an alternate, a linked passage, a restricted one
+  — its card opens at the **top of the right panel**, above the mark list. One card is open at a
+  time, so opening another replaces it, and no card ever sits on top of the prose you are reading.
+  (A comment thread still opens beside its paragraph: a conversation belongs next to the line it is
+  about.)
 - **Restricted: what a passage may leave in.** Marking a span restricted says its distribution is
   controlled. It doesn't ask you to choose anything — the classification comes down from the
   Product, or from whatever level is set closer to the passage (§4, Classification). Selecting a
-  restricted span opens a margin panel that names the level, says where it was inherited from, and
+  restricted span opens the card, which names the level, says where it was inherited from, and
   lists what that level actually means: whether it may leave the organisation, who may read it,
   who may edit it, and whether it needs sign-off. **Classification** takes you to the panel where
   the value is set. **Request sign-off** records that the passage is waiting on an approver — the

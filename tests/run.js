@@ -15135,7 +15135,15 @@ section("Product Rail: Source stage info panel");
   // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
   ok("the standalone renderSourceCommentsPanel accordion is retired (#163)", !/function renderSourceCommentsPanel\(/.test(e) && !/renderSourceCommentsPanel\(host, topic\)/.test(e));
   ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,320}\{ key: "comment", label: "Notes", title: "Comments"/.test(es));
-  ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(es));
+  // The claim is that the legacy branch ends at the Linked-in list with NO comments accordion —
+  // comments live in the Marks section's Comments tab and nowhere else. It used to be pinned to
+  // `applySourceInfoVisibility()` following immediately, which uio-S-M02's card re-render broke
+  // without touching what the claim is about.
+  ok("the legacy !hasDoc branch renders only the Linked-in list (no comments accordion)", (function () {
+    var branch = es.slice(es.indexOf("if (!hasDoc) {"), es.indexOf("applySourceInfoVisibility();\n    }\n    // Show or hide"));
+    return /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);/.test(branch) &&
+      branch.indexOf("renderSourceComments") === -1 && branch.indexOf("Comments\"") === -1;
+  })());
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(es));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(es));
   ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(es) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(SL));
@@ -15822,7 +15830,13 @@ section("uio-S-C03: source mark cards clamp to a reserved right lane");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var css = EDITOR_CSS;
-  ok("the article reserves a right lane when a where/alt/comment card is open (:has)", /\.source-stage__article:has\(\[data-source-wherepanel\]\)[\s\S]{0,220}data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css));
+  // uio-S-M02 took the where-used and alternate cards OFF the article — they dock in the panel now
+  // — so the lane is owed only to the comment thread, the one surface still pinned beside its line.
+  // The rule S-C03 established (a pinned surface never covers the passage) is unchanged; what it
+  // has to cover shrank.
+  ok("the article still reserves a right lane for the one surface pinned beside its line (:has)",
+    /\.source-stage__article:has\(\[data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css) &&
+    !/:has\(\[data-source-altpanel\]\)/.test(css) && !/:has\(\[data-source-wherepanel\]\)/.test(css));
   ok("the lane is desktop-scoped (min-width) so narrow screens aren't over-squeezed", /@media \(min-width: 1181px\) \{[\s\S]{0,260}padding-right: 312px/.test(css));
   // SRC-02: the where-used zero state reads as an invitation, and the title isn't the contradictory "Linked in 0".
   var e = src("src/editor.js");
@@ -17258,6 +17272,49 @@ section("uio-F03 scope + inheritance model");
 // with the annotations hidden. Naming the three real modes removes it by construction, and moves
 // the control off a pill floating over the prose into the top bar where a document's other live
 // switches already are.
+// uio-S-M02 (SRC-03, Moderate). The Source audit's through-line: "one place per question — what
+// is attached to THIS PASSAGE (one card, docked, never over the prose)". There were three cards,
+// each floating in the right margin, each pinned to its own span. They could stack, they covered
+// the reading column, and three surfaces were answering one question.
+section("uio-S-M02 one card, docked");
+(function () {
+  var es = src("src/editor/source-stage.js");
+  var css = EDITOR_CSS;
+
+  ok("there is ONE dock, and it is the first thing in the panel",
+    /var cardHost = h\("div", "source-card-dock"\); host\.appendChild\(cardHost\);/.test(es) &&
+    /function sourceCardDock\(\) \{[\s\S]{0,240}info\.querySelector\("\.source-card-dock"\)/.test(es));
+  // The dock has no fallback to the article ON PURPOSE: a card that cannot find its dock draws
+  // nothing, rather than falling back to floating over the prose.
+  ok("a card that cannot find the dock draws nothing rather than floating",
+    /var host = sourceCardDock\(\); if \(!host\) return;   \/\/ uio-S-M02: docked, never over the prose/.test(es) &&
+    (es.match(/var host = sourceCardDock\(\); if \(!host\) return;/g) || []).length === 3);
+  ok("all three cards mount there, and none mounts in the article",
+    /claimSourceCard\("restrict"\);/.test(es) && /claimSourceCard\("where"\);/.test(es) && /claimSourceCard\("alt"\);/.test(es));
+  ok("opening one card closes the other two, by construction",
+    /function claimSourceCard\(which\) \{[\s\S]{0,700}if \(which !== "alt"\)[\s\S]{0,240}if \(which !== "where"\)[\s\S]{0,240}if \(which !== "restrict"\)/.test(es));
+  // The three pin trackers are gone. A docked card has nothing to track.
+  ok("the per-card pin trackers are retired",
+    !/function positionSourceAltPanel/.test(es) && !/function positionSourceWherePanel/.test(es) &&
+    !/function positionSourceRestrictPanel/.test(es));
+  ok("pinCardToSpan survives for the comment thread, which IS a conversation beside its line",
+    /function pinCardToSpan\(el, markId\)/.test(es) && /uio-S-M02 took the three mark cards off this/.test(es));
+  // Rebuilding the panel empties the dock with it, so whichever card is open re-renders into the
+  // fresh one -- the same duty the pinned cards had to re-pin after an article re-render.
+  ok("the open card survives a panel rebuild",
+    /if \(__sourceRestrictMarkId\) renderSourceRestrictPanel\(topic\);\s*\n\s*else if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\);\s*\n\s*else if \(__sourceAltPanelMarkId\) renderSourceAltPanel\(topic\);/.test(es));
+  ok("every mark row opens its own card, whatever type it is",
+    /if \(m\.type === "link" && topic\) syncSourceWherePanel\(topic, m\.id\);\s*\n\s*else if \(m\.type === "restricted"\) syncSourceRestrictPanel\(topic, m\.id\);\s*\n\s*else if \(m\.type === "alternate" && topic\) syncSourceAltPanel\(topic, m\.id\);/.test(es));
+  // Docked means IN FLOW. The absolute position, the fixed width, the z-index and the drop shadow
+  // all existed to lift a card off the column it was covering.
+  ok("the card lost its float chrome", (function () {
+    var rule = css.slice(css.indexOf(".source-altpanel {"), css.indexOf("}", css.indexOf(".source-altpanel {")));
+    return rule.indexOf("position: absolute") === -1 && rule.indexOf("z-index") === -1 &&
+      rule.indexOf("box-shadow") === -1 && rule.indexOf("width: 244px") === -1;
+  })());
+  ok("an empty dock takes no space", /\.source-card-dock:empty \{ display: none; \}/.test(css));
+})();
+
 section("uio-S-M01 three modes, one source of truth");
 (function () {
   var es = src("src/editor/source-stage.js");
@@ -20268,7 +20325,11 @@ section("Source v2: one consolidated right panel (spec 2c section 3)");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
-  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /var hasDoc = topicHasDoc\(topic\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(es));
+  // uio-S-M02 put the passage's docked card ABOVE the document's list: the card answers "what is
+  // attached to this passage", the list answers "what is attached to this document", and the
+  // narrower question reads first. Marks is still the first SECTION.
+  ok("the info panel leads with the docked card, then the Marks section (the navigator)",
+    /var cardHost = h\("div", "source-card-dock"\); host\.appendChild\(cardHost\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(es));
   ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(es));
   ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(es));
   ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
@@ -20736,7 +20797,11 @@ section("Source rewrite: where-used panel (Epic 2b)");
   ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10; neutral at 0 — uio-S-C03)", /source-altpanel__title", used\.length \? \("Linked in " \+ used\.length\)/.test(es) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(es));
   ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(es));
   ok("a link with no live uses shows the invitation zero state (uio-S-C03)", /if \(!used\.length\) \{[\s\S]{0,320}Not used in a course yet — place this passage from the Edit stage/.test(es));
-  ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(es) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(es));
+  // uio-S-M02 took it OFF the span. It keeps the shared card chrome; what changed is where it
+  // mounts — the dock at the top of the panel, never floating over the reading column.
+  ok("the where-used panel reuses the shared card chrome and docks", /source-altpanel source-wherepanel/.test(es) &&
+    /claimSourceCard\("where"\);\s*\n\s*var host = sourceCardDock\(\); if \(!host\) return;/.test(es) &&
+    !/function positionSourceWherePanel/.test(es));
   ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(es) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(es));
   ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));
   ok("a 'link' glyph exists in the icon set for the panel", /"link":/.test(src("src/icons.js")));
