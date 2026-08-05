@@ -71,6 +71,7 @@
   var cache = b64ToText(window.__versoServerRegistryB64);
   var productsCache = b64ToText(window.__versoServerProductsB64);
   var libraryCache = b64ToText(window.__versoServerLibraryB64);
+  var classificationCache = b64ToText(window.__versoServerClassificationB64);
 
   // Signed out of a server we can nonetheless see (ticket 34). The bootstrap route is
   // served in FRONT of the identity boundary precisely so this state is knowable: it
@@ -246,6 +247,19 @@
       if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       productsCache = json;
       try { settle(putJson(apiUrl(base, "kv", "authoring.products"), json), "products"); }
+      catch (e) { return { ok: false, quota: false, error: e }; }
+      return { ok: true };
+    },
+
+    // --- classification levels (uio-F07) ---
+    // Deployment-wide and tiny, so the products posture exactly: inlined at page load, served
+    // synchronously from the cache, written as one blob. Shared on purpose -- two authors
+    // classifying the same content against different rule sets is the failure this prevents.
+    readClassification: function () { return classificationCache; },
+    writeClassification: function (json) {
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
+      classificationCache = json;
+      try { settle(putJson(apiUrl(base, "kv", "authoring.classification"), json), "classification"); }
       catch (e) { return { ok: false, quota: false, error: e }; }
       return { ok: true };
     },

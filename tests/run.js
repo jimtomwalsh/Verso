@@ -303,7 +303,7 @@ section("syntax");
  "src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/source-ownership.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/source-ownership.js", "src/classification.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -7421,7 +7421,7 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 44, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section, +1 = uio-F05 settings sheet sections)" },
+    sectionGroup: { base: 46, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section, +1 = uio-F05 settings sheet sections, +2 = uio-F07 Classification on the document and page panels)" },
     // uio-O-W2 (OVL-07) re-anchored subHeader 28 -> 0. The old floor sanctioned sub() as an
     // "in-section label"; the overlay audit found that is exactly the third header style, so a
     // group of rows is a section now and there is no bold heading without a chevron left.
@@ -7500,14 +7500,22 @@ section("#159/#163 frontend conformance gate");
   ok("gate trips (ENFORCED): adding a 5th \"Background\" label hard-fails the bgLabel check", !passes("bgLabel", addBg.bgLabel));
   var addStroke = measure(e + '\ncolorFieldFlat("Border colour", v, fn);');
   ok("gate trips (ENFORCED): re-introducing a \"Border\"/\"Outline\" label hard-fails the strokeLabel check", !passes("strokeLabel", addStroke.strokeLabel) && addStroke.strokeLabel === m.strokeLabel + 1);
-  var loseSection = measure(e.replace('sectionGroup("', 'XXXGroup("')); // remove the lone adopter
-  ok("gate trips (ENFORCED): removing a sectionGroup hard-fails the adoption floor", !passes("sectionGroup", loseSection.sectionGroup) && loseSection.sectionGroup === m.sectionGroup - 1);
-  // #163: PROVE the enforced adoption RATIO trips — flood the source with raw sub() headers
-  // so canonical adoption dilutes below the target, then assert the ratio check now fails.
-  var flood = ""; for (var _f = 0; _f < 40; _f++) flood += '\nx.appendChild(sub("Flood ' + _f + '"));';
+  // Both mutations below are sized FROM THE MEASUREMENT, not from a number typed once. A fixed
+  // number silently stops proving anything the moment adoption improves past it: uio-F07 added two
+  // sections and a "remove one" mutation landed above the floor, so the self-test passed the gate
+  // it was supposed to trip. Derived sizes cannot go stale.
+  var toFloor = m.sectionGroup - BASE.sectionGroup.base + 1;   // enough removals to land BELOW it
+  var loseSection = measure(e.split('sectionGroup("').join('XXXGroup("'));
+  ok("gate trips (ENFORCED): removing sectionGroups hard-fails the adoption floor (" + toFloor + " to breach)",
+    !passes("sectionGroup", loseSection.sectionGroup) && loseSection.sectionGroup === 0 && toFloor > 0);
+  // #163: PROVE the enforced adoption RATIO trips — flood the source with enough raw sub() headers
+  // to dilute canonical adoption below the target, then assert the ratio check now fails.
+  // sg / (sg + sub + disc) < target  =>  sub > sg/target - sg - disc.
+  var needSub = Math.ceil(m.sectionGroup / ADOPTION_TARGET - m.sectionGroup - m.disclosure) + 1;
+  var flood = ""; for (var _f = 0; _f < needSub; _f++) flood += '\nx.appendChild(sub("Flood ' + _f + '"));';
   var lowAdopt = measure(e + flood);
   var lowRatio = lowAdopt.sectionGroup / (lowAdopt.sectionGroup + lowAdopt.subHeader + lowAdopt.disclosure);
-  ok("gate trips (ENFORCED): adoption diluted below " + (ADOPTION_TARGET * 100) + "% hard-fails the taxonomy check", lowRatio < ADOPTION_TARGET);
+  ok("gate trips (ENFORCED): adoption diluted below " + (ADOPTION_TARGET * 100) + "% hard-fails the taxonomy check (" + needSub + " raw headers to breach)", lowRatio < ADOPTION_TARGET);
   // Allowlist mechanism exists (the single documented escape hatch past an enforcing check).
   ok("dialog allowlist mechanism present", Array.isArray(DIALOG_ALLOWLIST));
 })();
@@ -8621,8 +8629,10 @@ section("#22 section + page library masters");
   // 4. editor.js wiring: the page Inspector's Library section (mirrors renderLibraryInstanceBody).
   // arch-P3b-08: the page panel is inspector/scopes.js now.
   var SCOPES = src("src/editor/inspector/scopes.js");
+  // Bounded by the next function, not by a byte budget: a budget quietly drops the rows at the
+  // BOTTOM of the panel every time a section is added above them, and the Library section is last.
   var piStart = SCOPES.indexOf("function renderPageInspector(pi)");
-  var piBody = SCOPES.slice(piStart, piStart + 9600);
+  var piBody = SCOPES.slice(piStart, SCOPES.indexOf("function renderDocumentInspector()", piStart));
   ok("page Inspector reconciles on open (page-level reconcile fn, not the block-level one)", /var prec = reconcilePageOverrides\(pdef\.template\.blocks, page\.overrides \|\| \{\}\)/.test(piBody));
   ok("lists override fields via the canonical fieldRow control", /pfields\.forEach\(function \(f\) \{[\s\S]{0,200}fieldRow\(/.test(piBody));
   ok("offers Detach when linked, Save-to-library when not", /pDetachB\.disabled = !pdef/.test(piBody) && /pSaveB\.addEventListener\("click", function \(\) \{ savePageAsLibraryMaster\(pi\); \}\)/.test(piBody));
@@ -11835,8 +11845,17 @@ section("panel system v2 — layout engine");
   var SECTIONS = LOAD.load("src/editor/inspector/sections.js");
   var PANEL = SECTIONS.PanelLayout;
   ok("PanelLayout engine defined (localStorage, editor-chrome)", !!PANEL && typeof PANEL.load === "function");
-  ok("8-type taxonomy (Type first)",
-    PANEL.TAXONOMY.join(",") === "Type,Content,Appearance,Layout,Spacing,Behaviour,Light/Dark,Advanced");
+  // The claim is the ORDER and the two ends, not the count: a new canonical type is a DS change
+  // (uio-F07 added Classification) and pinning the arity turned that into a test failure rather
+  // than the deliberate act it is. Type leads because a selection's identity comes first, and the
+  // optional drawers stay last.
+  ok("the taxonomy leads with Type and ends with the optional drawers",
+    PANEL.TAXONOMY[0] === "Type" &&
+    PANEL.TAXONOMY.slice(-2).join(",") === "Light/Dark,Advanced" &&
+    PANEL.TAXONOMY.join(",").indexOf("Type,Content,Appearance,Layout,Spacing,Behaviour") === 0);
+  ok("uio-F07: Classification is a canonical type, after Behaviour, collapsed by default",
+    PANEL.TAXONOMY.indexOf("Classification") === PANEL.TAXONOMY.indexOf("Behaviour") + 1 &&
+    PANEL.isCollapsed("Classification") === true);
   ok("load() self-heals unknown + appends new taxonomy types", (function () {
     var win = LOAD.load("src/editor/inspector/sections.js");
     // a stored order carrying a retired type, and missing two current ones
@@ -12330,8 +12349,11 @@ section("UI kit seam");
 
   // Ticket 4 — renderContainerChrome (invariant Block-level chrome).
   ok("renderContainerChrome defined", /function renderContainerChrome\(host, decl, io, handlers\) \{/.test(ep));
-  ok("container row order is fixed + declared", /var CONTAINER_ROW_ORDER = \["align", "width", "padding", "gap", "fill", "stroke", "radius", "spacing", "actions"\]/.test(ep));
-  ok("chrome uses collapsed-optional fill/stroke + iconField dims + iconBtn actions", /optionalRow\(ap, "Fill"[\s\S]{0,1200}optionalRow\(ap, "Stroke"[\s\S]{0,2600}iconBtn\(a\[0\], a\[1\], a\[3\]\)/.test(ep));
+  ok("container row order is fixed + declared", /var CONTAINER_ROW_ORDER = \["align", "width", "padding", "gap", "fill", "stroke", "radius", "spacing", "classification", "actions"\]/.test(ep));
+  // ORDER, not spacing. The bounded gaps here were a byte budget in disguise: uio-F07 added a
+  // section between Stroke and Actions and the claim failed for the distance, not the order.
+  // CONTAINER_ROW_ORDER above is what actually pins the sequence.
+  ok("chrome uses collapsed-optional fill/stroke + iconField dims + iconBtn actions", /optionalRow\(ap, "Fill"[\s\S]*optionalRow\(ap, "Stroke"[\s\S]*iconBtn\(a\[0\], a\[1\], a\[3\]\)/.test(ep));
   ok("chrome hides omitted rows behind want() (never reorders)", /function want\(k, def\) \{ return decl\[k\] === undefined \? def : !!decl\[k\]; \}/.test(ep));
   ok("colourControl omits an empty label (single-line appearance)", /if \(labelText\) host\.appendChild\(h\("div", "insp-row__label insp-row__label--stacked", labelText\)\);/.test(ep));
   ok("__kit exposes renderContainerChrome", /window\.__kit[\s\S]{0,900}\brenderContainerChrome\s*:/.test(e));
@@ -17213,6 +17235,162 @@ section("uio-F03 scope + inheritance model");
 // everywhere else in the chrome, and text colour is never transparent, it inherits).
 // So: one more chain on F03's resolver, no second inheritance path, and the checkerboard is
 // handed back to the fields where empty really does mean no paint.
+// uio-F07 (2.2b): what content may leave, and to whom. The second axis uio-F03's resolver was
+// built to carry, so the thing under test is as much "it did NOT build a second inheritance path"
+// as it is the model itself. Titles are data, the rule keys are code, and rank is the whole
+// ordering — the "a rung may only tighten" guarantee rests on nothing else.
+section("uio-F07 classification + export control");
+(function () {
+  var C;
+  try { C = require(path.join(ROOT, "src/classification.js")); }
+  catch (e) { ok("require src/classification.js", false); return; }
+  var ep = src("src/editor/inspector/primitives.js");
+  var e = src("src/editor.js");
+  var L = C.seedLevels();
+
+  // --- the model ---
+  ok("the rule keys are code, and there are exactly four of them",
+    C.RULE_KEYS.join(",") === "internal,external,editCapability,approverCapability");
+  ok("the seed is neutral and ranked, least restrictive first",
+    L.map(function (l) { return l.rank; }).join(",") === "0,1,2" && L[0].id === C.DEFAULT_LEVEL_ID);
+  // The one thing a deployment is guaranteed to change. A guard that reads a name protects nothing.
+  ok("nothing branches on a level's NAME", (function () {
+    var body = src("src/classification.js").replace(/typeof l\.name === "string"/g, "");
+    return !/\.name\s*===?\s*"/.test(body);
+  })());
+
+  // --- normalising, and the two things it refuses ---
+  ok("a well-formed set passes through and sorts by rank", (function () {
+    var r = C.normalizeLevels([{ id: "b", rank: 2 }, { id: "a", rank: 1 }], "a");
+    return r.ok && r.levels.map(function (l) { return l.id; }).join(",") === "a,b";
+  })());
+  // Rank is the ONLY thing making one level more restrictive than another, so a tie would let a
+  // block swap between two levels and call it tightening. Refused, not repaired.
+  ok("two levels claiming one rank is refused, and the seed is kept", (function () {
+    var r = C.normalizeLevels([{ id: "a", rank: 1 }, { id: "b", rank: 1 }]);
+    return !r.ok && r.errors.join("").indexOf("rank 1 is claimed by") >= 0;
+  })());
+  ok("anything not explicitly cleared for release is withheld", (function () {
+    var r = C.normalizeLevels([{ id: "a", rank: 0 }, { id: "b", rank: 1, external: "maybe" }, { id: "c", rank: 2, external: "allowed" }], "a");
+    return r.levels[0].external === "withheld" && r.levels[1].external === "withheld" && r.levels[2].external === "allowed";
+  })());
+  ok("a default that is not in the set falls to the LEAST restrictive, and says so", (function () {
+    var r = C.normalizeLevels([{ id: "a", rank: 5 }, { id: "b", rank: 9 }], "gone");
+    return r.defaultLevelId === "a" && !r.ok && r.errors.join("").indexOf("gone") >= 0;
+  })());
+
+  // --- the ordering, which is the whole "may only tighten" guarantee ---
+  ok("the more restrictive value wins wherever it sits on the ladder", (function () {
+    var choose = C.mostRestrictive(L);
+    return choose("class_open", "class_restricted") === "class_restricted" &&
+      choose("class_restricted", "class_open") === "class_restricted";
+  })());
+  ok("a level the set does not define loses to one it does", (function () {
+    var choose = C.mostRestrictive(L);
+    return choose("class_internal", "made_up") === "class_internal" && choose("made_up", "class_internal") === "class_internal";
+  })());
+  ok("a rung may tighten and may not loosen", C.isTightening(L, "class_open", "class_restricted") &&
+    C.isTightening(L, "class_internal", "class_internal") && !C.isTightening(L, "class_restricted", "class_internal"));
+  ok("the picker offers exactly what the rule allows", (function () {
+    return C.allowedOverrides(L, "class_internal").map(function (l) { return l.id; }).join(",") === "class_internal,class_restricted";
+  })());
+
+  // --- the resolver ---
+  ok("external readability is decided by `external` alone", C.canAudienceSee(L, "class_open", "external") &&
+    !C.canAudienceSee(L, "class_internal", "external") && !C.canAudienceSee(L, "class_restricted", "external"));
+  ok("an internal audience is in the population, or the population names any-internal",
+    C.canAudienceSee(L, "class_internal", C.AUDIENCE_ANY_INTERNAL) && !C.canAudienceSee(L, "class_restricted", C.AUDIENCE_ANY_INTERNAL));
+  ok("a named population admits its own audience and nobody else", (function () {
+    var lv = C.normalizeLevels([{ id: "x", rank: 0, internal: ["team:legal"] }], "x").levels;
+    return C.canAudienceSee(lv, "x", "team:legal") && !C.canAudienceSee(lv, "x", "team:other");
+  })());
+  // Content whose classification the deployment no longer defines is WITHHELD, not shown. The
+  // safe direction is the only one available when the rule set has gone missing.
+  ok("an unknown level is readable by nobody", !C.canAudienceSee(L, "gone", "external") &&
+    !C.canAudienceSee(L, "gone", C.AUDIENCE_ANY_INTERNAL));
+
+  // --- a whole document ---
+  ok("a document reports what goes, what is held back, and its high-water mark", (function () {
+    var d = C.documentDisposition(L, [
+      { id: "b1", levelId: "class_open" }, { id: "b2", levelId: "class_internal" }, { id: "b3", levelId: "class_open" }
+    ], "external");
+    return d.visible.join(",") === "b1,b3" && d.withheld.join(",") === "b2" &&
+      !d.releasableWhole && d.releasableAtAll && d.mostRestrictiveLevelId === "class_internal";
+  })());
+  ok("a document held back entirely is a different answer from one with holes", (function () {
+    var all = C.documentDisposition(L, [{ id: "b1", levelId: "class_restricted" }], "external");
+    return !all.releasableWhole && !all.releasableAtAll;
+  })());
+  ok("an empty document is releasable — there is nothing in it to withhold", (function () {
+    var none = C.documentDisposition(L, [], "external");
+    return none.releasableWhole && none.releasableAtAll;
+  })());
+
+  // --- it rides F03's ladder, and did not build a second one ---
+  ok("the chain is a chain builder beside the others, not a new resolver",
+    /function classificationChain\(spec\)[\s\S]{0,1400}?return scopeChain\(\[/.test(ep) &&
+    !/function resolve[A-Z]\w*Classification/.test(ep) && !/function resolveClassification/.test(ep));
+  ok("its five rungs are the spine's, in order", (function () {
+    var body = ep.slice(ep.indexOf("function classificationChain(spec)"), ep.indexOf("/* @ec03-start */"));
+    return /scope: "system"/.test(body) && /rung\("product"/.test(body) &&
+      /rung\("course"/.test(body) && /rung\("page"/.test(body) && /rung\("block"/.test(body);
+  })());
+  ok("`mostRestrictive` is passed as the resolver's choose(), so a looser value never applies",
+    /resolveScoped\(chain, PROP, \{ at: at, choose: C\.mostRestrictive\(levels\) \}\)/.test(ep));
+  ok("ONE row builder, so four rungs cannot phrase the same fact differently", (function () {
+    var sites = (src("src/editor/inspector/scopes.js") + src("src/editor/product-panel.js") +
+      src("src/editor/hotspots-editor.js") + ep).match(/classificationRow\(/g) || [];
+    return sites.length >= 5 && /function classificationRow\(spec, opts\)/.test(ep);
+  })());
+  ok("all four rungs are wired: product, document, page, block", (function () {
+    var pp = src("src/editor/product-panel.js"), sc = src("src/editor/inspector/scopes.js"), he = src("src/editor/hotspots-editor.js");
+    return /at: "product"/.test(pp) && /at: "course"/.test(sc) && /at: "page"/.test(sc) && /at: "block"/.test(ep) &&
+      /product\.classificationId = id/.test(pp) && /E\.doc\.classificationId = id/.test(sc) &&
+      /page\.classificationId = id/.test(sc) && /block\.classificationId = id/.test(he);
+  })());
+  ok("the row states the rule set, not just the level's name",
+    /rules\.external === C\.EXTERNAL_ALLOWED \? "May leave the organisation\." : "Withheld from external packages\."/.test(ep));
+
+  // --- the levels are DATA, through the same facet seam as everything else ---
+  var STOR = src("src/editor/storage.js");
+  ok("classification is a storage FACET, not a constant", /classification: "authoring\.classification"/.test(STOR) &&
+    /classification: \{ key: KEYS\.classification, read: "readClassification", write: "writeClassification" \}/.test(STOR));
+  ok("a stored set is normalised on the way out, and a broken one keeps the seed",
+    /var norm = C\.normalizeLevels\(raw\.levels, raw\.defaultLevelId\);/.test(STOR) &&
+    /seeded: !norm\.ok/.test(STOR));
+  // The library facet already shipped this bug once: store-http implemented the registry only, so
+  // every library read fell through to a seeded demo and every save vanished, with a green suite.
+  ok("the server posture implements the facet, so a shared deployment shares its rule set",
+    /readClassification: function \(\) \{ return classificationCache; \}/.test(src("src/store-http.js")) &&
+    /data\.classification = store\.getKv\("authoring\.classification"\)/.test(src("server/verso-server.js")) &&
+    /window\.__versoServerClassificationB64/.test(src("src/store-http.js")));
+  ok("storage wires the model explicitly rather than reading it off window at load", /function use\(mod\) \{ classification = mod \|\| classification; return VersoStorage; \}/.test(STOR));
+  ok("one config is read at boot, so no two stages resolve against different rule sets",
+    /var ClassificationConfig = Store\.loadClassification\(\);/.test(e) && (e.match(/Store\.loadClassification\(\)/g) || []).length === 1);
+  ok("classification.js loads before the storage module that normalises through it", (function () {
+    var html = src("index.html");   // the TAGS, not a comment that happens to name the same file
+    return html.indexOf('<script src="src/classification.js">') > -1 &&
+      html.indexOf('<script src="src/classification.js">') < html.indexOf('<script src="src/editor/storage.js">');
+  })());
+  // The DS is the SoT for the canonical section set. A type that exists only in the code is the
+  // drift the front-end authority exists to stop, so the readme names it and the order.
+  ok("the DS records Classification as a canonical type, and where it sits", (function () {
+    var ds = src("design-system/readme.md").replace(/\s+/g, " ");
+    return ds.indexOf("Type · Content · Appearance · Layout · Spacing · Behaviour · Classification · Light/Dark · Advanced") >= 0 &&
+      ds.indexOf("`Classification`, `Light/Dark` and `Advanced` open COLLAPSED") >= 0;
+  })());
+  ok("the DS states that a second axis rides the ladder and never builds one", (function () {
+    var ds = src("design-system/readme.md").replace(/\s+/g, " ");
+    return ds.indexOf("A second, parallel inheritance path is a hard fail.") >= 0 &&
+      ds.indexOf("is exactly a `choose()`") >= 0;
+  })());
+  // Public repo: the CATEGORIES are customer data. Neutral generic terms only.
+  ok("the seeded vocabulary is neutral", (function () {
+    var names = L.map(function (l) { return l.name; }).join(",");
+    return names === "Open,Internal,Restricted";
+  })());
+})();
+
 section("uio-E-C03 resolved inherited values");
 (function () {
   var ep = src("src/editor/inspector/primitives.js");

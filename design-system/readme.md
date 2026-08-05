@@ -201,6 +201,29 @@ Concrete anatomy in the app: `--override-dot` sizes the one accent dot (rows and
 alike), the inherited scope name reads in `--text-tertiary` at `--text-xs`, and **Reset is a
 live edit, not a commit control** — it writes straight away and Undo takes it back.
 
+A rung may NAME ITSELF. "Theme" and "Style “Lead”" occupy the system and course rungs of the text
+ladder and are called neither on screen, so a rung's own label wins over the ladder's. Rungs that
+supply no label read as System · Product · Course · Page · Block, unchanged.
+
+**The canonical section types**, in the order a panel emits them:
+
+    Type · Content · Appearance · Layout · Spacing · Behaviour · Classification · Light/Dark · Advanced
+
+Type leads because a selection's identity comes first. `Classification` follows Behaviour: it is
+about the content's disposition rather than how it looks or acts, and filing it under Advanced
+would bury a governance fact in a drawer named for developer settings. `Classification`,
+`Light/Dark` and `Advanced` open COLLAPSED — most selections simply inherit, and a section that
+always shows an inherited value is the pre-expanded wall this spine forbids. Actions is pinned
+last, in the footer, and is not in this list. **Adding a type is a change HERE first**, then in
+the code that reads it.
+
+**Second axes ride the ladder; they never build one.** An export-control classification, an
+approval state, anything else that inherits, supplies a property key and a scope chain whose
+rungs read its own storage — and, where the deepest rung must not simply win, a `choose()`. A
+classification's "a block may only tighten what it inherits, never loosen it" is exactly a
+`choose()`, which is why the rule holds in resolution and not only in the picker that hides the
+looser options. A second, parallel inheritance path is a hard fail.
+
 ### Cross-stage facts
 
 Some facts follow a document across Source, Edit and Publish — how much of it comes from approved

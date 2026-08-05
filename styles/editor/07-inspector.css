@@ -531,6 +531,10 @@ details[open] .caret {
 /* UNTAGGED IS A PLAIN FACT, NOT AN ERROR: no red, no alarm glyph. Shared material is something
    people make on purpose. */
 .prodpanel__untagged { font-size: var(--text-xs, 11px); line-height: 1.5; color: var(--text-secondary); }
+/* uio-F07: the classification row is the SAME shared row (.insp-row) every other surface uses;
+   this only rejoins it to the panel's own rhythm, which is a stack of label/value lines. */
+.prodpanel__classification { margin-top: var(--space-2, 4px); }
+.prodpanel__classification .insp-hint { margin-top: var(--space-1, 2px); }
 /* The release line is the only coloured thing in the panel, because it is the only thing that is
    ever news. */
 .prodpanel__release { margin-top: var(--space-2, 4px); font-size: var(--text-xs, 11px); }

@@ -49,4 +49,28 @@ plus a small note at the end of the row telling you where that value came from:
   rather than inherited. It is the quick way to spot a block or page that has drifted from the
   course.
 
+### Classification
+
+Classification says who may read a piece of content and whether it may leave your organisation at
+all. It follows the same five levels as everything else, so you set it once on a **Product** and
+every document, page and block under it inherits.
+
+Set it in the **Classification** section — on the Product panel, or on a document, page or block
+in the Inspector. The section is folded by default, because most content simply inherits; a blue
+dot on the header tells you when something below has been classified in its own right.
+
+Under the picker Verso states what the level actually means: whether it may leave the
+organisation, who may read it internally, and whether it needs sign-off before release.
+
+**You can tighten, never loosen.** A block inside a document classified as Internal may be made
+Restricted, but it cannot be made Open — the picker does not offer the looser levels, and a
+looser value would not apply even if one arrived from an import. **Reset** puts a block back to
+whatever it inherits.
+
+Your levels are set up for your organisation. Verso ships three neutral ones — Open, Internal and
+Restricted — until yours replace them.
+
+> **Note.** Classification is the label. Acting on it when you publish — holding a Restricted
+> block out of a package that goes outside — is not built yet.
+
 ---

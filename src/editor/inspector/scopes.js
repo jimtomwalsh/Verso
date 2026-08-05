@@ -35,6 +35,7 @@
       "selectRow", "moveToChapter", "promptModal", "createChapter", "resolveScoped", "gateScopeChain",
       "switchRow", "onOffLabel", "resolveComponentDef", "reconcilePageOverrides", "collectPageOverridableTextFields", "fieldRow",
       "clone", "deletePage", "applyCanvasBg", "openSettingsModal", "setInspector", "TEXT_STYLE_TYPES",
+      "classificationRow", "classificationSpec", "classificationLevels", "productOf",
       "CELL_GEO_LABEL", "BG_DEFAULT", "detachPageLibraryInstance", "savePageAsLibraryMaster", "setCurrentPage", "inspector",
       "doc", "currentPage", "multiSel", "registry", "canvasBg"
     );
@@ -207,6 +208,15 @@
         } finally { E.setInspector(_i); }
       });
 
+      // uio-F07: a page may tighten what its document classifies, never loosen it.
+      sectionGroup("Classification", "Classification", function (secBody) {
+        E.classificationRow(E.classificationSpec({ product: E.productOf(E.doc), doc: E.doc, page: page }), {
+          at: "page", host: secBody, levels: E.classificationLevels(),
+          write: function (id) { page.classificationId = id; mount(); setSelection("page", pi); },
+          clear: function () { delete page.classificationId; mount(); setSelection("page", pi); }
+        });
+      });
+
       sectionGroup("Layout", "Side padding (%)", function (secBody) {
         var _i = E.inspector; E.setInspector(secBody);
         try {
@@ -330,6 +340,15 @@
             });
           }
         } finally { E.setInspector(_i); }
+      });
+      // uio-F07: the document's own classification, inheriting from its Product (or the deployment
+      // default when it is untagged). The same row every other rung renders.
+      sectionGroup("Classification", "Classification", function (secBody) {
+        E.classificationRow(E.classificationSpec({ product: E.productOf(E.doc), doc: E.doc }), {
+          at: "course", host: secBody, levels: E.classificationLevels(),
+          write: function (id) { E.doc.classificationId = id; mount(); setSelection(null); },
+          clear: function () { delete E.doc.classificationId; mount(); setSelection(null); }
+        });
       });
       sectionGroup("Appearance", "Canvas", function (secBody) {
         var _i = E.inspector; E.setInspector(secBody);
