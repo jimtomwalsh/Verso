@@ -51,6 +51,16 @@ if (major < 22 || (major === 22 && minor < 5)) {
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// A port already in use is the likeliest way to run this wrongly, and the likeliest CAUSE is
+// Verso.app -- which binds 8123 and reuses whatever is already there. Saying so beats an
+// EADDRINUSE stack trace, because the fix is "quit the app", not "read node:net".
+function portInUse(port, which) {
+  fail("Port " + port + " (" + which + ") is already in use.\n" +
+       "  If Verso.app is open, quit it first -- it binds 8123 and will otherwise talk to THIS\n" +
+       "  server instead of its own, which makes it look signed out.\n" +
+       "  Or pick other ports:  VERSO_APP_PORT=8300 VERSO_API_PORT=8301 ./serve-server.command");
+}
+
 var startServer = require(path.join(ROOT, "server/verso-server.js")).startServer;
 var api = startServer({
   mode: "server",
@@ -66,6 +76,7 @@ var api = startServer({
 }, function () {
   startAppServer();
 });
+api.on("error", function (e) { if (e && e.code === "EADDRINUSE") portInUse(API_PORT, "backend"); throw e; });
 
 function serveStatic(req, res, urlPath) {
   var rel = decodeURIComponent(urlPath === "/" ? "/index.html" : urlPath);
@@ -111,6 +122,7 @@ function startAppServer() {
   });
 
   app.on("clientError", function (e, sock) { try { sock.destroy(); } catch (_) {} });
+  app.on("error", function (e) { if (e && e.code === "EADDRINUSE") portInUse(APP_PORT, "app"); throw e; });
   app.listen(APP_PORT, "127.0.0.1", function () {
     var url = "http://localhost:" + APP_PORT + "/index.html";
     console.log("");
