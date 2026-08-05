@@ -4823,6 +4823,9 @@
   var onOffLabel = VE.bind("onOffLabel");
   var blockBoxChain = VE.bind("blockBoxChain");
   var gateScopeChain = VE.bind("gateScopeChain");
+  var textStyleChain = VE.bind("textStyleChain");
+  var measureTextBaseline = VE.bind("measureTextBaseline");
+  var weightLabel = VE.bind("weightLabel");
   var settingsRow = VE.bind("settingsRow");
   var crossRefRow = VE.bind("crossRefRow");
   var fieldRow = VE.bind("fieldRow");
@@ -6541,6 +6544,9 @@
     headerFooterSummary: headerFooterSummary,
     onOffLabel: onOffLabel,
     gateScopeChain: gateScopeChain,
+    textStyleChain: textStyleChain,
+    measureTextBaseline: measureTextBaseline,
+    weightLabel: weightLabel,
     resolveScoped: resolveScoped,
     subDisclosure: subDisclosure,
     crossRefRow: crossRefRow,

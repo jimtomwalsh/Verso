@@ -79,6 +79,9 @@
 .insp-doc-tool { display: flex; align-items: center; height: 26px; padding: 0 2px; color: var(--text-secondary); }
 .insp-doc-tool .insp-row__label { flex: 1 1 auto; font-size: var(--text-sm); color: var(--text-primary); }
 .insp-row__label--stacked { display: block; flex: none; margin: 12px 0 5px; }
+/* uio-E-C03: a WIDE control stacks its label, so the inheritance tail rides that label line
+   (FieldRow.prompt.md — same row family, the label just sits above the control). */
+.insp-label-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .insp-hint {
   margin-top: 14px; font-size: var(--text-2xs); line-height: 1.45; color: var(--text-tertiary);
   padding-top: 10px; border-top: 1px solid var(--border-subtle);
@@ -227,6 +230,12 @@
 .prop-select:hover { border-color: var(--border-strong); }
 .prop-select:focus { outline: none; border-color: var(--accent); }
 .prop-select option { background: var(--surface-input); color: var(--text-primary); }
+/* uio-E-C03: ONE modifier for any control showing a RESOLVED inherited value rather than its
+   own. Tertiary ink is the spine's one word for "this came from somewhere above" — the same ink
+   .insp-row__scope uses. It has to name every select family it can land on: the canonical
+   dropdown is the DS's .vds-select, the font picker is a .prop-select button. */
+.is-inherited, select.is-inherited, .prop-select.is-inherited, .vds-select.is-inherited { color: var(--text-tertiary); }
+.prop-field.is-inherited .prop-field__input::placeholder { color: var(--text-tertiary); opacity: 1; }
 
 /* font picker: a button + popup listbox, each option rendered in its own font. */
 .font-picker { position: relative; width: 100%; }
@@ -324,8 +333,18 @@
   width: 26px; height: 22px; border-radius: 5px; border: 1px solid var(--border-strong); cursor: pointer; flex: 0 0 auto;
   background: #888;
 }
+/* Checkerboard = genuinely no paint. uio-E-C03 reserves it for that: a field that merely
+   inherits paints the inherited colour and wears the dot below instead. */
 .color-field__swatch--empty { background: repeating-conic-gradient(#5a5a5a 0% 25%, #444 0% 50%) 50% / 8px 8px; }
+.color-field__swatch--inherited { position: relative; border-style: dashed; }
+.color-field__swatch--inherited::after {
+  content: ""; position: absolute; right: 2px; bottom: 2px;
+  width: var(--override-dot, 4px); height: var(--override-dot, 4px);
+  border-radius: var(--radius-full, 50%); background: var(--text-tertiary);
+  box-shadow: 0 0 0 1px var(--surface-panel);
+}
 .color-field__val { font-size: var(--text-sm); color: var(--text-secondary); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.color-field__val--inherited { color: var(--text-tertiary); }
 .color-field-pop {
   /* Above the settings modal overlay (z 9999) so the Theme panel's colour/button
      pickers are clickable, not trapped behind the modal (#83). */
