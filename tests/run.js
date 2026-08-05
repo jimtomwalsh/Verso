@@ -8118,7 +8118,7 @@ section("theme-aware style colour");
   // token list, not the dialog's. The dialog mounts typeCluster (inspector/primitives.js), whose
   // Colour row is colorField (color.js), and the token pane is where the options actually are.
   ok("Edit-style dialog offers theme-token options", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME)
-    && /colorField\("Colour", tcVal\(\)/.test(src("src/editor/inspector/primitives.js"))
+    && /colorField\(null, tcVal\(\)/.test(src("src/editor/inspector/primitives.js"))
     && /COLOR_FIELD_TOKENS = \[\["Ink", "ink"\]/.test(src("src/editor/color.js")));
   ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(THEME));
   ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(src("src/editor/inspector/primitives.js")) && /"First-line indent"/.test(src("src/editor/inspector/primitives.js")));   // arch-P3b-07prim2: both are typeCluster rows
@@ -10119,7 +10119,7 @@ section("font preview picker");
   var r = src("src/render.js"), e = src("src/editor.js"), css = EDITOR_CSS;
   ok("render exposes fontStackFor (known stack or quoted family)", /window\.fontStackFor = function \(name\) \{ return name \? \(FONT_STACKS\[name\] \|\| \("'" \+ name \+ "', sans-serif"\)\) : ""; \}/.test(r));
   // the picker renders each option in its own font + exposes .value + fires change (attachFontWarn stays compatible)
-  ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
+  ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick[^)]*\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
   ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(FONTS) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(FONTS));
   // all 3 plain <select> font pickers replaced by the shared component
   // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
@@ -11978,7 +11978,7 @@ section("panel system v2 — layout engine");
   ok("colorField has eyedropper (reuses eyeDropperAvailable/pickScreenColor)", /if \(eyeDropperAvailable\(\)\) \{ var ed[\s\S]*?pickScreenColor\(\)/.test(ecol));
   ok("recents persisted to localStorage (max 8)", /function colorRecents\(add\)[\s\S]*?verso\.colorRecents[\s\S]*?\.slice\(0, 8\)/.test(ecol));
   // Phase 2b: the reusable typeCluster (D4) — one Type control body writing to a model
-  ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\("Colour", tcVal\(\)/.test(src("src/editor/inspector/primitives.js")));
+  ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\(null, tcVal\(\)/.test(src("src/editor/inspector/primitives.js")));
   ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(src("src/editor/inspector/primitives.js")));
   ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(src("src/editor/inspector/primitives.js")));
   // Phase 2c: the SAME typeCluster mounted in BOTH the field inspector and the style dialog
@@ -17207,6 +17207,126 @@ section("uio-F03 scope + inheritance model");
   ok("PanelSection declares the roll-up count", /overrideCount\?:\s*number/.test(dts));
 })();
 
+// uio-E-C03 (EDIT-03): the Edit audit's complaint was that the Type cluster answered "what is
+// this set to?" with "Default", "auto", an empty select and a transparency checkerboard —
+// four controls, no answer, and one of them actively wrong (a checkerboard means NO paint
+// everywhere else in the chrome, and text colour is never transparent, it inherits).
+// So: one more chain on F03's resolver, no second inheritance path, and the checkerboard is
+// handed back to the fields where empty really does mean no paint.
+section("uio-E-C03 resolved inherited values");
+(function () {
+  var ep = src("src/editor/inspector/primitives.js");
+  var parts = src("src/editor/inspector/parts.js");
+  var fonts = src("src/editor/fonts.js");
+  var colorjs = src("src/editor/color.js");
+  var css = EDITOR_CSS;
+  // The real thing, off a real boot — the chain and the resolver as the panels get them, not a
+  // copy of the source sliced back into life.
+  var K = EDITOR_BOOT.boot().VersoEditor;
+  var g = {
+    textStyleChain: K.bind("textStyleChain"), resolveScoped: K.bind("resolveScoped"),
+    weightLabel: K.bind("weightLabel"), cssColorToHex: K.bind("cssColorToHex"),
+    TEXT_COLOR_PROP: K.get("TEXT_COLOR_PROP")
+  };
+  var ec03 = ep.match(/\/\* @ec03-start \*\/([\s\S]*?)\/\* @ec03-end \*\//);
+  ok("the chain is fenced as pure — no DOM, no editor state, no host lookups", !!ec03 &&
+    !/\bdocument\b|\bgetComputedStyle\b|\bE\.[a-z]/.test(codeOnly(ec03[1])));
+
+  var theme = { font: "Exo 2", size: 36, weight: "700", color: "#f0f0f0", lineHeight: 1.15 };
+  function at(spec, prop) { return g.resolveScoped(g.textStyleChain(spec), prop, { at: "block" }); }
+
+  ok("a block that sets nothing resolves the THEME value, named as Theme", (function () {
+    var r = at({ theme: theme, block: {} }, "size");
+    return r.found && r.value === 36 && r.inherited === true && r.scopeLabel === "Theme";
+  })());
+  ok("a named style sits between the theme and the block, labelled with its own name", (function () {
+    var r = at({ theme: theme, styleName: "Lead", styleProps: { size: 22 }, block: {} }, "size");
+    return r.value === 22 && r.inherited === true && r.trace.some(function (t) { return t.label === "Style “Lead”"; });
+  })());
+  ok("the block's own value wins and reports itself overridden", (function () {
+    var r = at({ theme: theme, styleName: "Lead", styleProps: { size: 22 }, block: { size: 48 } }, "size");
+    return r.value === 48 && r.overridden === true && r.from.value === 22;
+  })());
+  // The bug this rung guards against: the controls DELETE by writing undefined, so a bag holds
+  // the key with nothing in it. Presence alone would report an override that is not there.
+  ok("a key present-but-empty is not an override", (function () {
+    var r = at({ theme: theme, block: { size: undefined, font: "" } }, "size");
+    var f = at({ theme: theme, block: { font: "" } }, "font");
+    return r.value === 36 && !r.overridden && f.value === "Exo 2" && !f.overridden;
+  })());
+  ok("colour resolves across the four keys one bag can store it under", (function () {
+    var tok = at({ theme: theme, block: { colorToken: "accent" } }, g.TEXT_COLOR_PROP);
+    var per = at({ theme: theme, block: { colorLight: "#111", colorDark: "#eee" } }, g.TEXT_COLOR_PROP);
+    var hex = at({ theme: theme, block: { color: "#abcdef" } }, g.TEXT_COLOR_PROP);
+    var inh = at({ theme: theme, block: {} }, g.TEXT_COLOR_PROP);
+    return tok.value.token === "accent" && per.value.dark === "#eee" && hex.value.hex === "#abcdef" &&
+      inh.inherited === true && inh.value.hex === "#f0f0f0";
+  })());
+  ok("a genuinely transparent baseline resolves to NOTHING, so the checkerboard is still right", (function () {
+    var r = at({ theme: { color: null }, block: {} }, g.TEXT_COLOR_PROP);
+    return r.found === false;
+  })());
+  ok("computed rgb()/rgba() becomes hex; zero alpha becomes null", (function () {
+    return g.cssColorToHex("rgb(240, 240, 240)") === "#f0f0f0" &&
+      g.cssColorToHex("rgba(0, 0, 0, 0.5)") === "#000000" &&
+      g.cssColorToHex("rgba(0, 0, 0, 0)") === null &&
+      g.cssColorToHex("#ABCDEF") === "#ABCDEF" && g.cssColorToHex("") === null;
+  })());
+  ok("a resolved weight reads as the word the picker's own options use", g.weightLabel("600") === "Semibold" && g.weightLabel("") === "");
+
+  // --- the wiring ---
+  ok("the Theme rung is measured off the block's own node, not a table of guesses",
+    /function measureTextBaseline\(node\)[\s\S]{0,900}?node\.cloneNode\(false\)[\s\S]{0,900}?getComputedStyle\(probe\)/.test(ep));
+  ok("the probe is removed however the measurement ends", /finally \{ if \(probe\.parentNode\) probe\.parentNode\.removeChild\(probe\); \}/.test(ep));
+  ok("the probe strips exactly the props applyTextStyle owns", /TEXT_BASELINE_PROPS = \["fontFamily", "fontSize", "fontWeight", "color", "lineHeight",\s*\n?\s*"letterSpacing", "wordSpacing", "textTransform", "textIndent", "textAlign"\]/.test(ep));
+  ok("the field inspector hands the cluster theme + named style + block", /scope: \{\s*\n\s*theme: measureTextBaseline\(node\),\s*\n\s*styleName: host\.styleRef[\s\S]{0,140}?block: s\s*\n\s*\}/.test(parts));
+  ok("font / size / weight / line-height all show the resolved value when unset",
+    /var fontGhost = ghost\(fontRes\);/.test(ep) && /placeholder: sizeGhost \? sizeGhost\.text : "auto"/.test(ep) &&
+    /wtGhost \? wtGhost\.text : "Weight"/.test(ep) && /placeholder: lhGhost \? lhGhost\.text : "1\.5"/.test(ep));
+  ok("the ghost never overwrites an overridden value", /if \(!res \|\| !res\.found \|\| res\.overridden\) return null;/.test(ep));
+  // FieldRow.prompt.md: a wide control stacks its label and is otherwise the same row family, so
+  // the tail rides that line — the scope named when inherited, the accent dot + Reset when not.
+  // Half the language (ghost text, no Reset) would read like no other laddered row in the app.
+  ok("the two wide controls carry the real inheritance tail, not just a tooltip",
+    /function stackedLabel\(text, res, format, onReset\)[\s\S]{0,400}?inheritanceTail\(\{ res: res, format: format, onReset: onReset \}\)/.test(ep) &&
+    /stackedLabel\("Font", fontRes, null, function \(\) \{ delete model\.font;/.test(ep) &&
+    /stackedLabel\("Colour", colGhost, colourWords, function \(\) \{[\s\S]{0,200}?delete model\.colorToken;/.test(ep));
+  ok("the tail sits on the stacked label line", /\.insp-label-line \{ display: flex;[^}]*justify-content: space-between/.test(css));
+  // Reset clears ONE property. The colour reset deletes all four keys because they are one
+  // property stored four ways; the font reset must not reach past its own.
+  ok("Reset on a wide control clears only its own property", (function () {
+    var font = /stackedLabel\("Font", fontRes, null, function \(\) \{ ([^}]*) \}\);/.exec(ep);
+    var col = /stackedLabel\("Colour", colGhost, colourWords, function \(\) \{([\s\S]*?)\}\);/.exec(ep);
+    if (!font || !col) return false;
+    var deletes = function (s) { return (s.match(/delete model\.[A-Za-z]+/g) || []).sort().join(","); };
+    return deletes(font[1]) === "delete model.font" &&
+      deletes(col[1]) === "delete model.color,delete model.colorDark,delete model.colorLight,delete model.colorToken";
+  })());
+  ok("the font picker takes the inherited name and paints it in that font", /function buildFontPicker\(current, onPick, opts\)[\s\S]{0,700}?opts\.inherited \|\| "Default"/.test(fonts));
+  ok("an inherited colour PAINTS itself rather than wearing the checkerboard",
+    /sw\.classList\.toggle\("color-field__swatch--empty", !showing\)/.test(colorjs) &&
+    /sw\.classList\.toggle\("color-field__swatch--inherited", isInherited\)/.test(colorjs));
+  ok("the inherited swatch names where the colour came from", /"Inherited from " \+ \(opts\.inheritedFrom \|\| "the theme"\) \+ ": "/.test(colorjs));
+  ok("a colour field with no inherited value is untouched — empty still means transparent",
+    /Without opts\.inherited nothing changes/.test(colorjs) && /var inherited = normColorField\(opts\.inherited\);/.test(colorjs));
+  ok("the Edit-Text-Style dialog passes no scope, so a draft style keeps the old placeholders",
+    /typeCluster\(box, draft, syncSpecimen\);/.test(src("src/editor/theme.js")) &&
+    /var chain = opts\.scope \? textStyleChain\(opts\.scope\) : null;/.test(ep));
+  // The spine's one ink for "this came from above" — the same token .insp-row__scope and
+  // Publish's inherited destination path already use, now one rule instead of three.
+  ok("inherited controls use the spine's tertiary ink, not a new colour",
+    /\.is-inherited[^{]*\{ color: var\(--text-tertiary\); \}/.test(css) &&
+    /\.prop-field\.is-inherited \.prop-field__input::placeholder \{ color: var\(--text-tertiary\)/.test(css) &&
+    /\.color-field__val--inherited \{ color: var\(--text-tertiary\); \}/.test(css));
+  // The canonical dropdown is the DS's .vds-select, not .prop-select — a modifier that named
+  // only one of them silently did nothing to the Weight control (caught in the browser, not here).
+  ok("the ink rule names every select family the modifier can land on",
+    /\.vds-select\.is-inherited/.test(css) && /\.prop-select\.is-inherited/.test(css));
+  ok("the inherited swatch carries a dot, and the checkerboard keeps its own meaning",
+    /\.color-field__swatch--inherited::after \{/.test(css) &&
+    /Checkerboard = genuinely no paint/.test(css));
+})();
+
 // uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
 // one row per mark carrying a count + its own heading path, one labelled filter carrying live
 // counts, and a fixed type palette that never collides with the accent (= selection/focus).
@@ -17927,8 +18047,11 @@ section("#170/#158 shared formatting toggle-bar");
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
   // arch-P3b-07parts: the field inspector is editor/inspector/parts.js now.
   var PARTSSRC = src("src/editor/inspector/parts.js");
+  // The subject is the WHOLE field-inspector body, bounded by the next function rather than by a
+  // byte budget: a budget quietly excludes the rows at the bottom of the panel every time
+  // something is added above them (uio-F04's provenance line, uio-E-C03's scope spec).
   var insStart = PARTSSRC.indexOf("function renderFieldInspector(node)");
-  var insBody = PARTSSRC.slice(insStart, insStart + 7400); // uio-F04 added the source-provenance line above these
+  var insBody = PARTSSRC.slice(insStart, PARTSSRC.indexOf("function renderInstanceInspector(card)", insStart));
   ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);

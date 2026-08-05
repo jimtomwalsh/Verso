@@ -22,6 +22,18 @@ Copy style, Move up / down, Save as component, Clear content, Delete, plus the v
 version show/hide toggles. The list ends with **Block settings**, which takes you back into the
 Inspector on that block.
 
+**Text properties show what the text is actually set to.** With text selected, the Inspector's
+**Type** section reads out the font, size, weight, line height and colour that apply right now,
+even where you haven't set them yourself. A value you haven't set is greyed and the label says
+where it comes from — **Theme** for the course's own styling, or the name of the text style the
+block references. Set your own and the label swaps for a dot and a **Reset**, whose tooltip tells
+you what Reset puts back. The section header counts them ("2 overridden") so you can see at a
+glance how far a block has drifted from the theme.
+
+The colour swatch paints the colour that applies, greyed with a small dot when it's inherited. A
+chequerboard swatch means genuinely no colour — an empty fill or stroke — and never appears on
+text.
+
 > **Tip.** An unfilled image or interaction placeholder glows neon-pink on the canvas so you
 > never miss a slot. It's an authoring cue only — it never shows in preview or the export.
 

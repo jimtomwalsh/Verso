@@ -202,6 +202,12 @@
       if (add && isHex(add)) { arr = [add].concat(arr.filter(function (x) { return x !== add; })).slice(0, 8); try { localStorage.setItem(KEY, JSON.stringify(arr)); } catch (e) {} }
       return arr;
     }
+    // uio-E-C03: opts.inherited is the colour that will actually apply when this field is empty
+    // (a normalised colorField value), opts.inheritedFrom the scope that supplies it. Given
+    // those, the empty state PAINTS that colour and marks it inherited. The checkerboard is
+    // what a swatch means everywhere else — no paint at all — so a field that merely inherits
+    // must not wear it. Without opts.inherited nothing changes: empty still means transparent,
+    // which for a fill or a stroke is the truth.
     function colorField(labelText, value, onPick, target, opts) {
       opts = opts || {};
       var host = target || E.inspector;
@@ -210,9 +216,16 @@
       var sw = h("button", "color-field__swatch"); sw.type = "button"; sw.title = "Colour";
       var lbl = h("span", "color-field__val");
       var val = normColorField(value);
+      var inherited = normColorField(opts.inherited);
       function curMode() { var m = E.activeMode; return (typeof m !== "undefined") ? m : "dark"; }
+      function hexOf(v) {
+        if (!v) return "";
+        if (v.token) return tokenHex(v.token);
+        if (v.light || v.dark) return (curMode() === "dark" ? v.dark : v.light) || v.light || v.dark;
+        return v.hex || "";
+      }
       function summary(v) {
-        if (!v) return "Default";
+        if (!v) return inherited ? summary(inherited) : "Default";
         if (v.token) { var m = COLOR_FIELD_TOKENS.filter(function (t) { return t[1] === v.token; })[0]; return m ? m[0] : v.token; }
         if (v.light || v.dark) return "Per-mode";
         return v.hex;
@@ -220,15 +233,16 @@
       function paint() {
         // Resolve to a real HEX for the swatch — the inspector chrome has no --color-* vars,
         // so painting `var(--color-accent)` would render gray. tokenHex gives the live colour.
-        var bg = "";
-        if (val) {
-          if (val.token) bg = tokenHex(val.token);
-          else if (val.light || val.dark) bg = (curMode() === "dark" ? val.dark : val.light) || val.light || val.dark;
-          else bg = val.hex || "";
-        }
-        sw.style.background = bg;
-        sw.classList.toggle("color-field__swatch--empty", !val);
+        var showing = val || inherited;
+        var isInherited = !val && !!inherited;
+        sw.style.background = hexOf(showing);
+        sw.classList.toggle("color-field__swatch--empty", !showing);
+        sw.classList.toggle("color-field__swatch--inherited", isInherited);
+        lbl.classList.toggle("color-field__val--inherited", isInherited);
         lbl.textContent = summary(val);
+        sw.title = isInherited
+          ? "Inherited from " + (opts.inheritedFrom || "the theme") + ": " + summary(inherited)
+          : "Colour";
       }
       function set(v) { val = normColorField(v); paint(); onPick(val); }
       sw.addEventListener("click", function () { openColorFieldPop(sw, val, set, opts); });

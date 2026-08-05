@@ -336,7 +336,7 @@
       chain = chain || [];
       var at = opts.at || (chain.length ? chain[chain.length - 1].scope : null);
       var atDepth = scopeDepth(at);
-      var trace = [], winner = NOT_SET, winScope = null, ownValue = NOT_SET, parent = null;
+      var trace = [], winner = NOT_SET, winScope = null, winLabel = null, ownValue = NOT_SET, parent = null;
       for (var i = 0; i < chain.length; i++) {
         var r = chain[i];
         if (scopeDepth(r.scope) > atDepth) continue;
@@ -346,8 +346,8 @@
         if (v === NOT_SET) continue;
         if (r.scope === at) ownValue = v;
         else parent = { scope: r.scope, label: lab, value: v };   // nearest ancestor that sets it
-        if (winner === NOT_SET || !opts.choose) { winner = v; winScope = r.scope; }
-        else { var w = opts.choose(winner, v); if (w === v) { winner = v; winScope = r.scope; } else winner = w; }
+        if (winner === NOT_SET || !opts.choose) { winner = v; winScope = r.scope; winLabel = lab; }
+        else { var w = opts.choose(winner, v); if (w === v) { winner = v; winScope = r.scope; winLabel = lab; } else winner = w; }
       }
       var found = winner !== NOT_SET;
       var overridden = ownValue !== NOT_SET;
@@ -357,7 +357,10 @@
         found: found,
         value: found ? winner : undefined,          // what will ACTUALLY apply — never "unset"
         scope: winScope,                            // the rung the applied value came from
-        scopeLabel: winScope ? scopeLabel(winScope) : null,
+        // A rung may name itself (uio-E-C03's "Theme" and "Style “Lead”" occupy the system and
+        // course rungs but are not called that on screen), so its own label wins over the
+        // ladder's. Every rung that supplies no label still reads exactly as it did.
+        scopeLabel: winScope ? (winLabel || scopeLabel(winScope)) : null,
         overridden: overridden,                     // this rung sets its own value
         inherited: found && !overridden,
         from: parent,                               // what Reset restores, and from where
@@ -454,6 +457,101 @@
         { scope: "course", label: "Course", read: function () { return E.doc.gateAllInteractions ? true : NOT_SET; } },
         page ? scopeRung("page", page) : null
       ]);
+    }
+
+    // uio-E-C03. Text style: Theme -> the named text style this block references -> the block's
+    // own style bag. The three rungs are exactly the cascade render.js already applies
+    // (course.css class, then resolveBlockStyle's named-style merge, then per-block overrides),
+    // surfaced through the one resolver rather than restated as a second model.
+    //
+    // The colour rung is the "same idea, different keys" seam in use: a bag stores colour as one
+    // of colorToken / colorLight+colorDark / color, so the rung normalises to the colorField
+    // shape and the resolver never learns that four keys are one property.
+    /* @ec03-start */
+    var TEXT_COLOR_PROP = "__colorField";
+    function textColorOf(bag) {
+      if (!bag) return NOT_SET;
+      if (bag.colorToken) return { token: bag.colorToken };
+      if (bag.colorLight || bag.colorDark) return { light: bag.colorLight || bag.colorDark, dark: bag.colorDark || bag.colorLight };
+      if (bag.color != null && bag.color !== "") return { hex: bag.color };
+      return NOT_SET;
+    }
+    function textStyleRung(scope, label, bag) {
+      return {
+        scope: scope, label: label,
+        read: function (prop) {
+          if (prop === TEXT_COLOR_PROP) return textColorOf(bag);
+          if (!bag) return NOT_SET;
+          var v = Object.prototype.hasOwnProperty.call(bag, prop) ? bag[prop] : NOT_SET;
+          // A style bag carries `undefined` / "" for props it does not set (the controls delete
+          // by writing those), so presence alone would report a rung as setting something it does
+          // not. Only the block rung can legitimately hold a falsy-but-real value here, and none
+          // of the typography props has one — 0px text and an empty font are not values.
+          return (v === undefined || v === "" || v === null) ? NOT_SET : v;
+        }
+      };
+    }
+    // spec: { theme (measured baseline bag), styleName, styleProps, block (the block's style bag) }
+    function textStyleChain(spec) {
+      spec = spec || {};
+      return scopeChain([
+        spec.theme ? textStyleRung("system", "Theme", spec.theme) : null,
+        spec.styleProps ? textStyleRung("course", "Style “" + (spec.styleName || "") + "”", spec.styleProps) : null,
+        textStyleRung("block", "Block", spec.block || {})
+      ]);
+    }
+    // A resolved weight is a number on the model and a word in the chrome, and the ghost text
+    // has to read the way the picker's own options do.
+    var WEIGHT_LABELS = { "400": "Regular", "500": "Medium", "600": "Semibold", "700": "Bold", "800": "Extra" };
+    function weightLabel(v) { var k = String(v == null ? "" : v); return WEIGHT_LABELS[k] || k; }
+    // getComputedStyle hands back rgb()/rgba(); every colour control downstream speaks hex.
+    // Fully transparent stays null — the one state that legitimately paints a checkerboard.
+    function cssColorToHex(css) {
+      var m = /^rgba?\(\s*([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)\s*(?:[,/]\s*([0-9.]+%?)\s*)?\)$/i.exec(String(css || "").trim());
+      if (!m) return /^#[0-9a-f]{3,8}$/i.test(String(css || "").trim()) ? String(css).trim() : null;
+      var a = m[4] == null ? 1 : (/%$/.test(m[4]) ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
+      if (!(a > 0)) return null;
+      function hx(n) { var v = Math.max(0, Math.min(255, Math.round(parseFloat(n)))).toString(16); return v.length === 1 ? "0" + v : v; }
+      return "#" + hx(m[1]) + hx(m[2]) + hx(m[3]);
+    }
+    /* @ec03-end */
+    // The Theme rung is MEASURED, never guessed. A text block's baseline is course.css reading
+    // theme vars (--font-heading, --size-page-title) mixed with literals (.page-title is
+    // font-weight 700, .body-copy is 17px), and a copy of that table in JS is how the ghost text
+    // and the canvas drift apart. So: clone the block's own rendered node in place, strip the
+    // inline props applyTextStyle owns, measure, drop it. Same ancestors, same classes, same
+    // theme vars, so it is the real baseline for any block type without a mapping table.
+    var TEXT_BASELINE_PROPS = ["fontFamily", "fontSize", "fontWeight", "color", "lineHeight",
+      "letterSpacing", "wordSpacing", "textTransform", "textIndent", "textAlign"];
+    function measureTextBaseline(node) {
+      if (!node || !node.cloneNode || !node.parentNode) return null;
+      if (typeof window.getComputedStyle !== "function") return null;
+      var probe = node.cloneNode(false);   // shallow: the classes and the tag, none of the copy
+      TEXT_BASELINE_PROPS.forEach(function (p) { try { probe.style[p] = ""; } catch (e) {} });
+      if (probe.style.removeProperty) { probe.style.removeProperty("--tc-light"); probe.style.removeProperty("--tc-dark"); }
+      probe.removeAttribute("contenteditable");
+      probe.removeAttribute("id");
+      probe.setAttribute("aria-hidden", "true");
+      probe.style.position = "absolute";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      var out = null;
+      try {
+        node.parentNode.appendChild(probe);
+        var cs = window.getComputedStyle(probe);
+        if (!cs) return null;
+        var px = parseFloat(cs.fontSize);
+        var lh = parseFloat(cs.lineHeight);
+        out = {
+          font: (typeof window.fontNameFromStack === "function" ? window.fontNameFromStack(cs.fontFamily) : "") || "",
+          size: isNaN(px) ? undefined : Math.round(px),
+          weight: String(parseInt(cs.fontWeight, 10) || 400),
+          color: cssColorToHex(cs.color),
+          lineHeight: (isNaN(lh) || isNaN(px) || !px) ? undefined : Math.round((lh / px) * 100) / 100
+        };
+      } catch (e) { out = null; }
+      finally { if (probe.parentNode) probe.parentNode.removeChild(probe); }
+      return out;
     }
 
     // ---- The shared settings/overlay row (uio-F01 — the UI spine's row anatomy) ------
@@ -995,17 +1093,48 @@
     // this collapses the old twin whole-field + selection weight controls into one.
     function typeCluster(container, model, onChange, opts) {
       onChange = onChange || function () {};
-      container.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Font"));
-      var fp = buildFontPicker(model.font || "", function (v) { model.font = v; onChange(); });
+      opts = opts || {};
+      // uio-E-C03. With a scope spec the cluster stops saying "Default" / "auto" / nothing and
+      // says what the text is ACTUALLY set to, in tertiary ink, naming where it comes from. The
+      // Edit-Text-Style dialog passes no spec (a draft style has no block and no canvas node to
+      // resolve against), so it keeps the old placeholders — resolve() answers null there and
+      // every branch below falls back to what it did before.
+      var chain = opts.scope ? textStyleChain(opts.scope) : null;
+      function resolve(prop) { return chain ? resolveScoped(chain, prop, { at: "block" }) : null; }
+      function ghost(res, format) {
+        if (!res || !res.found || res.overridden) return null;
+        return { text: (format || String)(res.value), title: inheritedTooltip(res, format) };
+      }
+      // FieldRow.prompt.md: a WIDE control (the colour field, a full-width picker) stacks its
+      // label above itself and is otherwise the same row family — so the inheritance tail belongs
+      // on that label line. Both halves of the spine's language land here: the source scope named
+      // in tertiary ink when inherited, the accent dot + inline Reset when this field owns the
+      // value. The glyph-only cells below have no label line to carry a tail and state their
+      // scope on hover until they are routed through settingsRow.
+      function stackedLabel(text, res, format, onReset) {
+        var line = h("div", "insp-row__label insp-row__label--stacked insp-label-line");
+        line.appendChild(h("span", null, text));
+        var tail = res ? inheritanceTail({ res: res, format: format, onReset: onReset }) : null;
+        if (tail) line.appendChild(tail);
+        container.appendChild(line);
+      }
+      var fontRes = resolve("font");
+      stackedLabel("Font", fontRes, null, function () { delete model.font; onChange(); });
+      var fontGhost = ghost(fontRes);
+      var fp = buildFontPicker(model.font || "", function (v) { model.font = v; onChange(); },
+        fontGhost ? { inherited: fontGhost.text, inheritedTitle: fontGhost.title } : null);
       container.appendChild(fp);
       container.appendChild(attachFontWarn(fp));
       // Size + Weight
-      var size = iconField("A", { value: model.size == null ? "" : model.size, unit: "px", placeholder: "auto", step: 1, min: 1, max: 200, datalist: "dl-font-size", noHistory: true, title: "Font size",
+      var sizeGhost = ghost(resolve("size"));
+      var size = iconField("A", { value: model.size == null ? "" : model.size, unit: "px", placeholder: sizeGhost ? sizeGhost.text : "auto", step: 1, min: 1, max: 200, datalist: "dl-font-size", noHistory: true, title: sizeGhost ? sizeGhost.title : "Font size",
         onchange: function (v) { var n = parseInt(v, 10); model.size = isNaN(n) ? undefined : n; onChange(); } }).wrap;
+      if (sizeGhost) size.classList.add("is-inherited");
       // Selection-aware (field inspector): opening the <select> steals focus + collapses the
       // selection, so capture the live field range on mousedown (same trick the Link button uses).
       var savedWtRange = null;
-      var wt = dsSelect([["Weight", ""], ["Regular", "400"], ["Medium", "500"], ["Semibold", "600"], ["Bold", "700"], ["Extra", "800"]], model.weight || "", function (weight) {
+      var wtGhost = ghost(resolve("weight"), weightLabel);
+      var wt = dsSelect([[wtGhost ? wtGhost.text : "Weight", ""], ["Regular", "400"], ["Medium", "500"], ["Semibold", "600"], ["Bold", "700"], ["Extra", "800"]], model.weight || "", function (weight) {
         if (savedWtRange && opts && opts.applyWeightToSelection) {
           var range = savedWtRange; savedWtRange = null;
           if (!weight) return; // empty on a live selection = no-op (don't clear the whole field)
@@ -1020,20 +1149,34 @@
           savedWtRange = (r && !r.collapsed && opts.fieldNode.contains(r.commonAncestorContainer)) ? r.cloneRange() : null;
         });
       }
+      if (wtGhost) { wt.classList.add("is-inherited"); wt.title = wtGhost.title; }
       container.appendChild(twoUp(size, wt));
       // Colour — the unified colorField (token XOR hex XOR per-mode).
+      // The audit's sharpest complaint was here: an unset text colour painted a transparency
+      // checkerboard, which everywhere else means "no colour". Text colour is never transparent
+      // — it inherits — so the swatch now paints the colour that will actually apply and marks
+      // it inherited. The checkerboard is left to the fields where empty really does mean no paint.
+      var colGhost = resolve(TEXT_COLOR_PROP);
+      function colourWords(v) { return !v ? "" : (v.token ? v.token : (v.light || v.dark ? "per-mode" : v.hex)); }
+      stackedLabel("Colour", colGhost, colourWords, function () {
+        delete model.color; delete model.colorToken; delete model.colorLight; delete model.colorDark; onChange();
+      });
       function tcVal() { return model.colorToken ? { token: model.colorToken } : (model.colorLight || model.colorDark ? { light: model.colorLight, dark: model.colorDark } : (model.color != null ? { hex: model.color } : null)); }
-      colorField("Colour", tcVal(), function (v) {
+      colorField(null, tcVal(), function (v) {
         delete model.color; delete model.colorToken; delete model.colorLight; delete model.colorDark;
         if (v && v.token) model.colorToken = v.token;
         else if (v && (v.light || v.dark)) { model.colorLight = v.light; model.colorDark = v.dark; }
         else if (v && v.hex) model.color = v.hex;
         onChange();
-      }, container);
+      }, container, (colGhost && colGhost.found && !colGhost.overridden)
+        ? { inherited: colGhost.value, inheritedFrom: colGhost.scopeLabel }
+        : null);
       // Line-height + tracking
-      container.appendChild(twoUp(
-        iconField(Icon("line-height"), { value: model.lineHeight == null ? "" : model.lineHeight, placeholder: "1.5", step: 0.05, min: 0.5, max: 3, datalist: "dl-line-height", noHistory: true, title: "Line height",
-          onchange: function (v) { model.lineHeight = (v ? v : undefined); onChange(); } }).wrap,
+      var lhGhost = ghost(resolve("lineHeight"));
+      var lh = iconField(Icon("line-height"), { value: model.lineHeight == null ? "" : model.lineHeight, placeholder: lhGhost ? lhGhost.text : "1.5", step: 0.05, min: 0.5, max: 3, datalist: "dl-line-height", noHistory: true, title: lhGhost ? lhGhost.title : "Line height",
+        onchange: function (v) { model.lineHeight = (v ? v : undefined); onChange(); } }).wrap;
+      if (lhGhost) lh.classList.add("is-inherited");
+      container.appendChild(twoUp(lh,
         iconField(Icon("letter-spacing"), { value: model.letterSpacing == null ? "" : model.letterSpacing, unit: "px", placeholder: "0", step: 0.1, min: -10, max: 50, datalist: "dl-letter-spacing", noHistory: true, title: "Letter spacing",
           onchange: function (v) { var n = parseFloat(v); model.letterSpacing = isNaN(n) ? undefined : n; onChange(); } }).wrap));
       // Word-spacing + first-line indent
@@ -1077,6 +1220,8 @@
       inheritedTooltip: inheritedTooltip, overrideCount: overrideCount, rollupLabel: rollupLabel,
       tallyResolution: tallyResolution, inheritanceTail: inheritanceTail, onOffLabel: onOffLabel,
       blockBoxChain: blockBoxChain, gateScopeChain: gateScopeChain,
+      textStyleChain: textStyleChain, measureTextBaseline: measureTextBaseline,
+      cssColorToHex: cssColorToHex, weightLabel: weightLabel,
       settingsRow: settingsRow, crossRefRow: crossRefRow, fieldRow: fieldRow,
       segmentedLive: segmentedLive, iconField: iconField, twoUp: twoUp, propHeader: propHeader,
       breadcrumb: breadcrumb, optionalRow: optionalRow, repeatedList: repeatedList,
@@ -1090,6 +1235,7 @@
       HEADER_STYLE_KEYS: HEADER_STYLE_KEYS, FOOTER_STYLE_KEYS: FOOTER_STYLE_KEYS,
       NAV_BTN_KEYS: NAV_BTN_KEYS, NAV_PILL_KEYS: NAV_PILL_KEYS,
       SCOPE_LADDER: SCOPE_LADDER, SCOPE_LABELS: SCOPE_LABELS, NOT_SET: NOT_SET,
+      TEXT_COLOR_PROP: TEXT_COLOR_PROP,
       BOX_SYSTEM_DEFAULTS: BOX_SYSTEM_DEFAULTS,
       CONTAINER_ROW_ORDER: CONTAINER_ROW_ORDER, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS,
       ICON_ALIAS: ICON_ALIAS

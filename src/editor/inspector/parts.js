@@ -35,6 +35,7 @@
       "colorFieldFlat", "iconField", "endSections", "versionEditable", "renderContainerChrome", "CONTENT_DECL",
       "blockChromeIo", "blockChromeHandlers", "blurActiveText", "resetDrill", "buildActions", "iconBtn",
       "propHeader", "setSelection", "renderBlockActionsSection", "clone", "clearSelection", "setInspector",
+      "measureTextBaseline",
       "inspector", "selection", "panelFields"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
@@ -80,6 +81,7 @@
         renderBlockActionsSection = E.renderBlockActionsSection,
         clone = E.clone,
         clearSelection = E.clearSelection,
+        measureTextBaseline = E.measureTextBaseline,
         setInspector = E.setInspector;
 
     // Caret currently inside a list item within this field? Any rich field can hold an
@@ -171,7 +173,16 @@
       // font-weight). Weight-ONLY, never touches the run's size/font/colour. surroundContents
       // throws when the range crosses element boundaries -> extract+insert handles that (v1
       // accepts nested spans; innermost wins; undo/Regular reverts).
+      // uio-E-C03: the cluster resolves through F03's ladder — the measured theme baseline, the
+      // named style this field references, then the field's own overrides — so every control
+      // shows what the text is actually set to rather than "Default" / "auto" / nothing.
       typeCluster(E.inspector, s, apply, {
+        scope: {
+          theme: measureTextBaseline(node),
+          styleName: host.styleRef || "",
+          styleProps: (host.styleRef && presets[host.styleRef]) || null,
+          block: s
+        },
         fieldNode: node,
         applyWeightToSelection: function (weight, range) {
           node.focus();

@@ -201,14 +201,23 @@
     // that font. Drop-in for the plain <select> font pickers — exposes `.value` (get/set) and
     // fires a 'change' event on pick, so attachFontWarn works against it unchanged. Options =
     // "" (Default) + window.FONT_LIST; only loaded families appear here, so previews render.
-    function buildFontPicker(current, onPick) {
+    // uio-E-C03: opts.inherited names the font that will actually apply when nothing is picked
+    // here, so the empty state reads "Exo 2" in tertiary ink instead of the word "Default" —
+    // which told an author the setting was blank and nothing about the page.
+    function buildFontPicker(current, onPick, opts) {
+      opts = opts || {};
       var wrap = h("div", "font-picker");
       var btn = h("button", "font-picker__btn prop-select"); btn.type = "button";
       var pop = h("div", "font-picker__pop"); pop.hidden = true;
       var val = current || "";
-      function labelFor(v) { return v ? v : "Default"; }
+      function labelFor(v) { return v ? v : (opts.inherited || "Default"); }
       function stackFor(v) { return window.fontStackFor ? window.fontStackFor(v) : (v ? "'" + v + "'" : ""); }
-      function paintBtn() { btn.textContent = labelFor(val); btn.style.fontFamily = stackFor(val); }
+      function paintBtn() {
+        btn.textContent = labelFor(val);
+        btn.style.fontFamily = stackFor(val || (opts.inherited || ""));
+        btn.classList.toggle("is-inherited", !val && !!opts.inherited);
+        if (!val && opts.inheritedTitle) btn.title = opts.inheritedTitle; else btn.removeAttribute("title");
+      }
       (([""]).concat(window.FONT_LIST || [])).forEach(function (v) {
         var row = h("div", "font-picker__opt" + (v === val ? " is-active" : ""), labelFor(v));
         row.style.fontFamily = stackFor(v);
