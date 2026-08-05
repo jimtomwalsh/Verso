@@ -4,6 +4,34 @@ When your team runs Verso on a shared server (rather than the standalone app), s
 can edit the same course at once. **The standalone `file://` app is unchanged — this section
 applies only in server mode.**
 
+- **Signing in.** Opening the server shows a sign-in screen. Use the **Continue with … sign-in**
+  button — you enter your password on your organisation's own sign-in page, never in Verso.
+  Some servers instead sign you in automatically from your Windows account, and some use Verso
+  accounts with their own passwords; your IT admin sets which. If the message says the sign-in
+  service can't be reached, that isn't your password — wait and try again, or use the local admin
+  account link if you have those credentials.
+- **Moving your work onto the server (admins only, once).** If your courses are still stored in
+  this browser, a **server** button appears on the left rail. It always makes you **run a
+  rehearsal** first, which proves the whole path — backup, server write, read-back — without
+  moving anything. Only then does it offer the real move. It downloads a backup file: **keep it**,
+  because a browser can't confirm a download reached your disk. If any step stops, nothing is
+  changed and your work stays exactly where it was. Once the move succeeds the button disappears.
+- **Managing people (admins only).** If your role can manage users, a **People** button appears
+  on the left rail. It opens a full screen listing everyone on the server — search it, page
+  through it, and use a row's **⋯** to change someone's role or remove them. Below the list,
+  **Roles** is where you name your own roles and tick which capabilities each one holds; renaming
+  a role changes nothing about what it can do. Verso refuses any change that would leave nobody
+  able to manage users and server configuration, and tells you so without changing anything.
+  Guests aren't listed — they hold a link, not an account.
+- **Which account am I on?** Your initials sit in the top bar; click them for your name, email,
+  role and how you signed in, and to sign out. If you signed in with the **local admin account**
+  — the emergency one — the avatar is outlined in red and the menu says so at the top, so an
+  admin who used it during an outage can see they never signed back out.
+- **If your session expires while you're working.** A banner appears under the toolbar and a
+  **Not saving** chip sits on the canvas. Your work stays on screen and you can still read and
+  copy it — but nothing you type from that point is being saved, and this tab only keeps it
+  until you reload. Use **Sign in** in the banner: it opens a separate window so this tab keeps
+  your edit, and once you're back the banner confirms saving has resumed.
 - **See who's here.** Avatars of everyone in the course show in the top bar, each in that
   person's colour (the same colour their comments use). A solid ring means they're editing; a
   hollow ring means they're just viewing, and a small flag shows where a colleague is looking.

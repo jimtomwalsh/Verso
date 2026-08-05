@@ -82,6 +82,20 @@
     if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
     if (window.console && console.error) console.error("[store-http] " + msg);
   }
+  // Being signed out is not the same failure as a full disk or an unreachable server, and it
+  // gets its own chrome (platform-pivot 38): a persistent banner plus a canvas chip, because
+  // the author is still typing and every keystroke is going nowhere. Two distinct signals --
+  // "your session went away" and "a save was actually refused just now" -- because the second
+  // states a loss that has already happened and must never be demoted back to the first.
+  function reportSignedOut(refused) {
+    var s = window.__versoSession;
+    if (s) { if (refused) s.saveRefused(); else s.authRequired(); }
+    reportFailure(SIGNED_OUT);
+  }
+  // Called by the session banner once it has watched a sign-in succeed, so the adapter stops
+  // refusing writes in the same beat the banner says saving has resumed. Without this the
+  // banner would be telling the truth about the server and a lie about this tab.
+  window.__versoHttpAuthRestored = function () { authRequired = false; };
 
   // Report a durable write's outcome without duplicating the four branches per facet.
   function settle(promise, what) {
@@ -91,7 +105,7 @@
         return r.ok ? r.json() : { ok: false };
       })
       .then(function (j) {
-        if (j && j.auth) return reportFailure(SIGNED_OUT);
+        if (j && j.auth) return reportSignedOut(true);   // a durable write was REFUSED
         if (!j || !j.ok) reportFailure("Saving " + what + " to the Verso server failed. Export JSON now to avoid losing work.");
       })
       .catch(function () { reportFailure("Could not reach the Verso server to save " + what + ". Check your connection; export JSON now to avoid losing work."); });
@@ -139,6 +153,12 @@
       var copy = {}, k;
       for (k in m) if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
       if (m.kind === "topic" && m.doc) { topics[id] = m.doc; delete copy.doc; }
+      // __deferred is a TRANSPORT flag the bootstrap sets, not a property of the library.
+      // Writing it back would persist "not loaded" into the stored shell, where it would
+      // outlive the page that could not load it. A master with no doc simply has no rows
+      // written -- splitLibrary already only collects a topic that HAS a body, which is what
+      // stops a deferred source document being saved back as an emptied one.
+      delete copy.__deferred;
       shell.components[id] = copy;
     });
     Object.keys(lib || {}).forEach(function (k) { if (k !== "components") shell[k] = lib[k]; });
@@ -201,7 +221,7 @@
       // stays installed on purpose -- withdrawing it would let pickFacetAdapter fall back
       // to the browser store, and the author would go on editing into localStorage while
       // believing they were on the shared server. A loud refusal beats a silent strand.
-      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       cache = json; // in-page truth updates synchronously (optimistic)
       try {
         fetch(apiUrl(base, "registry"), { method: "PUT", body: json, headers: { "Content-Type": "application/json" } })
@@ -210,7 +230,7 @@
             return r.ok ? r.json() : { ok: false };
           })
           .then(function (j) {
-            if (j && j.auth) return reportFailure(SIGNED_OUT);
+            if (j && j.auth) return reportSignedOut(true);   // a durable write was REFUSED
             if (!j || !j.ok) reportFailure("Save to the Verso server failed. Export JSON now to avoid losing work.");
           })
           .catch(function () { reportFailure("Could not reach the Verso server to save. Check your connection; export JSON now to avoid losing work."); });
@@ -223,7 +243,7 @@
     // load, served synchronously from the in-page cache, written as one blob.
     readProducts: function () { return productsCache; },
     writeProducts: function (json) {
-      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       productsCache = json;
       try { settle(putJson(apiUrl(base, "kv", "authoring.products"), json), "products"); }
       catch (e) { return { ok: false, quota: false, error: e }; }
@@ -235,7 +255,7 @@
     // decomposed form on its way out). Write decomposes -- see splitLibrary/writeTopic.
     readLibrary: function () { return libraryCache; },
     writeLibrary: function (json) {
-      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       var next, prev = null;
       try { next = JSON.parse(json); } catch (e) { return { ok: false, quota: false, error: e }; }
       try { prev = libraryCache ? JSON.parse(libraryCache) : null; } catch (e) { prev = null; }
@@ -261,7 +281,60 @@
   // Say it once at boot too, not only on the first save attempt: an author who opens a
   // signed-out server sees an empty world, and an empty world is indistinguishable from
   // a fresh one unless something says otherwise.
-  if (authRequired) reportFailure(SIGNED_OUT);
+  if (authRequired) reportSignedOut(false);
+
+  // ---- source documents on demand (platform-pivot 35) ----------------------
+  // The bootstrap ships the library SHELL plus the bodies the first render needs (the server
+  // computes that set -- see hydrationSet in verso-server.js). Everything else arrives here,
+  // one source document at a time, as an author opens it.
+  //
+  // ASYNC ON PURPOSE, and safe to be: readLibrary() is synchronous by contract because the
+  // editor reads it at BOOT, and the first render's bodies are already in the page by then.
+  // Every later body is fetched in response to a click, where a promise costs nothing.
+  //
+  // A hydrated body is spliced into the in-page library cache, so the ~36 existing
+  // `libComponents()[id].doc` readers keep working unchanged -- which is the whole reason this
+  // is a cache seam rather than 36 call-site rewrites.
+  var hydrating = {};   // id -> the in-flight promise, so two clicks make one request
+  function libraryShell() {
+    try { return libraryCache ? JSON.parse(libraryCache) : null; } catch (e) { return null; }
+  }
+  // Is this master a body we have not loaded yet? The server FLAGS them rather than leaving
+  // them merely absent: without the flag a deferred source document is indistinguishable from
+  // one an author emptied, and the app would render the blank and call it content.
+  function isDeferred(id) {
+    var lib = libraryShell();
+    var m = lib && lib.components && lib.components[id];
+    return !!(m && m.__deferred && !m.doc);
+  }
+  function hydrateTopic(id) {
+    if (!id) return Promise.resolve(null);
+    if (!isDeferred(id)) return Promise.resolve(null);   // already here, or not a deferred topic
+    if (hydrating[id]) return hydrating[id];
+    hydrating[id] = fetch(apiUrl(base, "library/topic", id), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        delete hydrating[id];
+        if (!j || !j.ok) return null;
+        var lib = libraryShell();
+        var m = lib && lib.components && lib.components[id];
+        if (!m) return null;
+        // `empty: true` means the server has no rows for it. Clearing the flag WITHOUT a body
+        // is the honest outcome: there is genuinely nothing, and it must stop looking unloaded
+        // or every reader would ask again forever.
+        if (j.doc) m.doc = j.doc;
+        delete m.__deferred;
+        libraryCache = JSON.stringify(lib);
+        // Splice into the LIVE store too, so the readers that already hold it see the body.
+        var live = window.LibraryStore && window.LibraryStore.components && window.LibraryStore.components[id];
+        if (live) { if (j.doc) live.doc = j.doc; delete live.__deferred; }
+        return j.doc || null;
+      })
+      .catch(function () { delete hydrating[id]; return null; });
+    return hydrating[id];
+  }
+  window.__versoHydrateTopic = hydrateTopic;
+  window.__versoTopicDeferred = isDeferred;
 
   // Async API surface for later phases (transport #08, migration #05). Not wired into
   // the sync media facet yet -- that async rework is Phase 2, not this ticket.

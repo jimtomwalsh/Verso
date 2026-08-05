@@ -1,0 +1,109 @@
+/* 15-sign-in.css -- the server-mode sign-in surface (platform-pivot 19).
+ *
+ * AN ARGUED EXCEPTION TO THE SIX-PRESENTATION SPINE, confirmed by James 2026-08-05 and
+ * recorded in specs/3-identity.spec.md -> "Design-system spine". The spine's rule is that a
+ * surface squeezes the canvas rather than covering it; sign-in has no canvas to squeeze,
+ * because nothing is loaded until someone is signed in. It therefore takes the whole viewport
+ * and carries full Verso identity -- wordmark, dark chrome, brand face -- on the grounds that
+ * an IT admin standing up a professional on-prem tool should see the product rather than a
+ * commodity auth page, and that the dark chrome matches the editor they land in next.
+ *
+ * THE EXCEPTION DOES NOT EXTEND ANYWHERE ELSE. First run (platform-pivot 31) is the only
+ * other one, argued on the same grounds. The signed-out banner (38) is app chrome, the
+ * account menu (39) is a popover, and admin user management (21) is a full surface inside
+ * the app -- each is judged against the spine at its own gate.
+ *
+ * WHAT THIS FILE MAY CONTAIN, after the /verso-frontend gate. Only layout: where the card
+ * sits, how the prose is spaced, and the two message tones. Every CONTROL comes from
+ * window.VersoUI (src/ui-kit.js, loaded well before this surface) and is styled by
+ * 12-controls.css -- there is no bespoke button or input here. Colours are the semantic
+ * role tokens, never the raw grey ramp: design-system/tokens/colors.css says so in as many
+ * words ("Reference these in components, not the raw ramp"), and the raw ramp does not
+ * follow the light-theme override.
+ */
+
+.verso-signin {
+  position: fixed; inset: 0; z-index: 9000;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-12);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  overflow: auto;
+}
+/* The wordmark, on the brand role token -- the same Exo 2 the courses ship in. */
+.verso-signin__mark {
+  font: var(--type-brand);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-2);
+}
+/* Dialog-shaped, at the Modal contract's default width (380px) so it reads as a sibling of
+   the app's own modals rather than a web page. */
+.verso-signin__card {
+  width: 100%; max-width: 380px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-16);
+  box-shadow: var(--shadow-modal);
+}
+.verso-signin__lede { margin: 0 0 var(--space-12); font-size: var(--text-md); line-height: var(--leading-normal); color: var(--text-secondary); }
+.verso-signin__title { margin: 0 0 var(--space-3); font: var(--type-panel-title); color: var(--text-primary); }
+
+/* Prose under the primary action, and under the break-glass link. Not labels: sentences. */
+.verso-signin__note { margin: var(--space-5) 0 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--text-tertiary); }
+
+.verso-signin__divider {
+  display: flex; align-items: center; gap: var(--space-6);
+  margin: var(--space-12) 0 var(--space-8); font-size: var(--text-xs); color: var(--text-disabled);
+}
+.verso-signin__divider::before,
+.verso-signin__divider::after { content: ""; flex: 1; height: 1px; background: var(--border-subtle); }
+
+/* Break-glass: a quiet text link, deliberately not a Button -- an emergency account offered
+   as a peer of the primary action gets used as one. */
+.verso-signin__link {
+  display: inline; font: inherit; font-size: var(--text-sm); padding: 0;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-secondary); text-decoration: underline; text-underline-offset: 2px;
+}
+.verso-signin__link:hover { color: var(--text-primary); }
+
+.verso-signin__field { display: block; margin: 0 0 var(--space-6); }
+.verso-signin__label { display: block; margin: 0 0 var(--space-3); font: var(--type-label); color: var(--text-secondary); }
+
+/* Two tones, and they mean different things: an outage is not a wrong password. */
+.verso-signin__msg {
+  margin: 0 0 var(--space-8); padding: var(--space-5) var(--space-6); border-radius: var(--radius-md);
+  font-size: var(--text-sm); line-height: var(--leading-normal);
+}
+.verso-signin__msg--warn { background: var(--mark-note-wash); border: 1px solid var(--warning); color: var(--text-primary); }
+.verso-signin__msg--error { background: var(--danger-quiet); border: 1px solid var(--danger); color: var(--text-primary); }
+.verso-signin__msg strong { display: block; margin-bottom: var(--space-1); font-weight: var(--weight-semibold); }
+
+.verso-signin__busy { font-size: var(--text-sm); color: var(--text-secondary); }
+.verso-signin__back { margin-top: var(--space-8); }
+.verso-signin__submit { margin-top: var(--space-4); }
+
+/* ---- first run (platform-pivot 31) ---------------------------------------
+   The OTHER argued exception to the six-presentation spine, on exactly the same grounds as
+   sign-in above: there is no canvas to squeeze, because the server is not set up yet. It shares
+   this stylesheet on purpose — two surfaces carrying the same exception for the same reason
+   should not drift into two looks. What it adds is the step rail, which is what makes it read
+   as completing an installation rather than configuring an app. */
+.verso-firstrun__card { max-width: 460px; }
+.verso-firstrun__rail {
+  display: flex; gap: var(--space-4); list-style: none; margin: 0 0 var(--space-12); padding: 0;
+}
+.verso-firstrun__step {
+  flex: 1 1 0; padding-top: var(--space-3);
+  border-top: 2px solid var(--border-subtle);
+  font-size: var(--text-2xs); line-height: var(--leading-snug); color: var(--text-disabled);
+}
+.verso-firstrun__step.is-done { border-top-color: var(--success); color: var(--text-tertiary); }
+.verso-firstrun__step.is-current { border-top-color: var(--accent); color: var(--text-primary); }
+/* The one hard refusal in the flow gets a tone of its own: SQLite on SMB corrupts silently, so
+   this is not a preference. */
+.verso-firstrun__never { color: var(--warning); }
+.verso-firstrun__val { margin-left: auto; font-size: var(--text-sm); color: var(--text-primary); }
+.verso-firstrun__footer { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-12); }

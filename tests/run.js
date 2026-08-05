@@ -1542,8 +1542,13 @@ section("platform-pivot 34 server-mode bootstrap");
   // --- store-http must fail LOUDLY when signed out, never fall back ---
   var sh = src("src/store-http.js");
   ok("34: store-http reads __versoServerAuthRequired", /__versoServerAuthRequired/.test(sh));
+  // The claim is that a signed-out write REFUSES and SAYS SO -- not which function it says it
+  // through. platform-pivot 38 routed the saying-so into the session banner, so pinning the old
+  // call text would have failed a change that kept the behaviour exactly.
   ok("34: signed-out writes return {ok:false} rather than an optimistic ok",
-    /if \(authRequired\) \{ reportFailure\(SIGNED_OUT\); return \{ ok: false/.test(sh));
+    /if \(authRequired\) \{ reportSignedOut\(true\); return \{ ok: false/.test(sh));
+  ok("34: and every facet's writer carries that same guard",
+    (sh.match(/if \(authRequired\) \{ reportSignedOut\(true\); return \{ ok: false/g) || []).length >= 3);
   ok("34: a 401/403 on a durable write flips the adapter to the signed-out state",
     /r\.status === 401 \|\| r\.status === 403/.test(sh));
 
@@ -1578,9 +1583,15 @@ section("platform-pivot 34 server-mode bootstrap");
   ok("34: signed in -> authRequired false", w.__versoServerAuthRequired === false);
   ok("34: registry arrives base64-inlined, byte-faithful",
     Buffer.from(w.__versoServerRegistryB64, "base64").toString("utf8") === reg);
-  ok("34: the principal is named (kind/role/name only)",
+  // The principal carries exactly what the account menu (platform-pivot 39) needs to answer
+  // "which account am I using" -- and nothing else. Notably NO capability list and no token:
+  // the server decides permissions regardless of what the page holds, and a capability list in
+  // the page invites a client-side check that looks authoritative and is not.
+  ok("34: the principal is named, and carries only what names it",
     w.__versoServerPrincipal.role === "author" && w.__versoServerPrincipal.name === "Ada" &&
-    Object.keys(w.__versoServerPrincipal).sort().join(",") === "kind,name,role");
+    Object.keys(w.__versoServerPrincipal).sort().join(",") === "breakGlass,email,kind,name,role");
+  ok("34: and never the capability list or anything secret",
+    !("capabilities" in w.__versoServerPrincipal) && !/token|secret|password/i.test(JSON.stringify(w.__versoServerPrincipal)));
 
   // --- signed out: the mode still arrives, the data does not ---
   // This is the ticket's whole point. If a signed-out client learned nothing, store-http
@@ -3078,6 +3089,986 @@ section("platform-pivot 17/18/20 identity");
     try { idn.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+})();
+
+// ---- platform-pivot 30: the go-live gate + server-only smoke test ---------------
+// Four behaviours cannot be exercised in local mode by construction, and this suite covers all
+// four against fakes and a real store -- which proves the LOGIC and cannot prove the DEPLOYMENT.
+// The smoke test drives them over HTTP against a real running server, and the gate refuses to
+// let a green local run ship on its own. That refusal is the ticket.
+section("platform-pivot 30 go-live gate");
+(function () {
+  var SMOKE = require(path.join(ROOT, "server/smoke.js"));
+
+  // --- the gate's arithmetic (pure) ---
+  var greenSmoke = { ok: true, results: [{ id: "health", ok: true }, { id: "sync", ok: true }] };
+  var everything = { backup: true, dryRun: true, rollback: true, "idp-reach": true, "arr-proxy": true };
+  ok("30: with the smoke green and every confirmation made, promotion proceeds",
+    SMOKE.evaluateGate(greenSmoke, everything).ok === true);
+  // THE POINT OF THE TICKET.
+  var noSmoke = SMOKE.evaluateGate({ ok: false, results: [{ id: "health", ok: true }] }, everything);
+  ok("30: a FAILED smoke test hard-blocks promotion, whatever else was confirmed", noSmoke.ok === false && noSmoke.blocking.indexOf("smoke") >= 0);
+  ok("30: and says so in words an operator can act on", /promotion is blocked/.test(noSmoke.reason));
+  ok("30: a green smoke alone is NOT enough -- the confirmations are part of the gate",
+    SMOKE.evaluateGate(greenSmoke, {}).ok === false);
+
+  // The two [UNKNOWN]s are properties of the site's network. A gate that omitted them would read
+  // as "all clear" while the two most likely deployment failures went unchecked.
+  var ids = SMOKE.GATE_ITEMS.map(function (i) { return i.id; });
+  ok("30: the gate carries the IdP-reachability unknown", ids.indexOf("idp-reach") >= 0);
+  ok("30: and the IIS+ARR both-pipes unknown", ids.indexOf("arr-proxy") >= 0);
+  ok("30: both are marked as unknowns a person confirms, not as things code decided",
+    SMOKE.GATE_ITEMS.filter(function (i) { return i.unknown; }).every(function (i) { return i.automated === false; }));
+  ok("30: the arr-proxy item names BOTH pipes, since proxying one is the silent failure",
+    /wss:\/\/ AND the long-poll/.test(SMOKE.GATE_ITEMS.filter(function (i) { return i.id === "arr-proxy"; })[0].label));
+  ok("30: the gate also covers backup, dry run, health and rollback",
+    ["backup", "dryRun", "health", "rollback"].every(function (k) { return ids.indexOf(k) >= 0; }));
+  var partial = SMOKE.evaluateGate(greenSmoke, { backup: true, dryRun: true });
+  ok("30: an unconfirmed item blocks and is named", partial.ok === false && partial.blocking.indexOf("rollback") >= 0);
+
+  // --- the harness, against a REAL running server ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> go-live smoke tests skipped"); return; }
+    var os = require("os");
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    __async.push((async function () {
+      var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-smoke-"));
+      var server, base;
+      await new Promise(function (r) {
+        server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "v.sqlite"), linkSecret: "s", insecureCookie: true }, function (s) { base = "http://127.0.0.1:" + s.address().port; r(); });
+      });
+      try {
+        server.__identity.registerLocalAccount("root@local", "Root", "smokepw", "admin");
+        var res = await SMOKE.run({ base: base, admin: { email: "root@local", password: "smokepw" }, docId: "SMOKE-1", stamp: "t" });
+        function got(id) { return res.results.filter(function (r) { return r.id === id; })[0]; }
+        ok("30: the smoke test runs end to end against a real server over HTTP", res.results.length === 5);
+        ok("30: health answers with a level and a version", got("health").ok === true);
+        // These four are exactly what local mode cannot exercise.
+        ok("30: (1) a second client sees a fanned-out block.change, and it persisted -- " + got("sync").detail, got("sync").ok === true);
+        ok("30: (2) a held block refuses the second client -- " + got("locks").detail, got("locks").ok === true);
+        ok("30: (3) the auth rung yields a resolvable session -- " + got("auth").detail, got("auth").ok === true);
+        ok("30: (4) a review link reads and comments but CANNOT edit -- " + got("review-link").detail, got("review-link").ok === true);
+        ok("30: and the run reports one overall verdict", res.ok === true);
+
+        // It asserts externally observable behaviour only: no internals, no in-process handles.
+        var js = src("server/smoke.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+        ok("30: the harness reaches the server only over HTTP",
+          !/require\(".*verso-server/.test(js) && !/__blockStore|__identity|__hub/.test(js));
+        ok("30: it takes a base URL, so it runs against prod-in-window or a throwaway alike",
+          /function run\(opts\)/.test(js) && /opts\.base/.test(js));
+        ok("30: a failing check never aborts the rest -- an operator gets every problem at once",
+          /async function step\(id, fn\)/.test(js) && /return \{ id: id, ok: false, detail: "threw/.test(js));
+      } finally {
+        try { server.close(); } catch (e) {}
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+      }
+    })());
+  })();
+
+  // --- the command an operator actually runs ---
+  var cli = src("scripts/go-live.js");
+  ok("30: the gate is a command, and it exits non-zero when blocked", /process\.exit\(gate\.ok \? 0 : 1\)/.test(cli));
+  ok("30: it prints each item with whether it passed", /gate\.items\.forEach/.test(cli));
+  ok("30: and tells the operator how to confirm the manual ones", /--confirm " \+ i\.id/.test(cli));
+  ok("30: it drives the same harness, not a second copy of the checks", /require\("\.\.\/server\/smoke\.js"\)/.test(cli));
+})();
+
+// ---- platform-pivot 31: guided IT install, first run, monitoring ----------------
+// This is the ticket that most directly answers James's ask: the moment approval lands, an admin
+// who has never seen the codebase can stand this up. So the tests are about the things that
+// would strand such a person -- a store on a network share, a first-run route that stays open, a
+// health check that says nothing, a log with a password in it.
+section("platform-pivot 31 IT install + first run + monitoring");
+(function () {
+  var OPS = require(path.join(ROOT, "server/ops.js"));
+  var SI = require(path.join(ROOT, "src/sign-in.js")).VersoSignIn;
+
+  // --- alerts: thresholds evaluated here, reported for the site's own monitoring ---
+  ok("31: a healthy reading raises nothing", OPS.evaluate({ diskFreePct: 60, changeLogRows: 10, heldLocks: 3 }).level === "ok");
+  ok("31: a tight volume warns", OPS.evaluate({ diskFreePct: 12 }).level === "warning");
+  ok("31: a nearly-full volume is CRITICAL, because writes start failing",
+    OPS.evaluate({ diskFreePct: 3 }).level === "critical");
+  ok("31: a large change log asks for a compaction", OPS.evaluate({ changeLogRows: 900000 }).alerts[0].id === "changeLog");
+  ok("31: a pile of held locks reads as locks not releasing, not as a busy team",
+    /may not be releasing/.test(OPS.evaluate({ heldLocks: 500 }).alerts[0].message));
+  ok("31: the worst condition wins the level", OPS.evaluate({ diskFreePct: 2, changeLogRows: 900000 }).level === "critical");
+  ok("31: a missing reading raises nothing rather than guessing", OPS.evaluate({}).alerts.length === 0);
+  ok("31: thresholds are overridable per site", OPS.evaluate({ diskFreePct: 40 }, { diskFreeWarnPct: 50 }).level === "warning");
+
+  // --- the health payload ---
+  var shallow = OPS.health({ mode: "server", version: "1", schemaVersion: 2 });
+  ok("31: the cheap form is cheap -- no readings, safe to poll often", shallow.ok === true && shallow.reading === undefined);
+  ok("31: and always identifies the running artifact", shallow.version === "1" && shallow.schemaVersion === 2);
+  var deepCrit = OPS.health({ mode: "server", dataDir: "/nonexistent-xyz", blockStore: { maxSeq: function () { return 900000; } } }, true);
+  ok("31: the deep form carries the readings and the alerts", !!deepCrit.reading && Array.isArray(deepCrit.alerts));
+  // ok goes false only on critical: a monitor that watches nothing but the boolean still catches
+  // what stops writes, and a warning does not page anyone for a volume that is 12% free.
+  var warnOnly = OPS.health({ blockStore: { maxSeq: function () { return 900000; } }, dataDir: ROOT }, true);
+  ok("31: a WARNING leaves ok true", warnOnly.level === "warning" && warnOnly.ok === true);
+
+  // --- the structured log ---
+  var written = [];
+  var log = OPS.createLog({ sink: function (l) { written.push(l); }, now: function () { return 0; } });
+  log.auth("signin", { email: "a@b", password: "hunter2", token: "abc", cookie: "x", authorization: "Bearer y", rung: "oidc" });
+  var rec = JSON.parse(written[0]);
+  ok("31: an auth event is one JSON object per line, with a timestamp and a kind",
+    rec.kind === "auth" && rec.event === "signin" && !!rec.ts);
+  // A log is exactly where a secret goes to be copied into a ticket.
+  ok("31: and NEVER carries a password, token, cookie or authorization header",
+    rec.password === undefined && rec.token === undefined && rec.cookie === undefined && rec.authorization === undefined);
+  ok("31: while the useful fields survive", rec.email === "a@b" && rec.rung === "oidc");
+  log.error("boom", { where: "x" }); log.promotion("promoted", { version: "2" });
+  ok("31: the three kinds an admin is asked about after the fact are all there",
+    written.map(function (l) { return JSON.parse(l).kind; }).join() === "auth,error,promotion");
+  ok("31: a failing sink never takes the server down",
+    (function () { var bad = OPS.createLog({ sink: function () { throw new Error("disk"); } }); bad.error("x"); return true; })());
+
+  // --- first run: the wizard's rules ---
+  ok("31: the admin account cannot be skipped", SI.firstRunStepValid(0, {}) === false);
+  ok("31: nor set with a throwaway password", SI.firstRunStepValid(0, { adminEmail: "a@b", adminPassword: "short" }) === false);
+  ok("31: a real one passes", SI.firstRunStepValid(0, { adminEmail: "a@b", adminPassword: "longenough" }) === true);
+  ok("31: local accounts need nothing more", SI.firstRunStepValid(1, { method: "local" }) === true);
+  ok("31: a half-filled OIDC config does not pass", SI.firstRunStepValid(1, { method: "oidc", issuer: "i", clientId: "c" }) === false);
+  ok("31: a complete one does", SI.firstRunStepValid(1, { method: "oidc", issuer: "i", clientId: "c", clientSecret: "s" }) === true);
+  ok("31: a data folder is required", SI.firstRunStepValid(2, {}) === false);
+  // Continue must not stay enabled beside the inline refusal, or the screen says two things at once.
+  ok("31: and a network path does not merely warn -- it blocks the step",
+    SI.firstRunStepValid(2, { dataDir: "\\\\nas\\\\verso" }) === false &&
+    SI.firstRunStepValid(2, { dataDir: "D:\\\\Verso" }) === true);
+
+  // THE REFUSAL THAT MATTERS. SQLite over SMB corrupts silently; no error, and the damage shows
+  // up later as a course that will not open.
+  ok("31: a UNC path is refused", SI.isNetworkPath("\\\\\\\\server\\\\share\\\\verso") === true);
+  ok("31: and a URL-shaped one", SI.isNetworkPath("smb://nas/vol") === true && SI.isNetworkPath("//nas/vol") === true);
+  ok("31: a local path is fine", SI.isNetworkPath("D:\\\\Verso\\\\data") === false && SI.isNetworkPath("/var/lib/verso") === false);
+  ok("31: the wizard refuses it inline AND again at submit",
+    (src("src/sign-in.js").match(/isNetworkPath\(data\.dataDir\)/g) || []).length >= 2);
+  // The inline half is only reachable if the field re-renders its STEP, not just the footer.
+  // It was written and unreachable until the browser showed it -- hence the gate.
+  ok("31: and the data-folder field re-renders live, so the inline refusal can actually appear",
+    /field\("Folder", "dataDir", "text", "D:\\\\Verso\\\\data", true\)/.test(src("src/sign-in.js")) &&
+    /if \(live\) \{ var pos = tf\.input\.selectionStart; render\(\);/.test(src("src/sign-in.js")));
+  ok("31: the payload only carries OIDC config when OIDC was chosen",
+    SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", method: "local" }).oidc === undefined &&
+    !!SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", method: "oidc", issuer: "i" }).oidc);
+  ok("31: first run comes BEFORE sign-in -- there is nobody to sign in as yet",
+    /if \(shouldFirstRun\(window\)\) mountFirstRun/.test(src("src/sign-in.js")));
+  ok("31: and it shares sign-in's argued exception rather than growing a second look",
+    /verso-firstrun__card \{ max-width/.test(src("styles/editor/15-sign-in.css")));
+
+  // --- first run over HTTP: open before setup, CLOSED after ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> first-run HTTP tests skipped"); return; }
+    var os = require("os");
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    __async.push((async function () {
+      var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-firstrun-"));
+      var server, base;
+      await new Promise(function (r) { server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "v.sqlite"), linkSecret: "s", insecureCookie: true }, function (s) { base = "http://127.0.0.1:" + s.address().port; r(); }); });
+      try {
+        // In FRONT of the identity boundary, deliberately: there is nobody who could authenticate.
+        var g = await (await fetch(base + "/api/first-run")).json();
+        ok("31: a fresh server says it needs first run, without authentication", g.ok === true && g.needed === true);
+        var boot = await (await fetch(base + "/api/bootstrap.js")).text();
+        ok("31: and the page is told, so it shows the wizard instead of a dead-end sign-in",
+          /__versoFirstRunNeeded = true/.test(boot));
+
+        var p = await (await fetch(base + "/api/first-run", { method: "POST", body: JSON.stringify({ adminEmail: "root@local", adminPassword: "longenough", organisationName: "Northwind" }) })).json();
+        ok("31: setting it up creates the break-glass admin and records the organisation", p.ok === true && p.org === "Northwind");
+        ok("31: which can immediately sign in",
+          (await (await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "root@local", password: "longenough" }) })).json()).ok === true);
+
+        // THE ONE THAT WOULD LOSE A SERVER: a permanent create-an-admin endpoint.
+        var again = await fetch(base + "/api/first-run", { method: "POST", body: JSON.stringify({ adminEmail: "attacker@x", adminPassword: "longenough" }) });
+        ok("31: and the route CLOSES ITSELF -- it can never mint a second administrator", again.status === 409);
+        ok("31: it now reports setup as done", (await (await fetch(base + "/api/first-run")).json()).needed === false);
+        ok("31: the bootstrap stops advertising it too", !/__versoFirstRunNeeded = true/.test(await (await fetch(base + "/api/bootstrap.js")).text()));
+
+        var h = await (await fetch(base + "/api/health?deep=1")).json();
+        ok("31: deep health answers with a level and real readings", !!h.level && typeof h.reading.diskFreePct === "number");
+        ok("31: and never needs a login, so a monitor can poll it", h.service === "verso-server");
+      } finally {
+        try { server.close(); } catch (e) {}
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+      }
+    })());
+  })();
+
+  // --- the install kit an admin actually follows ---
+  var ps = src("server/install/install-windows.ps1");
+  ok("31: the installer registers Node as an auto-starting Windows Service",
+    /New-Service/.test(ps) && /-StartupType Automatic/.test(ps));
+  ok("31: it refuses a network path before changing anything", /SQLite corrupts silently on SMB/.test(ps) && ps.indexOf("throw \"DataDir must be") < ps.indexOf("New-Item -ItemType Directory"));
+  ok("31: it refuses a Node too old for node:sqlite", /22\.5\.0/.test(ps));
+  ok("31: the data folder ends up writable by the service account alone, which is what makes WAL safe",
+    /icacls/.test(ps) && /inheritance:r/.test(ps));
+  ok("31: the backend binds loopback, so IIS is the only thing that can reach it", /"host" = "127\.0\.0\.1"|host = "127\.0\.0\.1"/.test(ps));
+  // Proxying only one pipe is the failure that looks like "collaboration is just slow".
+  ok("31: the IIS config proxies BOTH the websocket upgrade and the long-poll fallback",
+    /<webSocket enabled="true" \/>/.test(ps) && /\^\(api\|auth\|sync\)/.test(ps));
+  ok("31: secrets go in the config FILE, never in source", /never in source/.test(ps));
+  ok("31: and it makes no external call of any kind",
+    !/Invoke-WebRequest|Invoke-RestMethod|curl|wget|Start-BitsTransfer/i.test(ps));
+
+  var rb = src("server/install/RUNBOOK.md");
+  ok("31: the runbook states the air-gap posture up front", /Nothing in Verso's backend reaches the internet/.test(rb));
+  ok("31: names TLS as IIS's job and at-rest as the volume's", /BitLocker/.test(rb) && /Verso never terminates TLS itself|does not encrypt at rest/.test(rb));
+  ok("31: explains the alert table an admin will be paged by", /changeLog/.test(rb) && /locks/.test(rb) && /15% free/.test(rb));
+  ok("31: tells them how to get back in when the IdP is down", /break-glass/.test(rb) && /Use the local admin account/.test(rb));
+  ok("31: and carries the two deploy unknowns rather than pretending they are settled",
+    /reach your identity provider/.test(rb) && /wss:\/\/` and the long-poll|BOTH `wss/.test(rb));
+})();
+
+// ---- platform-pivot 35: source documents on demand ------------------------------
+// The scaling half of James's loading decision. The whole ticket turns on ONE hazard: the canvas
+// render resolver reads master.doc DURING render, so a body that has not arrived renders a BLANK
+// BLOCK -- which does not look like a failure, it looks like content somebody deleted. Every test
+// here is about never confusing "not loaded" with "empty".
+section("platform-pivot 35 source documents on demand");
+(function () {
+  try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> on-demand library tests skipped"); return; }
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+
+  // --- the hydration set: what the FIRST render cannot do without ---
+  var reg = {
+    "C-1": { meta: { code: "C-1" }, pages: [{ id: "p1", blocks: [
+      { id: "b1", type: "paragraph", sourceLink: { masterId: "top-a", markId: "m1" } },
+      { id: "b2", type: "row", children: [{ id: "b3", type: "paragraph", sourceLink: { masterId: "top-b", markId: "m2" } }] }
+    ] }] },
+    "C-2": { meta: { code: "C-2" }, pages: [{ id: "p2", blocks: [
+      { id: "b4", type: "paragraph", sourceLink: { masterId: "top-c", markId: "m3" } }
+    ] }] }
+  };
+  var openOnly = srv.hydrationSet(reg, ["C-1"]);
+  ok("35: the set is every source document linked into the OPEN documents", openOnly.sort().join() === "top-a,top-b");
+  ok("35: and it reaches links nested inside containers, not just top-level blocks", openOnly.indexOf("top-b") >= 0);
+  ok("35: a document that is not open contributes nothing", openOnly.indexOf("top-c") === -1);
+  ok("35: with both open, both contribute", srv.hydrationSet(reg, ["C-1", "C-2"]).sort().join() === "top-a,top-b,top-c");
+  // No open-doc pointer is the conservative case: hydrate from EVERYTHING rather than guess, since
+  // guessing wrong here is the blank-block failure.
+  ok("35: no open-doc pointer -> every document is considered", srv.hydrationSet(reg, null).sort().join() === "top-a,top-b,top-c");
+  ok("35: an empty registry needs nothing", srv.hydrationSet({}, ["C-1"]).length === 0);
+  ok("35: and a doc with no source links needs nothing",
+    srv.hydrationSet({ "C-9": { pages: [{ blocks: [{ id: "x", type: "paragraph" }] }] } }, ["C-9"]).length === 0);
+
+  // --- the shell: bodies omitted, and FLAGGED ---
+  var os = require("os");
+  __async.push((async function () {
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-ondemand-"));
+    var server, base;
+    await new Promise(function (r) { server = srv.startServer({ mode: "local", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "v.sqlite") }, function (s) { base = "http://127.0.0.1:" + s.address().port; r(); }); });
+    try {
+      var store = server.__store, bs = server.__blockStore;
+      var SD = require(path.join(ROOT, "src/source-doc.js"));
+      // two source documents, both with real bodies in the block store
+      ["top-a", "top-c"].forEach(function (id) {
+        var model = SD.fromSections({ sections: [{ heading: "H " + id, body: "Body of " + id }] });
+        bs.importDoc(srv.libraryDocId(id), SD.toBlockDoc(model), "seed");
+      });
+      store.setKv("authoring.library", JSON.stringify({ components: {
+        "top-a": { kind: "topic", name: "A" }, "top-c": { kind: "topic", name: "C" },
+        "cmp-1": { kind: "component", name: "not a topic" }
+      } }));
+
+      var full = JSON.parse(srv.assembleLibrary(store, bs));
+      ok("35: with no hydration set, every topic still carries its body (the pre-35 behaviour)",
+        !!full.components["top-a"].doc && !!full.components["top-c"].doc);
+
+      var shell = JSON.parse(srv.assembleLibrary(store, bs, { hydrate: ["top-a"] }));
+      ok("35: a hydrated topic carries its body", !!shell.components["top-a"].doc);
+      ok("35: and carries no stale 'not loaded' mark", shell.components["top-a"].__deferred === undefined);
+      ok("35: a deferred topic carries NO body", shell.components["top-c"].doc === undefined);
+      // The flag is the whole safety mechanism: without it, deferred and empty are the same shape.
+      ok("35: but IS flagged, so deferred can never be mistaken for empty", shell.components["top-c"].__deferred === true);
+      ok("35: the metadata survives, so the shell still lists the document", shell.components["top-c"].name === "C");
+      ok("35: a non-topic component is untouched by any of this", shell.components["cmp-1"].kind === "component");
+
+      // --- the on-demand route ---
+      var j = await (await fetch(base + "/api/library/topic/top-c")).json();
+      ok("35: the deferred body is fetchable on demand", j.ok === true && j.id === "top-c" && !!j.doc);
+      ok("35: and it is the SAME body the eager path would have sent",
+        JSON.stringify(j.doc) === JSON.stringify(full.components["top-c"].doc));
+      var none = await (await fetch(base + "/api/library/topic/nope")).json();
+      ok("35: a topic with no rows reports empty rather than an empty document",
+        none.ok === true && none.doc === null && none.empty === true);
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+
+  // --- the client seam ---
+  var sh = src("src/store-http.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("35: the client hydrates by id, and splices the body into the LIVE store so the ~36 existing readers keep working",
+    /window\.__versoHydrateTopic = hydrateTopic/.test(sh) && /window\.LibraryStore\.components\[id\]/.test(sh));
+  ok("35: two clicks make one request", /if \(hydrating\[id\]\) return hydrating\[id\];/.test(sh));
+  ok("35: an already-loaded topic is a no-op", /if \(!isDeferred\(id\)\) return Promise\.resolve\(null\);/.test(sh));
+  ok("35: a topic the server says is genuinely empty stops looking unloaded, or every reader would ask forever",
+    /delete m\.__deferred;/.test(sh));
+
+  // THE DATA-LOSS QUESTION, and the two things that answer it. A save while a body is deferred
+  // must never write that source document back as an emptied one.
+  ok("35: splitLibrary only collects a topic that HAS a body, so a deferred one writes no rows",
+    /if \(m\.kind === "topic" && m\.doc\) \{ topics\[id\] = m\.doc; delete copy\.doc; \}/.test(sh));
+  ok("35: and the transport flag is stripped on write, so 'not loaded' is never persisted",
+    /delete copy\.__deferred;/.test(sh));
+
+  // --- the client callers that could meet a non-hydrated master ---
+  var ss = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("35: opening a source document waits for its body instead of rendering a blank",
+    /function hydrateIfDeferred\(id, then\)/.test(ss) && /Loading this source document/.test(ss));
+  ok("35: the master is still resolved first, so a deferred body cannot be mistaken for a MISSING document and mint a second one",
+    ss.indexOf("var master = ensureUnifiedDocForActiveProduct();") < ss.indexOf("hydrateIfDeferred(master.id"));
+  // Export is the one path that would otherwise rebuild from the old per-topic content and hand
+  // the author a file that silently disagrees with what is on screen.
+  ok("35: export refuses to fabricate from a deferred master, and fetches instead",
+    /return "deferred";/.test(ss) && /if \(model === "deferred"\)/.test(ss));
+
+  ok("35: the bootstrap asks for the hydration set rather than everything",
+    /hydrate: hydrationSet\(reg, open\)/.test(src("server/verso-server.js")));
+})();
+
+// ---- platform-pivot 36: the cutover UI -----------------------------------------
+// platform-pivot-33 built and PROVED the engine, then deliberately wired nothing to it. This is
+// the entry point, done once, carefully. The tests that matter are the two refusals: the real
+// cutover is unreachable until a rehearsal has passed, and a failure must read as safe.
+section("platform-pivot 36 cutover UI");
+(function () {
+  var CO = require(path.join(ROOT, "src/editor/cutover.js")).VersoCutover;
+  var js = src("src/editor/cutover.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  // --- offered only where it can do something ---
+  var can = ["view", "edit", "serverConfig"];
+  ok("36: offered to a serverConfig holder on a browser store, with a server to move to",
+    CO.shouldOffer({ serverUrl: "http://s", backend: "browser", capabilities: can }) === true);
+  ok("36: NOT to an ordinary author -- this is admin-only",
+    CO.shouldOffer({ serverUrl: "http://s", backend: "browser", capabilities: ["view", "edit", "publish"] }) === false);
+  ok("36: not once the work already lives on the server",
+    CO.shouldOffer({ serverUrl: "http://s", backend: "http", capabilities: can }) === false);
+  ok("36: and never in a local install, where there is nothing to move to",
+    CO.shouldOffer({ backend: "browser", capabilities: can }) === false);
+
+  // --- the stage marks: what ran, what stopped it, what never started ---
+  var all = CO.stageMarks({ ok: true, stage: "done" });
+  ok("36: a clean run marks every stage", all.length === 6 && all.every(function (m) { return m.state === "ok"; }));
+  ok("36: and the stages are the ENGINE's own names, in its order",
+    all.map(function (m) { return m.id; }).join() === "read,backup,deliver,stash,write,verify");
+  var mid = CO.stageMarks({ ok: false, stage: "stash" });
+  ok("36: a failure marks the stages that ran", mid[0].state === "ok" && mid[1].state === "ok" && mid[2].state === "ok");
+  ok("36: names the one that stopped it", mid[3].state === "failed" && mid[3].id === "stash");
+  // "skipped" and "ok" must look different: an admin working out how far it got needs to tell
+  // a stage that passed from one that never started.
+  ok("36: and shows the rest as never started, not as passed", mid[4].state === "skipped" && mid[5].state === "skipped");
+  ok("36: a first-stage failure marks nothing as passed",
+    CO.stageMarks({ ok: false, stage: "read" }).filter(function (m) { return m.state === "ok"; }).length === 0);
+
+  // --- a refusal reads as safe ---
+  var msg = CO.failMessage({ ok: false, stage: "write", error: "the server said no" });
+  ok("36: the failure copy LEADS with what did not happen",
+    msg.indexOf("Nothing was changed. Your work is still on this machine, exactly as it was.") === 0);
+  ok("36: then names the stage in the author's words, not the engine's id", /writing your work to the server/i.test(msg));
+  ok("36: and passes the server's own reason on", /the server said no/.test(msg));
+  ok("36: a success is not a failure message", CO.failMessage({ ok: true }) === null);
+
+  // --- the two hard rules ---
+  // Two independent guards, and the claim rests on both: the one button asks for a REAL run only
+  // once a rehearsal has passed, and start() refuses one anyway. Stated as behaviour rather than
+  // as a literal handler, because the handler changed once already (see the double-fire note in
+  // cutover.js) and the guarantee did not.
+  ok("36: the real cutover is unreachable until a rehearsal has passed",
+    /if \(real && !dryPassed\) return;/.test(js) && /start\(dryPassed\)/.test(js));
+  ok("36: and the button has exactly ONE click handler, so the two meanings cannot both fire",
+    (js.match(/shell\.primary\.addEventListener\("click"/g) || []).length === 1 && !/onPrimary:/.test(js));
+  ok("36: the first run offered is the rehearsal, and it commits nothing",
+    /primaryLabel: COPY\.dryRun/.test(js) && /run\(!real,/.test(js));
+  ok("36: commitBackend stays the ONE writer of the flag -- this calls it and never touches the key",
+    /E\.Store\.commitBackend\("http"\)/.test(js) && !/setItem\s*\([^)]*authoring\.storageBackend/.test(js));
+  ok("36: and it is only called after a REAL run reports ok",
+    js.indexOf("commitBackend") > js.indexOf("if (!real)"));
+
+  // --- the backup limit is stated, not implied ---
+  ok("36: the screen says a browser cannot confirm the download landed",
+    /cannot confirm a download reached your disk/.test(CO.COPY.keepBackup));
+  ok("36: and it is shown on the run screen, not buried in a log", /cutover__keep/.test(js));
+
+  // --- the surface ---
+  var css = src("styles/editor/18-cutover.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok("36: it is the canonical modal shell, not a bespoke dialog",
+    /kernel\.bind\("dsModalShell"\)/.test(js) && !/position:\s*fixed;\s*inset:\s*0/.test(css));
+  ok("36: semantic role tokens only", !/var\(--gray-/.test(css));
+  ok("36: a skipped stage is visually distinct from a passed one",
+    /\.cutover__stage--skipped/.test(css) && /\.cutover__stage--ok::before/.test(css));
+
+  // --- wiring ---
+  ok("36: the module is installed and loaded on both pages",
+    /window\.VersoCutover\.install\(VE\)/.test(src("src/editor.js")) &&
+    /editor\/cutover\.js/.test(src("index.html")) && /editor\/cutover\.js/.test(src("kit.html")));
+  ok("36: it drives the ENGINE rather than reimplementing the stages",
+    /window\.Migration\.runToServer\(/.test(js) && !/verifyClientBackup|buildClientBackup/.test(js));
+  ok("36: its stylesheet is declared, ordered and linked on both pages",
+    /18-cutover\.css/.test(src("styles/editor/order.json")) &&
+    /18-cutover\.css/.test(src("index.html")) && /18-cutover\.css/.test(src("kit.html")));
+})();
+
+// ---- platform-pivot 21: people and roles ---------------------------------------
+// The rule that shapes every test here: THE SERVER DECIDES, THIS RENDERS. Both guardrail
+// warnings and the never-locked-out refusal are computed by platform-pivot-37 and arrive with
+// the data. A UI that re-derives them is a UI that will one day explain a rule the server did
+// not apply -- telling an admin their change was fine when it was refused, or the reverse.
+section("platform-pivot 21 people and roles");
+(function () {
+  var AU = require(path.join(ROOT, "src/editor/admin-users.js")).VersoAdminUsers;
+
+  // --- who is offered it: asked for, never assumed ---
+  ok("21: not offered without the capability",
+    AU.shouldOffer({ kind: "user", capabilities: ["view", "edit", "publish"] }) === false);
+  ok("21: offered to a holder of manageUsers",
+    AU.shouldOffer({ kind: "user", capabilities: ["view", "manageUsers"] }) === true);
+  ok("21: never to a guest", AU.shouldOffer({ kind: "guest", capabilities: ["manageUsers"] }) === false);
+  ok("21: never in local mode -- there is no principal at all", AU.shouldOffer(null) === false);
+  var js = src("src/editor/admin-users.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("21: the capability is fetched from /auth/me, not read off the page",
+    /\/auth\/me/.test(js) && !/__versoServerPrincipal[\s\S]{0,40}capabilit/.test(js));
+
+  // --- the empty state explains rather than showing a table of one ---
+  var solo = [{ id: "u1", name: "Boss", email: "b@x", role: "Admin" }];
+  ok("21: only the installing admin -> the empty state", AU.isEmptyState(solo, "u1") === true);
+  ok("21: the break-glass account does not count as company", AU.isEmptyState(solo.concat([{ id: "u0", name: "BG", breakGlass: true }]), "u1") === true);
+  ok("21: a second real person ends it", AU.isEmptyState(solo.concat([{ id: "u2", name: "Ada" }]), "u1") === false);
+  ok("21: and the empty copy is verbatim",
+    AU.COPY.emptyTitle === "You're the only account so far" &&
+    AU.COPY.emptyBody === "Add the people who'll be authoring alongside you.");
+
+  // --- at scale: search, count, pagination ---
+  var many = [];
+  for (var i = 0; i < 240; i++) many.push({ id: "u" + i, name: "Person " + i, email: "p" + i + "@x.invalid", role: i % 3 ? "Author" : "Reviewer" });
+  ok("21: search matches name, email or role",
+    AU.filterPeople(many, "Person 7").length >= 1 &&
+    AU.filterPeople(many, "p12@").length === 1 &&
+    AU.filterPeople(many, "reviewer").length === 80);
+  ok("21: an empty query is everyone", AU.filterPeople(many, "  ").length === 240);
+  var pg = AU.paginate(many, 1);
+  ok("21: the list paginates and reports the true total", pg.rows.length === AU.PAGE_SIZE && pg.total === 240 && pg.pages === 10);
+  ok("21: a page beyond the end clamps rather than showing nothing", AU.paginate(many, 99).page === 10);
+  ok("21: and so does a page before the start", AU.paginate(many, 0).page === 1);
+  ok("21: one short page is still one page", AU.paginate(many.slice(0, 3), 1).pages === 1);
+
+  // --- guests are shown, never as rows ---
+  ok("21: the guest line is verbatim",
+    AU.COPY.guests === "Guests hold a link, not an account — they can view and comment on one document each.");
+  ok("21: and they are a note, not a row in the people list",
+    /verso-admin__guests/.test(js) && !/guests[\s\S]{0,200}personRow/.test(js));
+
+  // --- the refusal comes FROM the server ---
+  var refusal = AU.refusalFor({ ok: false, invariant: "lastCapabilityHolder", error: "..." }, "Ada Lovelace");
+  ok("21: the last-holder refusal renders, with its title verbatim", refusal.title === "Someone must be able to manage this server");
+  ok("21: the body is capability-first and names the person, verbatim",
+    refusal.body === "Ada Lovelace is the only person who can manage users and server configuration. At least one must remain, so nobody is ever locked out of sign-in, users, and configuration. Nothing was changed.");
+  ok("21: it confirms nothing changed, and names the way out",
+    /Nothing was changed\./.test(refusal.body) &&
+    refusal.wayOut === "To change this person's role, first give someone else a role that can manage users and server configuration.");
+  ok("21: it never names a role TITLE, which a rename would falsify", !/admin/i.test(refusal.title + refusal.body + refusal.wayOut));
+  ok("21: an ordinary error is NOT dressed up as the invariant",
+    AU.refusalFor({ ok: false, error: "this role still has 2 people in it" }, "X") === null);
+  ok("21: and a success is not a refusal", AU.refusalFor({ ok: true }, "X") === null);
+  ok("21: the UI does not re-derive the invariant -- it reads what the server sent",
+    /res\.invariant !== "lastCapabilityHolder"/.test(js) &&
+    !/manageUsers[\s\S]{0,80}serverConfig[\s\S]{0,80}(filter|every|length)/.test(js));
+
+  // --- the warnings are rendered, not computed ---
+  ok("21: guardrail warnings are read off the role the server returned",
+    /\(r\.warnings \|\| \[\]\)\.forEach/.test(js) && !/serverConfigSpread/.test(js) && !/can't do anything yet/.test(js));
+
+  // --- titles are data ---
+  ok("21: no seeded role title is hard-coded anywhere in the surface",
+    !/"admin"|"author"|"reviewer"|"viewer"/i.test(js.replace(/manageUsers|serverConfig/g, "")));
+  ok("21: the capability tick-boxes come from the server's vocabulary",
+    /state\.caps\.forEach/.test(js) && /capabilities: list/.test(js));
+
+  // --- it is a place you go, not a decision you answer ---
+  var css = src("styles/editor/17-admin.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok("21: a full surface -- and NOT a modal: no scrim", /position:\s*fixed;\s*inset:\s*0/.test(css) && !/scrim/.test(css));
+  ok("21: it is not a right-docked sheet either", !/--panel-sheet-width/.test(css));
+  ok("21: semantic role tokens only", !/var\(--gray-/.test(css));
+  ok("21: every control is canonical -- no hand-rolled button, input, select or checkbox",
+    /UI\(\)\.Button\(/.test(js) && /UI\(\)\.TextField\(/.test(js) && /UI\(\)\.Select\(/.test(js) && /UI\(\)\.Checkbox\(/.test(js) &&
+    !/<button|createElement\("button"\)/.test(js));
+  ok("21: a rename commits on blur, not per keystroke",
+    /addEventListener\("blur"/.test(js) && !/onChange: function \(v\) \{ [\s\S]{0,40}PATCH/.test(js));
+  ok("21: removal is a destructive confirm, which is what the spine reserves a modal for",
+    /danger: true, okLabel: "Remove"/.test(js));
+
+  // --- wiring ---
+  ok("21: it needs `h` through provide, and reaches the modals through bind",
+    /kernel\.need\("h"\)/.test(js) && /kernel\.bind\("confirmModal"\)/.test(js) && /kernel\.bind\("promptModal"\)/.test(js));
+  ok("21: installed, and loaded on both pages",
+    /window\.VersoAdminUsers\.install\(VE\)/.test(src("src/editor.js")) &&
+    /editor\/admin-users\.js/.test(src("index.html")) && /editor\/admin-users\.js/.test(src("kit.html")));
+  ok("21: its stylesheet is declared, ordered and linked on both pages",
+    /17-admin\.css/.test(src("styles/editor/order.json")) &&
+    /17-admin\.css/.test(src("index.html")) && /17-admin\.css/.test(src("kit.html")));
+})();
+
+// ---- platform-pivot 39: the account menu + break-glass marking -----------------
+// Small surface, one job: it is the only place a person can confirm WHICH account they are
+// using. The case it exists for is an IT admin who signed in on the emergency account during
+// an outage and never signed back out, so the tests that matter are the break-glass ones.
+section("platform-pivot 39 account menu");
+(function () {
+  var AM = require(path.join(ROOT, "src/editor/account-menu.js")).VersoAccountMenu;
+
+  var ada = { kind: "user", name: "Ada Lovelace", email: "ada@corp.invalid", role: "Author", breakGlass: false };
+  var root = { kind: "user", name: "Break-glass admin", email: "root@local", role: "Admin", breakGlass: true };
+
+  // --- it appears only where there is an account ---
+  ok("39: never in local mode -- there is no principal to show", AM.shouldMount({}) === false);
+  ok("39: nor for a guest, who holds a link and not an account",
+    AM.shouldMount({ __versoServerUrl: "http://s", __versoServerPrincipal: { kind: "guest" } }) === false);
+  ok("39: it mounts for a signed-in user",
+    AM.shouldMount({ __versoServerUrl: "http://s", __versoServerPrincipal: ada }) === true);
+
+  // --- what it shows ---
+  var m = AM.accountModel(ada, "oidc", "Northwind");
+  ok("39: name, email and the role's NAME", m.name === "Ada Lovelace" && m.email === "ada@corp.invalid" && m.role === "Author");
+  ok("39: and how they signed in", m.method === "Signed in with Northwind sign-in");
+  ok("39: an unset organisation falls back rather than naming anyone",
+    AM.accountModel(ada, "oidc", null).method === "Signed in with your organisation sign-in");
+  ok("39: the Windows rung says so", AM.accountModel(ada, "iwa", "Northwind").method === "Signed in with your Windows account");
+  ok("39: a local-accounts deployment says so", AM.accountModel(ada, "local", null).method === "Signed in with the local admin account");
+  ok("39: an ordinary account carries no warning strip", m.strip === null && m.breakGlass === false);
+
+  // --- THE POINT OF THE TICKET ---
+  var bg = AM.accountModel(root, "oidc", "Northwind");
+  ok("39: the break-glass session is marked, verbatim", bg.strip === "Local admin account, in use");
+  ok("39: and it says the LOCAL method even on an SSO deployment -- reporting the rung there would hide exactly this case",
+    bg.method === "Signed in with the local admin account");
+  ok("39: the flag travels so the avatar can differ too", bg.breakGlass === true);
+  ok("39: the avatar is visually distinct, not merely labelled",
+    /account-av--breakglass/.test(src("src/editor/account-menu.js")) && /\.account-av--breakglass/.test(src("styles/editor/14-collab.css")));
+
+  // --- the restraint is a decision, not an omission ---
+  // Comments stripped, INCLUDING trailing ones: this module explains in prose that it shows a
+  // role name "never a capability", and a gate that reads its own explanation as a violation
+  // is a gate that punishes documenting the decision. The `:` guard leaves URLs alone.
+  var js = src("src/editor/account-menu.js")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("39: the role is shown by name only -- no capability list, no permissions screen",
+    !/capabilit/i.test(js) && !/permission/i.test(js));
+  ok("39: and no seeded role title is hard-coded, so a rename needs no code change",
+    !/"admin"|"author"|"reviewer"|"viewer"|"Admin"|"Author"|"Reviewer"|"Viewer"/.test(js));
+  ok("39: a renamed role shows through unchanged",
+    AM.accountModel({ kind: "user", name: "X", role: "Technical Authority" }, "local", null).role === "Technical Authority");
+
+  // --- initials, which is all the avatar has room for ---
+  ok("39: initials come from the name", AM.initialsOf("Ada Lovelace") === "AL" && AM.initialsOf("Prince") === "PR");
+  ok("39: and a nameless account still draws something", AM.initialsOf("") === "?" && AM.initialsOf(null) === "?");
+
+  // --- the surface is the spine's popover, not a second implementation ---
+  ok("39: it opens the SAME chrome popover the storage dot does",
+    /kernel\.need\("h", "openChromePop", "closeChromePop"\)/.test(src("src/editor/account-menu.js")) &&
+    /E\.openChromePop\(anchor/.test(src("src/editor/account-menu.js")));
+  ok("39: which editor.js provides rather than the module re-rolling one",
+    /openChromePop: openChromePop/.test(src("src/editor.js")));
+  ok("39: sign out is the only action, and it is a canonical Button",
+    /window\.VersoUI\.Button\(/.test(js) && (js.match(/onClick:/g) || []).length === 1);
+  ok("39: and it ends the server session rather than just clearing the page",
+    /\/auth\/logout/.test(js) && /method: "POST"/.test(js));
+
+  // --- wiring ---
+  ok("39: the module is installed, and loaded on both pages",
+    /window\.VersoAccountMenu\.install\(VE\)/.test(src("src/editor.js")) &&
+    /editor\/account-menu\.js/.test(src("index.html")) && /editor\/account-menu\.js/.test(src("kit.html")));
+  ok("39: the principal carries what the menu needs",
+    /breakGlass: !!principal\.breakGlass/.test(src("server/verso-server.js")) &&
+    /__versoServerRung/.test(src("server/verso-server.js")));
+})();
+
+// ---- platform-pivot 38: the signed-out state inside the app -------------------
+// The highest-stakes surface in the identity set, because it is the only one whose failure
+// mode is an author typing into a void. The tests that matter are the ratchet (a refusal can
+// never be demoted back to a warning) and the promise the copy makes (this tab keeps your
+// edit, so signing back in must not reload it).
+section("platform-pivot 38 signed-out state");
+(function () {
+  var SS = require(path.join(ROOT, "src/session-state.js")).VersoSession;
+
+  // --- installs only where there is a session to lose ---
+  ok("38: nothing installs locally", SS.shouldInstall({}) === false);
+  ok("38: nor against a local bundled backend", SS.shouldInstall({ __versoServerUrl: "http://x", __versoServerMode: "local" }) === false);
+  ok("38: it installs in server mode", SS.shouldInstall({ __versoServerUrl: "http://x", __versoServerMode: "server" }) === true);
+
+  // --- the state machine ---
+  ok("38: an expiry moves an active session to the warning", SS.nextState("active", "authRequired") === "expired");
+  ok("38: a refused save is its own, sharper state", SS.nextState("expired", "saveRefused") === "refused");
+  // THE RATCHET. A second 401 lands a moment after the refusal; demoting the message back to
+  // "you might lose work" after it already HAS been lost is the one thing this must not do.
+  ok("38: once a save has been refused, a later expiry cannot demote the message",
+    SS.nextState("refused", "authRequired") === "refused");
+  ok("38: signing back in cancels the alarm from either state",
+    SS.nextState("expired", "signedIn") === "restored" && SS.nextState("refused", "signedIn") === "restored");
+  ok("38: and recovery returns to normal, not to the warning", SS.nextState("restored", "dismissRestored") === "active");
+  ok("38: an unknown event changes nothing", SS.nextState("refused", "sneeze") === "refused");
+
+  // --- the copy is the specification ---
+  ok("38: an active session shows nothing at all", SS.viewFor("active") === null);
+  var exp = SS.viewFor("expired");
+  ok("38: the expiry copy is verbatim",
+    exp.title === "Your session expired" &&
+    exp.body === "Nothing you type from here is being saved. Sign in to keep working.");
+  var ref = SS.viewFor("refused");
+  ok("38: the refusal copy is verbatim -- the loss, the window and the action in one line",
+    ref.title === "That change wasn't saved" &&
+    ref.body === "You're signed out, so nothing you type is being saved. This tab keeps your edit until you reload — sign in now to keep it.");
+  var res = SS.viewFor("restored");
+  ok("38: the recovery copy actively says nothing was lost, verbatim",
+    res.title === "Signed back in" &&
+    res.body === "Saving has resumed — nothing from the last few minutes was lost.");
+  ok("38: the three tones are warning / danger / success, in that order of escalation",
+    exp.tone === "warn" && ref.tone === "danger" && res.tone === "success");
+
+  // --- the canvas chip ---
+  ok("38: the chip is on exactly while saving is off",
+    exp.chip === "Not saving" && ref.chip === "Not saving");
+  ok("38: and OFF during recovery, so it cannot contradict the banner beside it", res.chip === null);
+  ok("38: the sign-in action is offered while signed out, and withdrawn once back in",
+    exp.action === "Sign in" && ref.action === "Sign in" && res.action === null);
+
+  // --- what it will and will not do to the canvas ---
+  // Comments are stripped first: this file DESCRIBES what it refuses to do ("no scrim, no
+  // inset overlay"), which is the point of the comment and would otherwise fail its own gate.
+  var css = src("styles/editor/16-session.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok("38: the banner never covers the canvas -- no scrim, no full-viewport inset",
+    !/inset:\s*0/.test(css) && !/scrim/i.test(css) && !/position:\s*fixed;\s*inset/.test(css));
+  ok("38: the chip cannot get in the way of the work", /pointer-events:\s*none/.test(css));
+  // In the layout, not over it -- a fixed banner lands on whatever the stage happens to be
+  // showing at that height, which is how the Files-header collision was found.
+  ok("38: it is a flex child in the shell, not a floating overlay",
+    /flex:\s*0 0 auto/.test(css) && !/position:\s*fixed/.test(css.slice(css.indexOf("#session-banner"), css.indexOf("#session-chip"))));
+  ok("38: and it is inserted before the workspace, so the canvas shifts down rather than being covered",
+    /insertBefore\(banner, ws\)/.test(src("src/session-state.js")));
+  ok("38: semantic role tokens only, never the raw grey ramp", !/var\(--gray-/.test(css));
+  var js = src("src/session-state.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("38: nothing here disables or blanks the canvas",
+    !/pointer-events:\s*none/.test(js) && !/contentEditable\s*=\s*false/.test(js) && !/\.disabled\s*=\s*true/.test(js.replace(/__action\.disabled[^\n]*/g, "")));
+  // The copy promises the tab keeps the edit until reload. A sign-in that reloads would break
+  // that promise in the act of keeping it, so the banner opens a separate window and polls.
+  ok("38: signing back in opens a separate window and does NOT reload this tab",
+    /openWindow/.test(js) && !/location\.reload/.test(js));
+  ok("38: and it tells the storage adapter before it claims saving has resumed",
+    js.indexOf("__versoHttpAuthRestored") < js.indexOf('to("signedIn")'));
+
+  // --- the wiring into store-http ---
+  var sh = src("src/store-http.js");
+  ok("38: store-http reports a REFUSED write as a refusal, not a warning", /reportSignedOut\(true\)/.test(sh));
+  ok("38: and arriving signed-out as an expiry, since nothing has been lost yet", /reportSignedOut\(false\)/.test(sh));
+  ok("38: the adapter stops refusing once the banner has seen a real sign-in",
+    /window\.__versoHttpAuthRestored = function \(\) \{ authRequired = false; \}/.test(sh));
+  ok("38: it is loaded after store-http, which reports into it",
+    src("index.html").indexOf("src/store-http.js") < src("index.html").indexOf("src/session-state.js"));
+  ok("38: its stylesheet is declared, ordered and linked on both pages",
+    /16-session\.css/.test(src("styles/editor/order.json")) &&
+    /16-session\.css/.test(src("index.html")) && /16-session\.css/.test(src("kit.html")));
+})();
+
+// ---- platform-pivot 19: the corporate authentication rungs --------------------
+// A complete OIDC auth-code round trip runs here with no tenant and no network: a locally
+// generated RSA keypair plays the IdP, and every endpoint is injected. That is the point of
+// the adapter shape -- the live-IdP check is a deploy-time unknown (platform-pivot 30), but
+// nothing else about this rung has to wait for it.
+section("platform-pivot 19 auth rungs");
+(function () {
+  var AR = require(path.join(ROOT, "server/auth-rungs.js"));
+  var crypto = require("node:crypto");
+
+  // --- a fake IdP: a real keypair, real RS256 signatures, real discovery shape ---
+  var kp = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  var jwk = kp.publicKey.export({ format: "jwk" });
+  jwk.kid = "test-key-1"; jwk.alg = "RS256"; jwk.use = "sig";
+  var ISSUER = "https://login.example.invalid/tenant";
+  function b64url(buf) { return Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+  function signJwt(claims, over) {
+    over = over || {};
+    var head = b64url(JSON.stringify({ alg: over.alg || "RS256", typ: "JWT", kid: over.kid === null ? undefined : (over.kid || "test-key-1") }));
+    var body = b64url(JSON.stringify(claims));
+    var sig = over.badSig ? b64url("nonsense") : b64url(crypto.sign("RSA-SHA256", Buffer.from(head + "." + body, "utf8"), over.key || kp.privateKey));
+    return head + "." + body + "." + sig;
+  }
+  var NOW_MS = 1750000000000;
+  function nowFn() { return NOW_MS; }
+  function claims(over) {
+    var c = { iss: ISSUER, aud: "verso-client", exp: Math.floor(NOW_MS / 1000) + 3600, iat: Math.floor(NOW_MS / 1000),
+              email: "Ada@Example.Invalid", name: "Ada L" };
+    Object.keys(over || {}).forEach(function (k) { if (over[k] === undefined) delete c[k]; else c[k] = over[k]; });
+    return c;
+  }
+  var DISCOVERY = {
+    issuer: ISSUER,
+    authorization_endpoint: ISSUER + "/oauth2/v2.0/authorize",
+    token_endpoint: ISSUER + "/oauth2/v2.0/token",
+    jwks_uri: ISSUER + "/discovery/v2.0/keys"
+  };
+  // A rung wired to the fake IdP. `plan` lets a test break exactly one step.
+  //
+  // The fake ECHOES THE NONCE back in the id_token, the way a real IdP does. That detail is
+  // load-bearing: without it every token would fail the replay check and the whole suite would
+  // pass for the wrong reason -- "refused" is the expected answer in a dozen tests below, so a
+  // harness that can never produce a valid token proves nothing at all.
+  function rung(plan) {
+    plan = plan || {};
+    var calls = { discovery: 0, jwks: 0, token: 0, lastForm: null, lastNonce: null };
+    var adapter = AR.createOidcAdapter(
+      { issuer: ISSUER, clientId: "verso-client", clientSecret: "s3cr3t", redirectUri: "https://verso.example.invalid/auth/sso/callback" },
+      {
+        now: nowFn,
+        getJson: function (url) {
+          if (url.indexOf("openid-configuration") >= 0) { calls.discovery++; return Promise.resolve(plan.noDiscovery ? null : DISCOVERY); }
+          calls.jwks++; return Promise.resolve({ keys: plan.noKeys ? [] : [jwk] });
+        },
+        postForm: function (url, body) {
+          calls.token++; calls.lastForm = body;
+          if (plan.tokenError) return Promise.resolve({ error: "invalid_grant", error_description: "the code was already used" });
+          if (plan.noIdToken) return Promise.resolve({ access_token: "a" });
+          var c = claims(plan.claims);
+          if (c.nonce === undefined) c.nonce = calls.lastNonce;   // what a real IdP echoes back
+          return Promise.resolve({ id_token: signJwt(c, plan.jwt), token_type: "Bearer" });
+        }
+      });
+    adapter.__calls = calls;
+    // Wrap begin() so the harness sees the nonce this server minted, exactly as the IdP would.
+    var realBegin = adapter.begin;
+    adapter.begin = function (returnTo) {
+      return realBegin(returnTo).then(function (b) {
+        if (b) { var m = /nonce=([^&]+)/.exec(b.url); calls.lastNonce = m ? decodeURIComponent(m[1]) : null; }
+        return b;
+      });
+    };
+    return adapter;
+  }
+
+  // --- choosing the rung: config, never a build-time fork ---
+  ok("19: no auth config -> local accounts, the always-works floor", AR.chooseRung({}).rung === "local");
+  ok("19: a complete OIDC config selects the OIDC rung",
+    AR.chooseRung({ auth: { oidc: { issuer: "i", clientId: "c", clientSecret: "s", redirectUri: "r" } } }).rung === "oidc");
+  var half = AR.chooseRung({ auth: { rung: "oidc", oidc: { issuer: "i", clientId: "c" } } });
+  ok("19: a HALF-configured OIDC rung falls back to local and says what is missing",
+    half.rung === "local" && half.requested === "oidc" && /clientSecret/.test(half.reason));
+  var halfIwa = AR.chooseRung({ auth: { rung: "iwa", iwa: {} } });
+  ok("19: an IWA rung with no trusted upstream refuses to start, rather than trusting a header",
+    halfIwa.rung === "local" && /trustedProxies/.test(halfIwa.reason));
+  ok("19: Entra and AD FS are the SAME code path -- nothing branches on the provider",
+    !/entra|adfs|ad fs/i.test(src("server/auth-rungs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+
+  // --- the authorization redirect (pure) ---
+  var u = AR.authorizeUrl(DISCOVERY.authorization_endpoint, { clientId: "verso-client" }, "ST", "NO", "https://v/cb");
+  ok("19: the redirect asks for a code, with state and nonce",
+    /response_type=code/.test(u) && /state=ST/.test(u) && /nonce=NO/.test(u) && /client_id=verso-client/.test(u));
+  ok("19: and requests only the identity scopes", /scope=openid%20profile%20email/.test(u));
+  ok("19: no roles/groups scope is ever requested -- SSO proves identity only",
+    !/groups|roles|Directory\./i.test(u));
+
+  __async.push((async function () {
+    // --- the happy path, end to end ---
+    var a = rung();
+    var begun = await a.begin("/");
+    ok("19: begin() reaches discovery and returns a redirect", !!begun && begun.url.indexOf(DISCOVERY.authorization_endpoint) === 0);
+    var state = begun.state;
+    var done = await a.complete("CODE-1", state);
+    ok("19: a valid code exchanges into a verified identity", done.ok === true && done.identity.email === "ada@example.invalid");
+    ok("19: and the display name comes from the token", done.identity.name === "Ada L");
+    ok("19: the code exchange sends the client secret, form-encoded, server-side",
+      /grant_type=authorization_code/.test(a.__calls.lastForm) && /client_secret=s3cr3t/.test(a.__calls.lastForm));
+    ok("19: discovery is cached rather than re-fetched per sign-in", a.__calls.discovery === 1);
+    ok("19: a state is single-use -- a replayed callback is refused",
+      (await a.complete("CODE-1", state)).ok === false);
+    ok("19: and no attempt is left behind", a._pendingCount() === 0);
+
+    // --- every way the round trip must refuse ---
+    async function refuses(label, plan, match, mutate) {
+      var r = rung(plan);
+      var b = await r.begin("/");
+      var st = b && b.state;
+      if (mutate) st = mutate(st);
+      var res = await r.complete("CODE-X", st);
+      ok("19: " + label, res.ok === false && (!match || match.test(res.reason)));
+    }
+    await refuses("a callback this server never started is refused before any network call", {}, /did not start here/, function () { return "forged-state"; });
+    await refuses("a tampered signature is refused", { jwt: { badSig: true } }, /signature/);
+    await refuses("a token signed by the wrong key is refused", { jwt: { key: crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey } }, /signature/);
+    await refuses("a token whose kid matches nothing published is refused", { noKeys: true }, /no published key/);
+    await refuses("an unsigned (alg none) token is refused", { jwt: { alg: "none", badSig: true } }, /algorithm/);
+    await refuses("a token minted for another application is refused", { claims: { aud: "some-other-app" } }, /another application/);
+    await refuses("a token from a different issuer is refused", { claims: { iss: "https://evil.invalid" } }, /expected/);
+    await refuses("an expired token is refused", { claims: { exp: Math.floor(NOW_MS / 1000) - 10000 } }, /expired/);
+    await refuses("a replayed token from another sign-in is refused (nonce)", { claims: { nonce: "someone-elses" } }, /nonce/);
+    await refuses("a token with no email-shaped claim is refused rather than guessed", { claims: { email: undefined, preferred_username: undefined, upn: undefined } }, /cannot name the user/);
+    await refuses("an IdP that returns an error passes its reason on", { tokenError: true }, /already used/);
+    await refuses("an IdP that returns no id_token is refused", { noIdToken: true }, /no id_token/);
+
+    // an outage is a distinct, reportable state -- the sign-in surface depends on it
+    var down = rung({ noDiscovery: true });
+    ok("19: begin() returns null when the IdP cannot be reached (the outage state)", (await down.begin("/")) === null);
+    ok("19: and probe() reports it as unreachable rather than throwing", (await down.probe()).ok === false);
+    ok("19: a reachable IdP probes ok", (await rung().probe()).ok === true);
+
+    // upn / preferred_username, which is what AD FS and older Entra tenants send
+    var upnOnly = rung({ claims: { email: undefined, preferred_username: "ada@corp.invalid" } });
+    var b2 = await upnOnly.begin("/");
+    ok("19: preferred_username is accepted when email is absent (AD FS shape)",
+      (await upnOnly.complete("C", b2.state)).identity.email === "ada@corp.invalid");
+  })());
+
+  // --- the IWA rung: the header is worthless unless it came from the right place ---
+  (function () {
+    var iwa = AR.createIwaAdapter({ trustedProxies: ["10.0.0.5"], domainSuffix: "corp.invalid" });
+    function req(addr, headers) { return { headers: headers || {}, socket: { remoteAddress: addr } }; }
+    ok("19: IWA takes the account IIS forwards, from the configured upstream",
+      iwa.fromRequest(req("10.0.0.5", { "x-iis-windowsauth-user": "CORP\\ada" })).email === "ada@corp.invalid");
+    ok("19: a UPN arrives already in email shape",
+      iwa.fromRequest(req("10.0.0.5", { "x-iis-windowsauth-user": "Ada@Corp.Invalid" })).email === "ada@corp.invalid");
+    ok("19: THE SAME HEADER FROM ANYWHERE ELSE IS WORTHLESS -- this is the whole safety of the rung",
+      iwa.fromRequest(req("203.0.113.9", { "x-iis-windowsauth-user": "CORP\\administrator" })) === null);
+    ok("19: an IPv4 address seen through an IPv6 socket still matches its upstream",
+      !!iwa.fromRequest(req("::ffff:10.0.0.5", { "x-iis-windowsauth-user": "CORP\\ada" })));
+    ok("19: no header means no identity", iwa.fromRequest(req("10.0.0.5", {})) === null);
+    ok("19: a deployment that lists no upstream trusts nothing at all",
+      AR.createIwaAdapter({}).fromRequest(req("10.0.0.5", { "x-iis-windowsauth-user": "CORP\\ada" })) === null);
+    ok("19: neither rung is a credential check, so break-glass still falls through to local",
+      iwa.authenticate({ email: "x", password: "y" }) === null && rung().authenticate({}) === null);
+  })();
+
+  // --- the sign-in surface: five states, and the copy is the specification ---
+  (function () {
+    var SI = require(path.join(ROOT, "src/sign-in.js")).VersoSignIn;
+    ok("19: nothing renders without a server", SI.shouldSignIn({}) === false);
+    ok("19: nothing renders on a server we are already signed in to",
+      SI.shouldSignIn({ __versoServerUrl: "http://s", __versoServerAuthRequired: false }) === false);
+    ok("19: the surface appears exactly when the server says authentication is required",
+      SI.shouldSignIn({ __versoServerUrl: "http://s", __versoServerAuthRequired: true }) === true);
+
+    var sso = SI.viewModel({ org: "Northwind", sso: true, ssoReachable: true }, {});
+    ok("19: SSO is the prominent path and the account form is not shown beside it",
+      sso.hasSso === true && sso.showLocalForm === false && sso.ssoDisabled === false);
+    ok("19: the SSO button names the organisation", sso.ssoLabel === "Continue with Northwind sign-in");
+    ok("19: the reassurance is the specified sentence, verbatim",
+      sso.ssoNote === "You'll enter your password on Northwind's own sign-in page. Verso never sees it.");
+    ok("19: break-glass is framed as an emergency, verbatim",
+      sso.breakGlassNote === "For emergencies — works even when Northwind's sign-in service is down.");
+
+    var down = SI.viewModel({ org: "Northwind", sso: true, ssoReachable: false }, {});
+    ok("19: an unreachable IdP disables ONLY the SSO button", down.ssoDisabled === true);
+    ok("19: and says, verbatim, that this is not a password problem",
+      down.message.tone === "warn" &&
+      down.message.body === "Can't reach your organisation's sign-in service right now. This isn't your password — try again shortly, or use the local admin account below.");
+    ok("19: a credentials error never overwrites the outage notice",
+      SI.viewModel({ org: "Northwind", sso: true, ssoReachable: false }, { error: "credentials" }).message.tone === "warn");
+
+    var wrong = SI.viewModel({ org: "Northwind", sso: true, ssoReachable: true }, { showLocal: true, error: "credentials" });
+    ok("19: a wrong break-glass password does not implicate the SSO path, verbatim",
+      wrong.message.tone === "error" &&
+      wrong.message.body === "That password doesn't match. Try again, or continue with Northwind sign-in above.");
+    ok("19: the account form is reached from the break-glass link, not shown by default", wrong.showLocalForm === true);
+
+    var localOnly = SI.viewModel({ org: null, sso: false }, {});
+    ok("19: a local-accounts server shows the account form as the whole surface", localOnly.showLocalForm === true && localOnly.hasSso === false);
+    ok("19: ...and never as 'break-glass', because there is nothing to break out of", localOnly.localIsBreakGlass === false);
+    ok("19: a server with no SSO is never shown an outage", localOnly.ssoDisabled === false && localOnly.message === null);
+    ok("19: an unset organisation name falls back rather than naming anyone",
+      localOnly.org === "your organisation" && SI.interpolate("{org} sign-in", null) === "your organisation sign-in");
+
+    var text = src("src/sign-in.js");
+    ok("19: no organisation is compiled into the shipped strings",
+      !/DroneShield/i.test(text) && (text.match(/\{org\}/g) || []).length >= 5);
+    ok("19: the surface is inert unless a document exists, so `require` cannot install it",
+      /typeof document !== "undefined" && document\.createElement/.test(text));
+    var html = src("index.html");
+    ok("19: it is loaded after the bootstrap globals it depends on",
+      html.indexOf("src/store-http.js") < html.indexOf("src/sign-in.js"));
+    // The surface builds itself out of window.VersoUI, so a load-order slip would give a
+    // signed-out author a blank screen with no way in. This is the ratchet on that.
+    ok("19: and after src/ui-kit.js, whose canonical controls it is built from",
+      html.indexOf("src/ui-kit.js") < html.indexOf("src/sign-in.js"));
+    ok("19: it hand-rolls no button and no input -- both come from VersoUI",
+      /ui\(\)\.Button\(/.test(text) && /ui\(\)\.TextField\(/.test(text) &&
+      !/verso-signin__sso|verso-signin__input/.test(text) &&
+      !/verso-signin__sso|verso-signin__input/.test(src("styles/editor/15-sign-in.css")));
+    ok("19: and it focuses the first field, as its sibling modal does",
+      /email\.focus\(\)/.test(text));
+    // The chrome layer references the semantic role tokens, never the raw grey ramp -- the
+    // raw ramp does not follow the light-theme override, so a surface built on it would be
+    // the one thing in the app that never changes theme.
+    ok("19: the stylesheet uses semantic role tokens, not the raw ramp",
+      !/var\(--gray-/.test(src("styles/editor/15-sign-in.css")));
+    ok("19: TextField forwards the type its own contract declares (password, here)",
+      /el\.type = props\.type \|\| "text"/.test(src("src/ui-kit.js")));
+    ok("19: and its stylesheet is declared, ordered and linked on both pages",
+      /15-sign-in\.css/.test(src("styles/editor/order.json")) &&
+      /15-sign-in\.css/.test(src("index.html")) && /15-sign-in\.css/.test(src("kit.html")));
+  })();
+
+  // --- over HTTP: /auth/config, the redirect, and IWA in front of the boundary ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> auth-rung HTTP tests skipped"); return; }
+    var os = require("os");
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    __async.push((async function () {
+      // (1) a local-accounts deployment: no SSO to offer, and no outage to report
+      var t1 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rung-local-"));
+      var s1, b1;
+      await new Promise(function (r) { s1 = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(t1, "v.sqlite"), linkSecret: "s", organisationName: "Northwind" }, function (s) { b1 = "http://127.0.0.1:" + s.address().port; r(); }); });
+      try {
+        var j = await (await fetch(b1 + "/auth/config")).json();
+        ok("19: /auth/config names the rung and the organisation", j.ok && j.rung === "local" && j.org === "Northwind");
+        ok("19: it offers no SSO on a local-accounts deployment, and always the floor", j.sso === false && j.localAccounts === true);
+        ok("19: it carries no client id and no secret", !/client|secret/i.test(JSON.stringify(j)));
+        ok("19: with no redirect rung, /auth/sso/start is not a route", (await fetch(b1 + "/auth/sso/start", { redirect: "manual" })).status === 404);
+      } finally { try { s1.close(); } catch (e) {} try { fs.rmSync(t1, { recursive: true, force: true }); } catch (e) {} }
+
+      // (2) an OIDC deployment, with the fake IdP injected as the rung
+      var t2 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rung-oidc-"));
+      var oidc = rung();
+      var s2 = srv.createServer({ dbPath: path.join(t2, "v.sqlite"), config: { mode: "server", linkSecret: "s", organisationName: "Northwind" }, rung: oidc });
+      var b2 = await new Promise(function (r) { s2.listen(0, "127.0.0.1", function () { r("http://127.0.0.1:" + s2.address().port); }); });
+      try {
+        var j2 = await (await fetch(b2 + "/auth/config")).json();
+        ok("19: an OIDC deployment reports the rung and that it is reachable", j2.rung === "oidc" && j2.sso === true && j2.ssoReachable === true);
+        var red = await fetch(b2 + "/auth/sso/start", { redirect: "manual" });
+        ok("19: /auth/sso/start 302s to the IdP's authorize endpoint",
+          red.status === 302 && red.headers.get("location").indexOf("/oauth2/v2.0/authorize") > 0);
+        ok("19: the redirect is never cached", /no-store/.test(red.headers.get("cache-control") || ""));
+        var state = /state=([^&]+)/.exec(red.headers.get("location"))[1];
+        var cb = await fetch(b2 + "/auth/sso/callback?code=CODE-1&state=" + state, { redirect: "manual" });
+        ok("19: the callback mints a session cookie and sends the browser back to the app",
+          cb.status === 302 && /verso_session=/.test(cb.headers.get("set-cookie") || ""));
+        ok("19: the session cookie is HttpOnly", /HttpOnly/.test(cb.headers.get("set-cookie")));
+        var me = await (await fetch(b2 + "/auth/me", { headers: { cookie: (cb.headers.get("set-cookie") || "").split(";")[0] } })).json();
+        ok("19: the SSO user is provisioned into Verso's own record", me.principal && me.principal.email === "ada@example.invalid");
+        ok("19: as the FIRST user they are the bootstrap admin -- from Verso, never from a directory claim",
+          me.principal.role === "admin" || (me.principal.capabilities || []).indexOf("manageUsers") >= 0);
+        var bad = await fetch(b2 + "/auth/sso/callback?error=access_denied&error_description=refused+by+policy", { redirect: "manual" });
+        ok("19: an IdP refusal is passed on, not turned into a generic failure",
+          bad.status === 401 && /refused by policy/.test(JSON.stringify(await bad.json())));
+      } finally { try { s2.close(); } catch (e) {} try { fs.rmSync(t2, { recursive: true, force: true }); } catch (e) {} }
+
+      // (3) IWA: the first request IS the sign-in, but only from the trusted upstream
+      var t3 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rung-iwa-"));
+      var s3 = srv.createServer({
+        dbPath: path.join(t3, "v.sqlite"), config: { mode: "server", linkSecret: "s" },
+        rung: AR.createIwaAdapter({ trustedProxies: ["127.0.0.1"], domainSuffix: "corp.invalid" })
+      });
+      var b3 = await new Promise(function (r) { s3.listen(0, "127.0.0.1", function () { r("http://127.0.0.1:" + s3.address().port); }); });
+      try {
+        var anon = await fetch(b3 + "/api/registry");
+        ok("19: without the IIS header there is no identity, and the boundary still 401s", anon.status === 401);
+        var iwaRes = await fetch(b3 + "/api/registry", { headers: { "x-iis-windowsauth-user": "CORP\\ada" } });
+        ok("19: with it, the first request signs the person in -- no sign-in page to visit", iwaRes.status === 200);
+        var who = await (await fetch(b3 + "/auth/me", { headers: { "x-iis-windowsauth-user": "CORP\\ada" } })).json();
+        ok("19: and they are a real Verso user record", who.principal && who.principal.email === "ada@corp.invalid");
+      } finally { try { s3.close(); } catch (e) {} try { fs.rmSync(t3, { recursive: true, force: true }); } catch (e) {} }
+    })());
+  })();
+
+  // --- local mode is untouched (Law 4) ---
+  ok("19: no rung is built in local mode", /identity && config\.mode === "server"\) \? authRungs\.createRung/.test(src("server/verso-server.js")));
 })();
 
 // ---- platform-pivot 37: composable roles over a fixed capability vocabulary ----
@@ -19599,7 +20590,13 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(es));
 
   // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
-  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(es));
+  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,700}__sourceActiveTopicId = master\.id;/.test(es));
+  // platform-pivot 35 sits between those two lines: the body may not be in the page yet, and the
+  // stage must WAIT for it rather than render the blank. Asserted here, beside the claim it
+  // qualifies, so the two cannot drift apart.
+  ok("...and waits for a deferred body before rendering, rather than showing a blank one",
+    /if \(master && hydrateIfDeferred\(master\.id, renderSourceStage\)\)/.test(es) &&
+    /Loading this source document/.test(es));
   ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = activeSourceMaster\(\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
   ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(es) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(es));
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(es));

@@ -1,7 +1,7 @@
 [
  {
   "file": "01-tokens.css",
-  "is": "the file header and the design-system tokens — the source of truth"
+  "is": "the file header and the design-system tokens \u2014 the source of truth"
  },
  {
   "file": "02-toolbar.css",
@@ -54,5 +54,21 @@
  {
   "file": "14-collab.css",
   "is": "live-collaboration presence chrome"
+ },
+ {
+  "file": "15-sign-in.css",
+  "is": "the server-mode sign-in surface"
+ },
+ {
+  "file": "16-session.css",
+  "is": "the signed-out session banner and its canvas chip"
+ },
+ {
+  "file": "17-admin.css",
+  "is": "the people-and-roles admin surface"
+ },
+ {
+  "file": "18-cutover.css",
+  "is": "the move-to-server cutover run"
  }
 ]

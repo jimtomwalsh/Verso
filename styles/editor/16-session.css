@@ -1,0 +1,53 @@
+/* 16-session.css -- the signed-out state inside the app (platform-pivot 38).
+ *
+ * APP CHROME, NOT ONE OF THE SIX SPINE SURFACES. Its siblings are #save-fail-banner and
+ * #storage-advisory (02-toolbar.css): a full-width strip pinned under the toolbar, carrying
+ * one sentence and one action. It is deliberately not a toast -- a toast implies "noted, and
+ * gone in a moment", and this state persists until it is fixed.
+ *
+ * IT NEVER COVERS THE CANVAS. No scrim, no inset overlay, no pointer-events trap: the author
+ * must be able to read and copy what they wrote.
+ *
+ * IT IS IN THE LAYOUT, NOT OVER IT. body is a flex column and the workspace is its growing
+ * child, so the banner is inserted before the workspace and the canvas shifts down by its
+ * height -- which is what "between the toolbar and the canvas" means. It was first floated
+ * over the top on the reasoning that a layout shift mid-sentence is its own small harm; that
+ * put it straight on top of the Files header, because a fixed banner has no idea what is
+ * underneath it and what is underneath it changes with the stage.
+ *
+ * Semantic role tokens only -- the raw grey ramp does not follow the light-theme override.
+ */
+
+#session-banner {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--space-6);
+  padding: var(--space-5) var(--space-8);
+  font-size: var(--text-sm); line-height: var(--leading-snug);
+  border-bottom: 1px solid var(--border-subtle);
+}
+#session-banner[hidden] { display: none; }
+.verso-session__title { flex: 0 0 auto; font-weight: var(--weight-semibold); }
+.verso-session__body { flex: 1 1 auto; }
+.verso-session__action { flex: 0 0 auto; }
+.verso-session__action[hidden] { display: none; }
+
+/* Three tones, and they are not decoration: warning = this will lose work, danger = it just
+   did, success = it is over. The success tone is the one that cancels the alarm. */
+.verso-session--warn { background: var(--mark-note-wash); color: var(--text-primary); border-bottom-color: var(--warning); }
+.verso-session--danger { background: var(--danger-quiet); color: var(--text-primary); border-bottom-color: var(--danger); }
+.verso-session--success { background: var(--green-tint); color: var(--text-primary); border-bottom-color: var(--success); }
+
+/* The chip is for the author who has scrolled past the banner and is typing into a block
+   with the fact out of view. Quiet on purpose -- it repeats, it does not shout. */
+#session-chip {
+  position: fixed; right: var(--space-6); bottom: var(--space-6); z-index: 8500;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: var(--control-md); padding: 0 var(--space-5);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs); font-weight: var(--weight-medium);
+  background: var(--danger-quiet); color: var(--text-primary);
+  border: 1px solid var(--danger);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;   /* it states a fact; it is never in the way of the work */
+}
+#session-chip[hidden] { display: none; }

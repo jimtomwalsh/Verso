@@ -1,0 +1,79 @@
+/* 17-admin.css -- people and roles (platform-pivot 21).
+ *
+ * A FULL SURFACE, argued. The spine's default is that a settings surface squeezes the canvas
+ * rather than covering it, and this one covers it: an IT admin adding people is not adjusting a
+ * setting and has no use for the canvas behind, and the at-scale state carries search, a count,
+ * pagination and a per-row editor -- more than a right dock should hold. Confirmed by James
+ * 2026-08-05 and recorded in specs/3-identity.spec.md, surface 4.
+ *
+ * It is NOT a modal: it has no scrim and it dismisses with its own Close, because it is a place
+ * you go rather than a decision you answer. The refusal INSIDE it is a modal, which is what the
+ * spine reserves modals for.
+ *
+ * Every control on this screen comes from window.VersoUI. What is here is layout and the two
+ * pieces of chrome the canonical set does not carry: the person row and the role card.
+ */
+
+.verso-admin {
+  position: fixed; inset: 0; z-index: 8800;
+  display: flex; flex-direction: column;
+  background: var(--surface-canvas); color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+.verso-admin__head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  height: var(--toolbar-height); padding: 0 var(--space-8);
+  border-bottom: 1px solid var(--border-subtle); background: var(--surface-app);
+}
+.verso-admin__title { margin: 0; font: var(--type-panel-title); }
+.verso-admin__body { flex: 1 1 auto; overflow: auto; padding: var(--space-12) var(--space-8); max-width: 880px; width: 100%; margin: 0 auto; }
+.verso-admin__section { margin-bottom: var(--space-16); }
+.verso-admin__subtitle { margin: 0; font: var(--type-section); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-secondary); }
+.verso-admin__bar { display: flex; align-items: center; gap: var(--space-6); margin-bottom: var(--space-6); }
+.verso-admin__search { max-width: 240px; }
+.verso-admin__count { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
+.verso-admin__error { margin-bottom: var(--space-6); padding: var(--space-5) var(--space-6); border-radius: var(--radius-md); background: var(--danger-quiet); border: 1px solid var(--danger); font-size: var(--text-sm); }
+
+/* The person row. A different species from an inspector row -- an avatar well, a name, an email,
+   a role and one overflow action -- so it takes --row-height-doc, the token the document lists
+   already use, rather than inventing a height. */
+.verso-admin__list { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+.verso-admin__rowwrap + .verso-admin__rowwrap { border-top: 1px solid var(--border-subtle); }
+.verso-admin__row { display: flex; align-items: center; gap: var(--space-6); min-height: var(--row-height-doc); padding: var(--space-4) var(--space-6); }
+.verso-admin__row:hover { background: var(--surface-hover); }
+.verso-admin__av {
+  flex: 0 0 auto; width: var(--control-md); height: var(--control-md);
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full); background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  font-size: var(--text-2xs); font-weight: var(--weight-semibold);
+}
+.verso-admin__av--breakglass { background: var(--danger-quiet); border-color: var(--danger); }
+.verso-admin__who { flex: 1 1 auto; min-width: 0; }
+.verso-admin__name { font-size: var(--text-sm); }
+.verso-admin__you { color: var(--text-tertiary); }
+.verso-admin__email { font-size: var(--text-xs); color: var(--text-tertiary); }
+.verso-admin__role { flex: 0 0 auto; font-size: var(--text-xs); color: var(--text-secondary); }
+/* Inline, so an admin changing three people's roles never loses their place in the list. */
+.verso-admin__editor { padding: var(--space-6); background: var(--surface-panel); border-top: 1px solid var(--border-subtle); display: flex; align-items: center; gap: var(--space-8); }
+.verso-admin__editor[hidden] { display: none; }
+.verso-admin__field { display: flex; align-items: center; gap: var(--space-4); }
+.verso-admin__label { font: var(--type-label); color: var(--text-secondary); }
+.verso-admin__pager { display: flex; align-items: center; gap: var(--space-6); margin-top: var(--space-6); }
+.verso-admin__pageno { font-size: var(--text-xs); color: var(--text-tertiary); }
+
+.verso-admin__empty { padding: var(--space-16); text-align: center; border: 1px dashed var(--border-subtle); border-radius: var(--radius-md); }
+.verso-admin__empty-title { margin: 0 0 var(--space-3); font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.verso-admin__empty-body { margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); }
+
+/* Guests get a line, never a row: there is no account to manage, and a row implies one. */
+.verso-admin__guests { margin-bottom: var(--space-16); padding: var(--space-6); border-radius: var(--radius-md); background: var(--surface-panel); }
+.verso-admin__guests-note { font-size: var(--text-sm); color: var(--text-secondary); }
+
+.verso-admin__role-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-6); margin-bottom: var(--space-6); }
+.verso-admin__role-head { display: flex; align-items: center; gap: var(--space-6); margin-bottom: var(--space-6); }
+.verso-admin__role-name { max-width: 240px; }
+.verso-admin__holders { font-size: var(--text-xs); color: var(--text-tertiary); }
+.verso-admin__caps { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-8); }
+/* Advisory, never a block: the admin may well mean it. */
+.verso-admin__warn { margin-top: var(--space-6); padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); background: var(--mark-note-wash); border: 1px solid var(--warning); font-size: var(--text-xs); }

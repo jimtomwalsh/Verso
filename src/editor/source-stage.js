@@ -345,12 +345,21 @@
     function sourceModelForExport(pid) {
       var SD = window.SourceDoc; if (!SD) return null;
       var master = sourceMasterFor(pid);
+      // platform-pivot 35: a master whose body has not loaded is NOT an empty one. Falling
+      // through to buildUnifiedModelFor here would rebuild the export from the old per-topic
+      // content and hand the author a file that silently disagrees with what they see.
+      if (master && window.__versoTopicDeferred && window.__versoTopicDeferred(master.id)) return "deferred";
       if (master && master.doc && master.doc.nodes && master.doc.nodes.length) return SD.fromJSON(master.doc);
       return buildUnifiedModelFor(pid);
     }
     function exportProductSourceMarkdown(pid) {
       var SD = window.SourceDoc;
       var model = sourceModelForExport(pid);
+      if (model === "deferred") {
+        // Fetch it, then run the export the author actually asked for.
+        window.__versoHydrateTopic(sourceMasterFor(pid).id).then(function () { exportProductSourceMarkdown(pid); });
+        return;
+      }
       if (!SD || !model || !model.nodes || !model.nodes.length) { window.alert("This Product has no source document to export."); return; }
       var pname = (window.ProductsStore[pid] && window.ProductsStore[pid].name) || "source";
       var slug = String(pname).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "source";
@@ -2868,10 +2877,32 @@
     // search field once, then re-renders the toolbar + topic list + article from current
     // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
     // inside renderSourceTopicList, not mounted separately).
+    // platform-pivot 35: a source document's body may not be in the page yet. The bootstrap ships
+    // the bodies the first CANVAS render needs; a source document the author navigates to is
+    // fetched here, on the click. Returns true when it started a fetch, so the caller can render
+    // a waiting state instead of the body it does not have.
+    //
+    // This is the guard that keeps "deferred" from ever being mistaken for "empty". Without it,
+    // opening an unloaded source document would show a blank article -- and blank content does not
+    // look like a failure, it looks like a document somebody emptied.
+    function hydrateIfDeferred(id, then) {
+      if (!id || !window.__versoTopicDeferred || !window.__versoTopicDeferred(id)) return false;
+      window.__versoHydrateTopic(id).then(function () { if (then) then(); });
+      return true;
+    }
+
     function renderSourceStage() {
       // Source v2: the source is ONE continuous document. Resolve (and materialise on first entry)
       // the master to open, so the stage shows the document, not a topic list.
       var master = ensureUnifiedDocForActiveProduct();
+      // Hydrate before rendering. `master` is present either way -- only its BODY is deferred --
+      // so this never causes ensureUnifiedDocFor to mistake it for missing and mint a second one.
+      if (master && hydrateIfDeferred(master.id, renderSourceStage)) {
+        __sourceActiveTopicId = master.id;
+        var host = document.getElementById("source-article");
+        if (host) host.textContent = "Loading this source document\u2026";
+        return;
+      }
       if (master) {
         __sourceActiveTopicId = master.id;
         __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the document changed

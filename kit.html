@@ -26,6 +26,10 @@
   <link rel="stylesheet" href="styles/editor/12-controls.css">   <!-- the canonical control set -->
   <link rel="stylesheet" href="styles/editor/13-home.css">   <!-- the course browser -->
   <link rel="stylesheet" href="styles/editor/14-collab.css">   <!-- live-collaboration presence chrome -->
+  <link rel="stylesheet" href="styles/editor/15-sign-in.css">
+  <link rel="stylesheet" href="styles/editor/16-session.css">
+  <link rel="stylesheet" href="styles/editor/17-admin.css">
+  <link rel="stylesheet" href="styles/editor/18-cutover.css">
   <!-- arch-P5-02: src/course.css was 2,104 lines. It is styles/course/*.css now, in the order
        declared by styles/course/order.json. The SCORM exporter reads that same list and inlines them
        into one course.css, so the shipped package is byte-identical. No build step. -->
@@ -160,6 +164,9 @@
   <!-- arch-P3b-07k Home: window.VersoHome — the pre-document course browser, grouped by document geometry, with each card rendering its real first page behind an IntersectionObserver rather than showing a cached image. Must precede editor.js. -->
   <script src="src/editor/home.js"></script>
   <script src="src/editor/files.js"></script>
+  <script src="src/editor/account-menu.js"></script>
+  <script src="src/editor/admin-users.js"></script>
+  <script src="src/editor/cutover.js"></script>
   <!-- uio-W12 Product panel: window.VersoProductPanel — what the open document belongs to (product,
        primary source, extras, siblings, release state), in the left panel of Source and Edit. An
        inspector, never a filter. Must precede editor.js, which installs it. -->
