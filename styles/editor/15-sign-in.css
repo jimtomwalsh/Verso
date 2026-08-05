@@ -84,3 +84,26 @@
 .verso-signin__busy { font-size: var(--text-sm); color: var(--text-secondary); }
 .verso-signin__back { margin-top: var(--space-8); }
 .verso-signin__submit { margin-top: var(--space-4); }
+
+/* ---- first run (platform-pivot 31) ---------------------------------------
+   The OTHER argued exception to the six-presentation spine, on exactly the same grounds as
+   sign-in above: there is no canvas to squeeze, because the server is not set up yet. It shares
+   this stylesheet on purpose — two surfaces carrying the same exception for the same reason
+   should not drift into two looks. What it adds is the step rail, which is what makes it read
+   as completing an installation rather than configuring an app. */
+.verso-firstrun__card { max-width: 460px; }
+.verso-firstrun__rail {
+  display: flex; gap: var(--space-4); list-style: none; margin: 0 0 var(--space-12); padding: 0;
+}
+.verso-firstrun__step {
+  flex: 1 1 0; padding-top: var(--space-3);
+  border-top: 2px solid var(--border-subtle);
+  font-size: var(--text-2xs); line-height: var(--leading-snug); color: var(--text-disabled);
+}
+.verso-firstrun__step.is-done { border-top-color: var(--success); color: var(--text-tertiary); }
+.verso-firstrun__step.is-current { border-top-color: var(--accent); color: var(--text-primary); }
+/* The one hard refusal in the flow gets a tone of its own: SQLite on SMB corrupts silently, so
+   this is not a preference. */
+.verso-firstrun__never { color: var(--warning); }
+.verso-firstrun__val { margin-left: auto; font-size: var(--text-sm); color: var(--text-primary); }
+.verso-firstrun__footer { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-12); }

@@ -3091,6 +3091,152 @@ section("platform-pivot 17/18/20 identity");
   }
 })();
 
+// ---- platform-pivot 31: guided IT install, first run, monitoring ----------------
+// This is the ticket that most directly answers James's ask: the moment approval lands, an admin
+// who has never seen the codebase can stand this up. So the tests are about the things that
+// would strand such a person -- a store on a network share, a first-run route that stays open, a
+// health check that says nothing, a log with a password in it.
+section("platform-pivot 31 IT install + first run + monitoring");
+(function () {
+  var OPS = require(path.join(ROOT, "server/ops.js"));
+  var SI = require(path.join(ROOT, "src/sign-in.js")).VersoSignIn;
+
+  // --- alerts: thresholds evaluated here, reported for the site's own monitoring ---
+  ok("31: a healthy reading raises nothing", OPS.evaluate({ diskFreePct: 60, changeLogRows: 10, heldLocks: 3 }).level === "ok");
+  ok("31: a tight volume warns", OPS.evaluate({ diskFreePct: 12 }).level === "warning");
+  ok("31: a nearly-full volume is CRITICAL, because writes start failing",
+    OPS.evaluate({ diskFreePct: 3 }).level === "critical");
+  ok("31: a large change log asks for a compaction", OPS.evaluate({ changeLogRows: 900000 }).alerts[0].id === "changeLog");
+  ok("31: a pile of held locks reads as locks not releasing, not as a busy team",
+    /may not be releasing/.test(OPS.evaluate({ heldLocks: 500 }).alerts[0].message));
+  ok("31: the worst condition wins the level", OPS.evaluate({ diskFreePct: 2, changeLogRows: 900000 }).level === "critical");
+  ok("31: a missing reading raises nothing rather than guessing", OPS.evaluate({}).alerts.length === 0);
+  ok("31: thresholds are overridable per site", OPS.evaluate({ diskFreePct: 40 }, { diskFreeWarnPct: 50 }).level === "warning");
+
+  // --- the health payload ---
+  var shallow = OPS.health({ mode: "server", version: "1", schemaVersion: 2 });
+  ok("31: the cheap form is cheap -- no readings, safe to poll often", shallow.ok === true && shallow.reading === undefined);
+  ok("31: and always identifies the running artifact", shallow.version === "1" && shallow.schemaVersion === 2);
+  var deepCrit = OPS.health({ mode: "server", dataDir: "/nonexistent-xyz", blockStore: { maxSeq: function () { return 900000; } } }, true);
+  ok("31: the deep form carries the readings and the alerts", !!deepCrit.reading && Array.isArray(deepCrit.alerts));
+  // ok goes false only on critical: a monitor that watches nothing but the boolean still catches
+  // what stops writes, and a warning does not page anyone for a volume that is 12% free.
+  var warnOnly = OPS.health({ blockStore: { maxSeq: function () { return 900000; } }, dataDir: ROOT }, true);
+  ok("31: a WARNING leaves ok true", warnOnly.level === "warning" && warnOnly.ok === true);
+
+  // --- the structured log ---
+  var written = [];
+  var log = OPS.createLog({ sink: function (l) { written.push(l); }, now: function () { return 0; } });
+  log.auth("signin", { email: "a@b", password: "hunter2", token: "abc", cookie: "x", authorization: "Bearer y", rung: "oidc" });
+  var rec = JSON.parse(written[0]);
+  ok("31: an auth event is one JSON object per line, with a timestamp and a kind",
+    rec.kind === "auth" && rec.event === "signin" && !!rec.ts);
+  // A log is exactly where a secret goes to be copied into a ticket.
+  ok("31: and NEVER carries a password, token, cookie or authorization header",
+    rec.password === undefined && rec.token === undefined && rec.cookie === undefined && rec.authorization === undefined);
+  ok("31: while the useful fields survive", rec.email === "a@b" && rec.rung === "oidc");
+  log.error("boom", { where: "x" }); log.promotion("promoted", { version: "2" });
+  ok("31: the three kinds an admin is asked about after the fact are all there",
+    written.map(function (l) { return JSON.parse(l).kind; }).join() === "auth,error,promotion");
+  ok("31: a failing sink never takes the server down",
+    (function () { var bad = OPS.createLog({ sink: function () { throw new Error("disk"); } }); bad.error("x"); return true; })());
+
+  // --- first run: the wizard's rules ---
+  ok("31: the admin account cannot be skipped", SI.firstRunStepValid(0, {}) === false);
+  ok("31: nor set with a throwaway password", SI.firstRunStepValid(0, { adminEmail: "a@b", adminPassword: "short" }) === false);
+  ok("31: a real one passes", SI.firstRunStepValid(0, { adminEmail: "a@b", adminPassword: "longenough" }) === true);
+  ok("31: local accounts need nothing more", SI.firstRunStepValid(1, { method: "local" }) === true);
+  ok("31: a half-filled OIDC config does not pass", SI.firstRunStepValid(1, { method: "oidc", issuer: "i", clientId: "c" }) === false);
+  ok("31: a complete one does", SI.firstRunStepValid(1, { method: "oidc", issuer: "i", clientId: "c", clientSecret: "s" }) === true);
+  ok("31: a data folder is required", SI.firstRunStepValid(2, {}) === false);
+  // Continue must not stay enabled beside the inline refusal, or the screen says two things at once.
+  ok("31: and a network path does not merely warn -- it blocks the step",
+    SI.firstRunStepValid(2, { dataDir: "\\\\nas\\\\verso" }) === false &&
+    SI.firstRunStepValid(2, { dataDir: "D:\\\\Verso" }) === true);
+
+  // THE REFUSAL THAT MATTERS. SQLite over SMB corrupts silently; no error, and the damage shows
+  // up later as a course that will not open.
+  ok("31: a UNC path is refused", SI.isNetworkPath("\\\\\\\\server\\\\share\\\\verso") === true);
+  ok("31: and a URL-shaped one", SI.isNetworkPath("smb://nas/vol") === true && SI.isNetworkPath("//nas/vol") === true);
+  ok("31: a local path is fine", SI.isNetworkPath("D:\\\\Verso\\\\data") === false && SI.isNetworkPath("/var/lib/verso") === false);
+  ok("31: the wizard refuses it inline AND again at submit",
+    (src("src/sign-in.js").match(/isNetworkPath\(data\.dataDir\)/g) || []).length >= 2);
+  // The inline half is only reachable if the field re-renders its STEP, not just the footer.
+  // It was written and unreachable until the browser showed it -- hence the gate.
+  ok("31: and the data-folder field re-renders live, so the inline refusal can actually appear",
+    /field\("Folder", "dataDir", "text", "D:\\\\Verso\\\\data", true\)/.test(src("src/sign-in.js")) &&
+    /if \(live\) \{ var pos = tf\.input\.selectionStart; render\(\);/.test(src("src/sign-in.js")));
+  ok("31: the payload only carries OIDC config when OIDC was chosen",
+    SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", method: "local" }).oidc === undefined &&
+    !!SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", method: "oidc", issuer: "i" }).oidc);
+  ok("31: first run comes BEFORE sign-in -- there is nobody to sign in as yet",
+    /if \(shouldFirstRun\(window\)\) mountFirstRun/.test(src("src/sign-in.js")));
+  ok("31: and it shares sign-in's argued exception rather than growing a second look",
+    /verso-firstrun__card \{ max-width/.test(src("styles/editor/15-sign-in.css")));
+
+  // --- first run over HTTP: open before setup, CLOSED after ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> first-run HTTP tests skipped"); return; }
+    var os = require("os");
+    var srv = require(path.join(ROOT, "server/verso-server.js"));
+    __async.push((async function () {
+      var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-firstrun-"));
+      var server, base;
+      await new Promise(function (r) { server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "v.sqlite"), linkSecret: "s", insecureCookie: true }, function (s) { base = "http://127.0.0.1:" + s.address().port; r(); }); });
+      try {
+        // In FRONT of the identity boundary, deliberately: there is nobody who could authenticate.
+        var g = await (await fetch(base + "/api/first-run")).json();
+        ok("31: a fresh server says it needs first run, without authentication", g.ok === true && g.needed === true);
+        var boot = await (await fetch(base + "/api/bootstrap.js")).text();
+        ok("31: and the page is told, so it shows the wizard instead of a dead-end sign-in",
+          /__versoFirstRunNeeded = true/.test(boot));
+
+        var p = await (await fetch(base + "/api/first-run", { method: "POST", body: JSON.stringify({ adminEmail: "root@local", adminPassword: "longenough", organisationName: "Northwind" }) })).json();
+        ok("31: setting it up creates the break-glass admin and records the organisation", p.ok === true && p.org === "Northwind");
+        ok("31: which can immediately sign in",
+          (await (await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "root@local", password: "longenough" }) })).json()).ok === true);
+
+        // THE ONE THAT WOULD LOSE A SERVER: a permanent create-an-admin endpoint.
+        var again = await fetch(base + "/api/first-run", { method: "POST", body: JSON.stringify({ adminEmail: "attacker@x", adminPassword: "longenough" }) });
+        ok("31: and the route CLOSES ITSELF -- it can never mint a second administrator", again.status === 409);
+        ok("31: it now reports setup as done", (await (await fetch(base + "/api/first-run")).json()).needed === false);
+        ok("31: the bootstrap stops advertising it too", !/__versoFirstRunNeeded = true/.test(await (await fetch(base + "/api/bootstrap.js")).text()));
+
+        var h = await (await fetch(base + "/api/health?deep=1")).json();
+        ok("31: deep health answers with a level and real readings", !!h.level && typeof h.reading.diskFreePct === "number");
+        ok("31: and never needs a login, so a monitor can poll it", h.service === "verso-server");
+      } finally {
+        try { server.close(); } catch (e) {}
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+      }
+    })());
+  })();
+
+  // --- the install kit an admin actually follows ---
+  var ps = src("server/install/install-windows.ps1");
+  ok("31: the installer registers Node as an auto-starting Windows Service",
+    /New-Service/.test(ps) && /-StartupType Automatic/.test(ps));
+  ok("31: it refuses a network path before changing anything", /SQLite corrupts silently on SMB/.test(ps) && ps.indexOf("throw \"DataDir must be") < ps.indexOf("New-Item -ItemType Directory"));
+  ok("31: it refuses a Node too old for node:sqlite", /22\.5\.0/.test(ps));
+  ok("31: the data folder ends up writable by the service account alone, which is what makes WAL safe",
+    /icacls/.test(ps) && /inheritance:r/.test(ps));
+  ok("31: the backend binds loopback, so IIS is the only thing that can reach it", /"host" = "127\.0\.0\.1"|host = "127\.0\.0\.1"/.test(ps));
+  // Proxying only one pipe is the failure that looks like "collaboration is just slow".
+  ok("31: the IIS config proxies BOTH the websocket upgrade and the long-poll fallback",
+    /<webSocket enabled="true" \/>/.test(ps) && /\^\(api\|auth\|sync\)/.test(ps));
+  ok("31: secrets go in the config FILE, never in source", /never in source/.test(ps));
+  ok("31: and it makes no external call of any kind",
+    !/Invoke-WebRequest|Invoke-RestMethod|curl|wget|Start-BitsTransfer/i.test(ps));
+
+  var rb = src("server/install/RUNBOOK.md");
+  ok("31: the runbook states the air-gap posture up front", /Nothing in Verso's backend reaches the internet/.test(rb));
+  ok("31: names TLS as IIS's job and at-rest as the volume's", /BitLocker/.test(rb) && /Verso never terminates TLS itself|does not encrypt at rest/.test(rb));
+  ok("31: explains the alert table an admin will be paged by", /changeLog/.test(rb) && /locks/.test(rb) && /15% free/.test(rb));
+  ok("31: tells them how to get back in when the IdP is down", /break-glass/.test(rb) && /Use the local admin account/.test(rb));
+  ok("31: and carries the two deploy unknowns rather than pretending they are settled",
+    /reach your identity provider/.test(rb) && /wss:\/\/` and the long-poll|BOTH `wss/.test(rb));
+})();
+
 // ---- platform-pivot 35: source documents on demand ------------------------------
 // The scaling half of James's loading decision. The whole ticket turns on ONE hazard: the canvas
 // render resolver reads master.doc DURING render, so a body that has not arrived renders a BLANK

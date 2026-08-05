@@ -28,6 +28,7 @@ var createIdentity = require("./identity").createIdentity;
 var createReview = require("./review").createReview;
 var authRungs = require("./auth-rungs");
 var migrations = require("./migrations");
+var ops = require("./ops");
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -62,7 +63,10 @@ function buildBootstrap(config, data, principal) {
     // Which rung this deployment runs, so the account menu can say HOW the person signed in
     // without guessing. Public and secret-free -- the same value /auth/config serves.
     "window.__versoServerRung = " + jsLit((config && config.__rungName) || "local") + ";",
-    "window.__versoServerOrg = " + jsLit((config && ((config.auth && config.auth.organisationName) || config.organisationName)) || null) + ";"
+    "window.__versoServerOrg = " + jsLit((config && ((config.auth && config.auth.organisationName) || config.organisationName)) || null) + ";",
+    // A server nobody has set up yet shows the first-run wizard instead of a sign-in page --
+    // there is nobody to sign in as. Computed by the caller, which knows the account count.
+    "window.__versoFirstRunNeeded = " + ((d && d.firstRunNeeded) ? "true" : "false") + ";"
   ];
   if (principal) {
     // The account menu (platform-pivot 39) is the only place a person can confirm WHICH
@@ -188,8 +192,11 @@ function assembleLibrary(store, blockStore, opts) {
   return JSON.stringify(lib);
 }
 
-function sendBootstrap(res, config, store, blockStore, principal) {
+function sendBootstrap(res, config, store, blockStore, principal, identity) {
   var data = {};
+  // Asked once, at the top: a server with no accounts is not "signed out", it is un-installed,
+  // and showing it a sign-in page is a dead end.
+  if (identity) { try { data.firstRunNeeded = ((identity.listUsers({ kind: "system", capabilities: ["manageUsers"] }).users) || []).length === 0; } catch (e) {} }
   if (principal) {
     try { data.registry = store.getRegistry(); } catch (e) {}
     try { data.products = store.getKv("authoring.products"); } catch (e) {}
@@ -284,7 +291,8 @@ function capFor(rest, method) {
 // drive it without binding a socket. An optional blockStore (ticket 03) mounts the
 // block-addressable /api/doc/* routes below the same API -- the boundary Phase-2 sync
 // fans out from. When absent, only the ticket-02 blob routes are served.
-function makeHandler(store, config, blockStore, sync, identity, review, rung) {
+function makeHandler(store, config, blockStore, sync, identity, review, rung, opsState) {
+  opsState = opsState || {};
   config = config || {};
   return function handler(req, res) {
     var raw = req.url || "";
@@ -294,8 +302,15 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung) {
     var method = req.method || "GET";
 
     if (url === "/api/health") {
-      // the running artifact version is always identifiable (ticket 27)
-      return sendJson(res, 200, { ok: true, mode: config.mode || "local", service: "verso-server", renders: false, version: migrations.SERVER_VERSION, schemaVersion: migrations.SCHEMA_VERSION });
+      // the running artifact version is always identifiable (ticket 27); ?deep=1 adds the
+      // readings and the alert evaluation an IT monitor polls less often (platform-pivot 31).
+      var deep = /(^|&)deep=1(&|$)/.test(query);
+      return sendJson(res, 200, ops.health({
+        mode: config.mode, version: migrations.SERVER_VERSION, schemaVersion: migrations.SCHEMA_VERSION,
+        dataDir: config.dataDir || (opsState.dbPath && require("node:path").dirname(opsState.dbPath)) || ".",
+        blockStore: blockStore, lockManager: opsState.lockManager,
+        thresholds: config.thresholds, uptimeSec: Math.round(process.uptime())
+      }, deep));
     }
 
     // --- server-mode bootstrap (ticket 34): THE ON-RAMP. -----------------------
@@ -316,12 +331,41 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung) {
     if (url === "/api/bootstrap.js") {
       var bp = principalOf(req, identity, config, rung);
       config.__rungName = rung ? rung.name : "local";
-      return sendBootstrap(res, config, store, blockStore, bp);
+      return sendBootstrap(res, config, store, blockStore, bp, identity);
+    }
+
+    // --- first run (platform-pivot 31) -----------------------------------------
+    // A server with no accounts yet has nothing to protect and nobody who could authenticate,
+    // so these two routes sit in FRONT of the identity boundary -- and they close themselves the
+    // moment the first admin exists. Leaving them open after that would be a permanent
+    // create-an-admin endpoint, which is the obvious way to lose a server.
+    if (url === "/api/first-run" && identity) {
+      var pending = identity.listUsers({ kind: "system", capabilities: ["manageUsers"] });
+      var count = (pending.users || []).length;
+      if (method === "GET") {
+        return sendJson(res, 200, { ok: true, needed: count === 0, org: (config.auth && config.auth.organisationName) || config.organisationName || null, dataDir: config.dataDir || null });
+      }
+      if (method === "POST") return withJsonBody(req, res, function (body) {
+        if (count > 0) return sendJson(res, 409, { ok: false, error: "this server has already been set up" });
+        if (!body.adminEmail || !body.adminPassword) return sendJson(res, 400, { ok: false, error: "the local admin account needs an email and a password" });
+        // The break-glass admin is created FIRST, so that even if a later step of first-run
+        // fails the server is reachable rather than stranded with no way in.
+        identity.ensureBreakGlass(body.adminEmail, body.adminPassword);
+        if (body.organisationName) { config.organisationName = String(body.organisationName); }
+        if (body.oidc && body.oidc.issuer) { config.auth = Object.assign({}, config.auth, { rung: "oidc", oidc: body.oidc, organisationName: config.organisationName }); }
+        if (opsState.log) opsState.log.auth("first-run", { email: body.adminEmail, rung: (config.auth && config.auth.rung) || "local" });
+        return sendJson(res, 200, { ok: true, org: config.organisationName || null, rung: (config.auth && config.auth.rung) || "local" });
+      });
+      return sendJson(res, 405, { ok: false, error: "method not allowed" });
     }
 
     // --- auth routes (ticket 17; public login/logout; server mode only) ---
     if (url === "/auth/login" && method === "POST" && identity) return withJsonBody(req, res, function (body) {
       var r = identity.login(identity.localAccountsAdapter, { email: body.email, password: body.password });
+      // Logged either way, and NEVER with the password: a failed sign-in is the event an admin
+      // is most often asked to account for, and the log line is useless if it only records the
+      // successes. ops.createLog drops any credential-shaped field by name.
+      if (opsState.log) opsState.log.auth(r ? "signin" : "signin-failed", { email: body.email, rung: "local" });
       if (!r) return sendJson(res, 401, { ok: false, error: "invalid credentials" });
       // Secure by default in server mode (on-prem TLS); config.insecureCookie relaxes it
       // for a plain-HTTP test/dev bring-up only.
@@ -330,7 +374,9 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung) {
       return sendJson(res, 200, { ok: true, user: r.user });
     });
     if (url === "/auth/logout" && method === "POST" && identity) {
-      var ck = parseCookies(req); if (ck.verso_session) identity.signOut(ck.verso_session);
+      var ck = parseCookies(req);
+      if (opsState.log) { var who = identity.resolveSession(ck.verso_session); if (who) opsState.log.auth("signout", { email: who.email }); }
+      if (ck.verso_session) identity.signOut(ck.verso_session);
       res.setHeader("Set-Cookie", "verso_session=; Path=/; Max-Age=0");
       return sendJson(res, 200, { ok: true });
     }
@@ -387,6 +433,7 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung) {
         if (!r || !r.ok) return sendJson(res, 401, { ok: false, error: (r && r.reason) || "sign-in failed" });
         // SSO proved WHO, and stops there. The Verso user record decides what they may do.
         var u = identity.findOrCreateUser(r.identity.email, r.identity.name);
+        if (opsState.log) opsState.log.auth("signin", { email: r.identity.email, rung: rung.name });
         var tok = identity.createSession(u.id);
         var sec = (config.mode === "server" && !config.insecureCookie) ? "; Secure" : "";
         res.writeHead(302, {
@@ -662,6 +709,11 @@ function createServer(opts) {
   // per DEPLOYMENT from the config file, never at build time. Null means this deployment runs
   // on local accounts alone -- the always-works floor -- which is also what a half-configured
   // rung falls back to rather than half-starting.
+  // The structured log (platform-pivot 31): errors, auth events and promotions, one JSON object
+  // per line, to a FILE the site's own collector reads. Nothing here opens an outbound connection.
+  var opsLog = opts.opsLog || ops.createLog({
+    file: config.logFile || (opts.dbPath ? require("node:path").join(require("node:path").dirname(opts.dbPath), "verso-server.log") : null)
+  });
   var rung = opts.hasOwnProperty("rung") ? opts.rung
     : ((identity && config.mode === "server") ? authRungs.createRung(config, { now: opts.now }) : null);
   // Review comments (ticket 23): server mode only, on the same on-disk store.
@@ -682,7 +734,7 @@ function createServer(opts) {
       });
     }
   }) : null;
-  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity, review, rung));
+  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity, review, rung, { lockManager: lockManager, dbPath: opts.dbPath, log: opsLog }));
   if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode
   server.__store = store;
   server.__blockStore = blockStore;
@@ -694,6 +746,7 @@ function createServer(opts) {
   server.__lockManager = lockManager;
   server.__reaper = reaper;
   server.__config = config;
+  server.__opsLog = opsLog;
   if (reaper && config.reaperIntervalMs) reaper.start(config.reaperIntervalMs); // opt-in periodic sweep
   return server;
 }
@@ -712,5 +765,5 @@ function startServer(config, cb) {
 module.exports = {
   createServer: createServer, makeHandler: makeHandler, startServer: startServer,
   buildBootstrap: buildBootstrap, assembleLibrary: assembleLibrary, libraryDocId: libraryDocId,
-  hydrationSet: hydrationSet, topicDoc: topicDoc
+  hydrationSet: hydrationSet, topicDoc: topicDoc, ops: ops
 };

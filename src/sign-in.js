@@ -236,10 +236,205 @@
     return mount({ base: w.__versoServerUrl });
   }
 
-  window.VersoSignIn = { COPY: COPY, interpolate: interpolate, viewModel: viewModel, shouldSignIn: shouldSignIn, mount: mount, install: install };
+  // ---- first run (platform-pivot 31) ---------------------------------------
+  // The OTHER argued exception to the six-presentation spine, on exactly the same grounds as
+  // sign-in: there is no canvas to squeeze, because the server is not set up yet. It shares
+  // this file and this stylesheet deliberately -- two surfaces that carry the same exception
+  // for the same reason should not drift into two looks.
+  //
+  // It reads as COMPLETING AN INSTALLATION rather than configuring an app: a step rail, four
+  // steps, a review, and a done state.
+  var FR = {
+    steps: ["Local admin account", "Sign-in method", "Data location", "Review"],
+    adminWhy: "This account always works, even if your sign-in provider is down. Keep its password somewhere safe — it's the way in if everything else fails.",
+    ssoRecommended: "Company sign-in (recommended)",
+    localOnly: "Local accounts only",
+    eitherWay: "The local admin account you just made works either way.",
+    dataWhat: "Your courses, source documents, media and the change log live here. Back it up like any other server folder.",
+    dataNeverSmb: "Must be a local disk. Never a network share — SQLite on SMB corrupts silently.",
+    doneTitle: "Your Verso server is ready",
+    doneBody: "Sign in with the local admin account to add the rest of your team."
+  };
+  // PURE: which step, what has been filled in -> can we go on. Separated so the wizard's rules
+  // are testable without a browser, and so "you cannot skip the admin account" is stated once.
+  function firstRunStepValid(step, data) {
+    data = data || {};
+    if (step === 0) return !!(data.adminEmail && /@/.test(data.adminEmail) && data.adminPassword && data.adminPassword.length >= 8);
+    if (step === 1) {
+      if (data.method !== "oidc") return true;              // local accounts need nothing more
+      return !!(data.issuer && data.clientId && data.clientSecret);
+    }
+    // A network path is not "filled in but questionable", it is invalid: SQLite corrupts
+    // silently on SMB. Leaving Continue enabled beside the inline refusal would have the screen
+    // saying two different things at once.
+    if (step === 2) return !!data.dataDir && !isNetworkPath(data.dataDir);
+    return true;
+  }
+  // The one hard refusal in the flow. SQLite on SMB corrupts silently under oplocks, and a
+  // silent corruption of the doc-of-record is the worst outcome this product has.
+  function isNetworkPath(p) {
+    var v = String(p || "").trim();
+    return /^\\\\/.test(v) || /^[a-z]+:\/\//i.test(v) || /^\/\//.test(v);
+  }
+  function firstRunPayload(data) {
+    var out = { adminEmail: data.adminEmail, adminPassword: data.adminPassword, organisationName: data.organisationName || null };
+    if (data.method === "oidc") out.oidc = { issuer: data.issuer, clientId: data.clientId, clientSecret: data.clientSecret, redirectUri: data.redirectUri || null };
+    return out;
+  }
+  function shouldFirstRun(w) { return !!(w && w.__versoServerUrl && w.__versoFirstRunNeeded === true); }
+
+  // The wizard. Same card, same tokens, plus a persistent step rail -- it must read as
+  // completing an installation, not as configuring an app.
+  function mountFirstRun(opts) {
+    opts = opts || {};
+    var base = opts.base || window.__versoServerUrl || "";
+    var doFetch = opts.fetch || (typeof fetch === "function" ? fetch : null);
+    var reload = opts.reload || function () { window.location.reload(); };
+    var step = 0, done = false, error = null, busy = false;
+    var data = { method: "oidc", dataDir: opts.dataDir || "" };
+
+    var root = el("div", "verso-signin verso-firstrun");
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-label", "Set up your Verso server");
+    var card = el("div", "verso-signin__card verso-firstrun__card");
+    root.appendChild(card);
+
+    // `live` re-renders the whole step on every keystroke rather than only the footer. The data
+    // folder needs it: its refusal is INLINE, and a field that only repaints the footer left that
+    // warning unreachable -- the copy was there and could never appear. Caught in the browser.
+    function field(label, key, type, placeholder, live) {
+      var wrap = el("div", "verso-signin__field");
+      wrap.appendChild(el("label", "verso-signin__label", label));
+      var tf = ui().TextField({ value: data[key] || "", type: type || "text", placeholder: placeholder || "",
+        onChange: function (v) {
+          data[key] = v;
+          if (live) { var pos = tf.input.selectionStart; render(); var next = document.querySelector(".verso-firstrun__card .vds-textfield__input"); if (next) { next.focus(); try { next.setSelectionRange(pos, pos); } catch (e) {} } }
+          else paintFooter();
+        } });
+      wrap.appendChild(tf);
+      return wrap;
+    }
+    var footer;
+    function paintFooter() {
+      if (!footer) return;
+      footer.textContent = "";
+      if (step > 0) footer.appendChild(ui().Button({ variant: "ghost", size: "sm", label: "Back",
+        onClick: function () { step--; error = null; render(); } }));
+      var last = step === 3;
+      footer.appendChild(ui().Button({
+        variant: "primary", full: true, label: last ? "Set up this server" : "Continue",
+        disabled: busy || !firstRunStepValid(step, data),
+        onClick: function () { if (last) submit(); else { step++; error = null; render(); } }
+      }));
+    }
+
+    function render() {
+      card.textContent = "";
+      card.appendChild(el("p", "verso-signin__mark", "Verso"));
+      if (done) {
+        card.appendChild(el("p", "verso-signin__title", FR.doneTitle));
+        card.appendChild(el("p", "verso-signin__lede", FR.doneBody));
+        card.appendChild(ui().Button({ variant: "primary", full: true, label: "Sign in", onClick: reload }));
+        return;
+      }
+      // The rail is persistent: at every step you can see how many are left, which is what
+      // makes this read as an installation rather than an open-ended settings screen.
+      var rail = el("ol", "verso-firstrun__rail");
+      FR.steps.forEach(function (label, i) {
+        rail.appendChild(el("li", "verso-firstrun__step" + (i === step ? " is-current" : (i < step ? " is-done" : "")), label));
+      });
+      card.appendChild(rail);
+      if (error) {
+        var m = el("div", "verso-signin__msg verso-signin__msg--error");
+        m.textContent = error;
+        card.appendChild(m);
+      }
+
+      if (step === 0) {
+        card.appendChild(el("p", "verso-signin__title", FR.steps[0]));
+        card.appendChild(el("p", "verso-signin__note", FR.adminWhy));
+        card.appendChild(field("Your name", "adminName"));
+        card.appendChild(field("Email", "adminEmail", "email"));
+        card.appendChild(field("Password", "adminPassword", "password"));
+        card.appendChild(field("Organisation name", "organisationName"));
+      } else if (step === 1) {
+        card.appendChild(el("p", "verso-signin__title", FR.steps[1]));
+        var seg = ui().SegmentedControl({
+          options: [{ value: "oidc", label: FR.ssoRecommended }, { value: "local", label: FR.localOnly }],
+          value: data.method, onChange: function (v) { data.method = v; render(); }
+        });
+        card.appendChild(seg);
+        card.appendChild(el("p", "verso-signin__note", FR.eitherWay));
+        if (data.method === "oidc") {
+          card.appendChild(field("Issuer URL", "issuer", "text", "https://login.microsoftonline.com/<tenant>/v2.0"));
+          card.appendChild(field("Client ID", "clientId"));
+          card.appendChild(field("Client secret", "clientSecret", "password"));
+        }
+      } else if (step === 2) {
+        card.appendChild(el("p", "verso-signin__title", FR.steps[2]));
+        card.appendChild(el("p", "verso-signin__note", FR.dataWhat));
+        card.appendChild(field("Folder", "dataDir", "text", "D:\\Verso\\data", true));
+        var warn = el("p", "verso-signin__note verso-firstrun__never", FR.dataNeverSmb);
+        card.appendChild(warn);
+        if (isNetworkPath(data.dataDir)) {
+          var bad = el("div", "verso-signin__msg verso-signin__msg--error");
+          bad.textContent = "That looks like a network share. SQLite corrupts silently on SMB — use a local disk.";
+          card.appendChild(bad);
+        }
+      } else {
+        card.appendChild(el("p", "verso-signin__title", FR.steps[3]));
+        [["Local admin", data.adminEmail],
+         ["Sign-in", data.method === "oidc" ? "Company sign-in (" + (data.issuer || "") + ")" : "Local accounts only"],
+         ["Data folder", data.dataDir]].forEach(function (row) {
+          var r = el("div", "chrome-pop__row");
+          r.appendChild(el("span", "verso-signin__label", row[0]));
+          r.appendChild(el("span", "verso-firstrun__val", row[1] || "—"));
+          card.appendChild(r);
+        });
+      }
+      footer = el("div", "verso-firstrun__footer");
+      card.appendChild(footer);
+      paintFooter();
+    }
+
+    function submit() {
+      // The one refusal in the flow, enforced at the last moment as well as inline: a network
+      // path here means silent corruption of the doc-of-record later.
+      if (isNetworkPath(data.dataDir)) { error = "The data folder must be on a local disk."; return render(); }
+      busy = true; error = null; render();
+      doFetch(base.replace(/\/+$/, "") + "/api/first-run", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(firstRunPayload(data))
+      }).then(function (r) { return r.json(); })
+        .then(function (j) {
+          busy = false;
+          if (j && j.ok) { done = true; return render(); }
+          error = (j && j.error) || "Setup could not be completed."; render();
+        })
+        .catch(function () { busy = false; error = "Could not reach the Verso server."; render(); });
+    }
+
+    render();
+    if (document.body) document.body.appendChild(root);
+    else document.addEventListener("DOMContentLoaded", function () { document.body.appendChild(root); });
+    return { root: root, render: render, _data: data, _step: function () { return step; } };
+  }
+
+  window.VersoSignIn = {
+    COPY: COPY, interpolate: interpolate, viewModel: viewModel, shouldSignIn: shouldSignIn, mount: mount, install: install,
+    // platform-pivot 31 first run, sharing this surface's argued exception
+    FIRST_RUN: FR, firstRunStepValid: firstRunStepValid, isNetworkPath: isNetworkPath,
+    firstRunPayload: firstRunPayload, shouldFirstRun: shouldFirstRun, mountFirstRun: mountFirstRun
+  };
 
   // Live install. Guarded on a real document so `require` in the suite is inert.
-  if (typeof document !== "undefined" && document.createElement) install(window);
+  // First run comes BEFORE sign-in: there is nobody to sign in as yet.
+  if (typeof document !== "undefined" && document.createElement) {
+    if (shouldFirstRun(window)) mountFirstRun({ base: window.__versoServerUrl });
+    else install(window);
+  }
 
   if (typeof module !== "undefined" && module.exports) module.exports = window;
 })();
