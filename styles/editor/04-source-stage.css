@@ -142,18 +142,21 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .source-marks__rollup { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 6px 10px 2px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); cursor: pointer; }
 .source-marks__rollup:hover { color: var(--text-secondary); text-decoration: underline; }
 
-/* Contextual alternate panel (alternates-staleness): a margin card pinned in the right gutter,
-   tracking its span (absolutely positioned within the scrolling article, so scroll tracks free). */
-/* uio-S-C03 (SRC-03): mark cards (where-used / alternate / comment) must never sit ON TOP of the
-   passage they annotate. While any card is open, reserve a right-margin LANE on the article so the
-   prose measure shifts clear of the card zone instead of being covered. The cards themselves stay
-   absolutely pinned to the right (right:20/42px); this just guarantees the text ends before them. */
+/* uio-S-C03 (SRC-03) reserved a 312px right-margin LANE on the article whenever a card was open,
+   so the prose shifted clear instead of being covered. uio-S-M02 took the mark cards off the
+   article entirely — they dock in the panel now — so the lane is only owed to the one surface that
+   is still pinned beside its line: the comment thread. A conversation belongs beside the paragraph
+   it is about; a card stating what is attached to a passage does not. */
 @media (min-width: 1181px) {
-  .source-stage__article:has([data-source-wherepanel]),
-  .source-stage__article:has([data-source-altpanel]),
   .source-stage__article:has([data-source-commentthread]) { padding-right: 312px; }
 }
-.source-altpanel { position: absolute; right: 20px; width: 244px; z-index: 25; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.12); padding: 12px 14px; }
+/* uio-S-M02: the mark cards are DOCKED now, not pinned over the prose. So they are in flow, full
+   width of the panel, and they lose the float chrome — the absolute position, the fixed 244px, the
+   z-index and the drop shadow all existed to lift a card off the reading column it was covering.
+   Borders over shadows is the DS rule; a docked card has no reason to break it. */
+.source-card-dock:empty { display: none; }
+.source-card-dock { margin-bottom: var(--space-3, 6px); }
+.source-altpanel { background: var(--surface-panel); border: 1px solid var(--border-strong); border-radius: var(--radius-md, 8px); padding: var(--space-3, 6px) var(--space-4, 10px); }
 .source-altpanel__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .source-altpanel__title { flex: 1 1 auto; font-weight: 650; font-size: 13px; }
 .source-altpanel__head .source-drawer__dot { margin-top: 0; }
