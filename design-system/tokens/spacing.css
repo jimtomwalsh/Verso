@@ -41,9 +41,16 @@
      the line return on the way back. WORKING is the measure you edit at, READING the one you read
      at — two different tasks, so two different measures, never one compromise between them.
      A measure only means anything WITH a type size: 780px reads at ~86 characters at 17px and at
-     ~101 at 13px. Pair --measure-reading with --text-reading; a measure alone fixes nothing. */
-  --measure-working:   700px;
-  --measure-reading:   780px;
+     ~101 at 13px. Pair --measure-reading with --text-reading; a measure alone fixes nothing.
+     uio-S-A01 RETUNED both against the type they are finally paired with (--text-source /
+     --text-reading rather than the chrome ramp), and measured the result in the browser instead of
+     deriving it: working lands at ~66 characters, reading at ~68. Widening either one now costs
+     characters rather than buying room, which is the whole point of stating the pair together. */
+  --measure-working:   600px;
+  --measure-reading:   640px;
+  /* uio-S-A01: the annotation gutter. A margin wide enough for a mark stub to state its type, its
+     meta and a line of the passage it sits beside; narrower and the snippet is all ellipsis. */
+  --gutter-w:          300px;
   --toolbar-height:    40px;
   --tabbar-height:     36px;
   --row-height:        28px;   /* inspector row */

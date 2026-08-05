@@ -384,6 +384,62 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
     return { tone: tone, title: bits.join(" · "), count: stat.total };
   }
 
+  // ---- uio-S-A01 (SRC-03/09): the annotation gutter ---------------------------
+  // A stub is one mark, stated the way it reads in the margin: what KIND it is and its one
+  // salient fact, then a line of the passage so you can tell which mark it is without looking
+  // back at the prose. Two lines is the whole budget — a stub that says more is a card.
+  //
+  // Everything type-specific that this file cannot know (whether a comment thread is resolved,
+  // how many documents a linked passage reaches, what a restricted passage classifies as) comes
+  // in through opts.meta, the same predicate-injection marksByHeading already uses for exactly
+  // this reason. This file shapes the answer; the editor supplies the facts.
+  // The keys are the model's own type names. `link` is the linked-passage type — spelled that way
+  // in the marks, the filter segments and markCounts, so it is spelled that way here too rather
+  // than being tidied to "linked" in one place and drifting.
+  var STUB_TYPE_LABEL = { comment: "Comment", link: "Linked", alternate: "Alternate", restricted: "Restricted" };
+  function markStub(model, m, opts) {
+    if (!m || !m.anchor) return null;
+    var label = STUB_TYPE_LABEL[m.type];
+    if (!label) return null;              // an unmapped type draws nothing rather than mis-labelling
+    var meta = (opts && typeof opts.meta === "function") ? opts.meta(m) : "";
+    var snippet = anchorText(model, m.anchor) || "";
+    snippet = snippet.replace(/\s+/g, " ").trim();
+    var CAP = 64;
+    if (snippet.length > CAP) snippet = snippet.slice(0, CAP - 1).replace(/\s+\S*$/, "") + "…";
+    // Tone is the mark's STATE and follows the same precedence the outline dots use, so a
+    // reviewer reads one order of urgency everywhere in the stage.
+    var tone = m.broken ? "broken" : m.stale ? "stale" : (m.type === "comment" && !(opts && opts.resolved && opts.resolved(m))) ? "open" : "quiet";
+    return {
+      id: m.id,
+      type: m.type,
+      title: meta ? (label + " · " + meta) : label,
+      sub: snippet || (isObjectMark(m) ? "Whole block" : ""),
+      tone: tone,
+      broken: !!m.broken
+    };
+  }
+  function markStubs(model, opts) {
+    return ((model && model.marks) || []).map(function (m) { return markStub(model, m, opts); }).filter(Boolean);
+  }
+  // Place the stubs down the margin. Each one WANTS to sit at its passage's height; two marks on
+  // adjacent lines want the same 40 pixels, so the later one is pushed down until it clears.
+  //
+  // The rule is deliberately one-directional: a stub never moves UP to fill a gap, because then a
+  // mark near the top of the document would drift away from the line it annotates to tidy the
+  // column. Being a little low is honest; being neatly packed is not. Input order decides who wins
+  // a collision, so callers sort by `want` first and the top-most mark keeps its true position.
+  function stackStubs(items, gap) {
+    var g = gap == null ? 8 : gap;
+    var out = [], floor = null;
+    (items || []).forEach(function (it) {
+      var top = Math.max(0, it.want || 0);
+      if (floor !== null && top < floor) top = floor;
+      out.push({ id: it.id, top: top });
+      floor = top + (it.height || 0) + g;
+    });
+    return out;
+  }
+
   // ---- uio-S-C06: restriction, as a fact about a passage --------------------
   // A restricted mark states what the passage resolves to and WHERE that came from. It does not
   // resolve anything itself: the level comes down uio-F07's ladder, which lives in the editor
@@ -1777,7 +1833,7 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, markStub: markStub, markStubs: markStubs, stackStubs: stackStubs, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
@@ -1798,7 +1854,7 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, markStub: markStub, markStubs: markStubs, stackStubs: stackStubs, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,

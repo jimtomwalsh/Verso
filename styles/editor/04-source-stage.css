@@ -8,17 +8,53 @@
    which is what actually shortens the line — 780px at 17px measures ~86 characters against 700px
    at 13px measuring ~101 (both measured in the browser, not estimated).
 
-   BOTH ARE STILL ABOVE THE 45-75 BAND prose is comfortable at, and the reason is the type: the
-   working measure runs at 13px because it inherits the chrome ramp. The spec's ~660-720px cap
-   assumes a larger reading size than chrome uses, so capping alone cannot get there. Bringing
-   Source's working type off the chrome ramp is a bigger change than this ticket — see the note
-   filed against uio-S-A01. Recorded here rather than fixed quietly, so the next person does not
-   re-derive it from scratch.
+   uio-S-A01 CLOSED that residual. S-M03 shipped with both measures still above the 45-75 band and
+   said so plainly rather than quietly: the cause was the TYPE, not the width, because working prose
+   inherited the 13px chrome ramp and no cap can rescue 13px. S-A01 took working prose onto its own
+   reading pair (--text-source / --leading-source) and retuned both measures against the type they
+   are finally paired with. Measured after the change: working ~66 characters, reading ~68.
 
    The mode drives both, so the measure cannot disagree with what you are allowed to do. */
 .source-doc__col { position: relative; flex: 1 1 auto; max-width: var(--measure-working, 700px); margin: 0 auto; padding-bottom: 120px; }
 .source-doc__col--read { max-width: var(--measure-reading, 780px); }
 .source-doc__col--read .source-doc { font-size: var(--text-reading, 17px); line-height: var(--leading-reading, 1.78); }
+
+/* ---- uio-S-A01: the annotation gutter (SRC-03/09, Ambitious) --------------------------------
+   The end of the clamp -> dock -> gutter arc. S-C03 stopped cards covering the prose by reserving
+   a lane; S-M02 gathered three floating cards into one dock in the right panel. Both were still
+   answering "what is attached to this passage" somewhere OTHER than beside the passage. The gutter
+   is the answer: a permanent margin, one stub per mark, each sitting at the height of the text it
+   annotates, so the relationship is spatial rather than something you reconstruct after a click.
+
+   The right panel is retired with it. Its two occupants went to the surfaces that already own their
+   question: the cards to this gutter, History to the nav rail beside the outline (S-M04 made that
+   rail the document-scope navigator, and History is a document-scope question).
+
+   Read mode hides the gutter. Marks are hidden in Read, so a margin of stubs pointing at
+   invisible highlights would be annotation without the annotations. */
+.source-doc__gutter { position: relative; flex: 0 0 var(--gutter-w, 300px); align-self: stretch; padding-top: var(--space-3, 12px); }
+.source-doc__gutter-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); height: 20px; margin-bottom: var(--space-2, 8px); }
+.source-doc__gutter-label { font: var(--type-label); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary, var(--text-secondary)); }
+.source-doc__gutter-all { height: 20px; padding: 0 6px; border: 0; border-radius: var(--radius-xs, 2px); background: transparent; font: var(--type-label-strong); color: var(--accent); cursor: pointer; }
+.source-doc__gutter-all:hover { background: var(--surface-hover); }
+/* The stubs are absolutely placed inside this track so each one can sit at its passage's height.
+   The track is only as tall as the article, so it scrolls with the prose rather than independently. */
+.source-doc__gutter-track { position: relative; }
+.source-doc__gutter-empty { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
+.source-stub { position: absolute; left: 0; width: 100%; display: flex; gap: var(--space-2, 8px); align-items: flex-start; padding: var(--space-2, 8px); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 6px); background: var(--surface-panel); cursor: pointer; text-align: left; transition: box-shadow 120ms ease, border-color 120ms ease; }
+.source-stub:hover { border-color: var(--border-strong); }
+.source-stub.is-active { box-shadow: inset 0 0 0 1px var(--accent); border-color: var(--accent); }
+.source-stub__dot { flex: none; width: 7px; height: 7px; margin-top: 5px; border-radius: var(--radius-full, 50%); }
+.source-stub__body { min-width: 0; }
+/* Type ink names the mark's KIND, the dot names its STATE. Two facts, two channels, neither
+   relying on the other -- and the title carries the words as well, so colour is never alone. */
+.source-stub__title { display: block; font: var(--type-label-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-stub__sub { display: block; font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* An opened card takes the stub's place in the margin, at the same height. It is the same card
+   shell the dock held, so the three renderers did not need rewriting -- only their host moved. */
+.source-doc__gutter-card { position: absolute; left: 0; width: 100%; }
+.source-doc__gutter-card .source-altpanel { position: static; width: 100%; margin: 0; }
+@media (max-width: 1240px) { .source-doc__gutter { display: none; } }
 .source-doc__toc { position: sticky; top: 0; flex: 0 0 188px; align-self: flex-start; max-height: calc(100vh - 130px); overflow-y: auto; padding: 2px 0 20px; }
 .source-doc__toc-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 8px; padding-left: 12px; }
 .source-doc__toc-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 4px 10px 4px 12px; font-size: var(--text-sm); line-height: 1.45; color: var(--text-secondary); cursor: pointer; border-radius: 0 5px 5px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -26,7 +62,9 @@
 .source-doc__toc-item--l3 { padding-left: 24px; font-size: var(--text-xs); }
 .source-doc__toc-item.is-current { border-left-color: var(--accent); color: var(--accent); font-weight: 600; }
 @media (max-width: 1080px) { .source-doc__toc { display: none; } }
-.source-doc { outline: none; color: var(--text-primary, var(--text-secondary)); font-size: var(--text-md, 15px); line-height: 1.65; }
+/* uio-S-A01: prose runs on the READING ramp, not the chrome one. This is the half of S-M03 that
+   capping could never reach — see the token note beside --text-source. */
+.source-doc { outline: none; color: var(--text-primary, var(--text-secondary)); font-size: var(--text-source, 16px); line-height: var(--leading-source, 1.7); }
 .source-doc__h { font-weight: 650; letter-spacing: -0.01em; margin: 1.4em 0 0.4em; }
 h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__h:first-child { margin-top: 0; }
@@ -158,13 +196,10 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .source-marks__rollup:hover { color: var(--text-secondary); text-decoration: underline; }
 
 /* uio-S-C03 (SRC-03) reserved a 312px right-margin LANE on the article whenever a card was open,
-   so the prose shifted clear instead of being covered. uio-S-M02 took the mark cards off the
-   article entirely — they dock in the panel now — so the lane is only owed to the one surface that
-   is still pinned beside its line: the comment thread. A conversation belongs beside the paragraph
-   it is about; a card stating what is attached to a passage does not. */
-@media (min-width: 1181px) {
-  .source-stage__article:has([data-source-commentthread]) { padding-right: 312px; }
-}
+   so the prose shifted clear instead of being covered. S-M02 took the mark cards off the article,
+   leaving the lane owed to the comment thread alone. uio-S-A01 RETIRED IT ENTIRELY: the thread is
+   in the margin with the other three cards now, so nothing is left to shift clear of. The gutter
+   is a real column, not a reservation — the prose never has to be pushed out of its own way. */
 /* uio-S-M02: the mark cards are DOCKED now, not pinned over the prose. So they are in flow, full
    width of the panel, and they lose the float chrome — the absolute position, the fixed 244px, the
    z-index and the drop shadow all existed to lift a card off the reading column it was covering.
@@ -201,20 +236,16 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 /* Comment margin pins (comments-canvas-adapter): a subtle blue glyph converged to the canvas comment
    idiom -- smaller, no bounding box, anchored just right of the text margin (pilot feedback 2026-07-28).
    Pinned to its span (absolute within the scrolling article, tracking on scroll; left set in JS). */
-.source-commentpin { position: absolute; right: 8px; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 50%; background: none; color: var(--pin-colour, var(--accent)); cursor: pointer; box-shadow: none; z-index: 24; }
-.source-commentpin svg { width: 16px; height: 16px; }
-.source-commentpin:hover { background: var(--accent-quiet, rgba(59,108,246,0.14)); }
-.source-commentpin.is-open { background: var(--accent-quiet, rgba(59,108,246,0.2)); color: var(--accent); }
-.source-commentpin.is-done { opacity: 0.5; }
-.source-commentpin__count { position: absolute; top: -5px; right: -5px; min-width: 13px; height: 13px; padding: 0 3px; box-sizing: border-box; font-size: 8px; line-height: 13px; text-align: center; color: #fff; background: var(--accent); border-radius: 999px; }
 /* In-place thread card, pinned beside the span (reuses .comment-thread from the canvas engine). */
-.source-commentthread { position: absolute; right: 42px; width: 258px; z-index: 26; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 12px 14px; max-height: 60vh; overflow-y: auto; }
+/* uio-S-A01: the thread is a card IN the margin now, so it loses its float chrome — the absolute
+   position, the fixed 258px, the z-index and the drop shadow all existed to lift it off a reading
+   column it was covering. Same move S-M02 made for the other three, and the same reason. */
+.source-commentthread { width: 100%; background: var(--surface-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 6px); padding: var(--space-3) var(--space-4); max-height: 60vh; overflow-y: auto; }
 .source-commentthread__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .source-commentthread__title { font-weight: 650; font-size: 13px; }
 .source-commentthread__close { display: inline-flex; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 5px; }
 .source-commentthread__close svg { width: 15px; height: 15px; }
 .source-commentthread__close:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
-@media (max-width: 1180px) { .source-commentthread { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
 
 /* Contextual selection bar, above the highlight (canvas idiom, glyph-only). */
 .source-selbar { position: absolute; z-index: 40; display: none; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
@@ -525,10 +556,13 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
    thing in that section — broken, then stale, then an open comment, then mere presence — because
    a row cannot wear four dots without becoming a chart. */
 .source-toc__dot { width: 6px; height: 6px; border-radius: var(--radius-full, 50%); flex: 0 0 auto; }
-.source-toc__dot--broken { background: var(--danger); }
-.source-toc__dot--stale { background: var(--warning); }
-.source-toc__dot--open { background: var(--mark-note); }
-.source-toc__dot--quiet { background: var(--text-tertiary, var(--text-secondary)); }
+/* uio-S-A01 shares this tone scale with the gutter stubs. The rail says a SECTION's most urgent
+   condition, a stub says one MARK's, and they are the same four words meaning the same four
+   things — so they resolve through one rule rather than two that can drift apart. */
+.source-toc__dot--broken, .source-stub__dot--broken { background: var(--danger); }
+.source-toc__dot--stale, .source-stub__dot--stale { background: var(--warning); }
+.source-toc__dot--open, .source-stub__dot--open { background: var(--mark-note); }
+.source-toc__dot--quiet, .source-stub__dot--quiet { background: var(--text-tertiary, var(--text-secondary)); }
 /* Scroll-spy was specified and invisible. A 2px accent rail on the current section is the
    smallest thing that answers "where am I" without competing with selection. */
 .source-toc__row.is-current { box-shadow: inset 2px 0 0 var(--accent); }

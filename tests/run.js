@@ -15145,7 +15145,13 @@ section("Product Rail: Source stage info panel");
   // block) for both "Linked in" and "History" -- the same section chrome every other
   // side panel in the app uses.
   ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(es));
-  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\)/.test(es));
+  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History", \{ collapsible: true, defaultOpen: open \}\)/.test(es));
+  // uio-S-A01: History moved to the nav rail when the right panel was retired, and a tab you chose
+  // should not make you open the one thing inside it. The default is still closed everywhere else,
+  // so S-C04's "collapsed footer" judgement survives for the legacy panel that still shows it.
+  ok("History opens by default ONLY where the rail tab is the disclosure", /var open = !!\(opts && opts\.open\);/.test(es) &&
+    /__sourceNavTab === "history"\) \{ renderHistoryTimeline\(host, master, \{ open: true \}\)/.test(es) &&
+    /renderHistoryTimeline\(host, topic\);/.test(es));
   // #163: the standalone Comments accordion is retired. Comments live ONLY in the Marks section's
   // Comments filter tab, so the info panel never double-renders them. The legacy !hasDoc branch ends
   // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
@@ -15155,8 +15161,12 @@ section("Product Rail: Source stage info panel");
   // comments live in the Marks section's Comments tab and nowhere else. It used to be pinned to
   // `applySourceInfoVisibility()` following immediately, which uio-S-M02's card re-render broke
   // without touching what the claim is about.
+  // uio-S-A01 retired the panel for a continuous source document, so the legacy branch is no longer
+  // an `if (!hasDoc)` block — it is everything after the hasDoc early return. The CLAIM is unchanged
+  // (that branch ends at its Linked-in list and never renders a second comments surface), so the
+  // slice is re-pinned rather than the assertion relaxed.
   ok("the legacy !hasDoc branch renders only the Linked-in list (no comments accordion)", (function () {
-    var branch = es.slice(es.indexOf("if (!hasDoc) {"), es.indexOf("applySourceInfoVisibility();\n    }\n    // Show or hide"));
+    var branch = es.slice(es.indexOf("if (hasDoc) { renderSourceGutter();"), es.indexOf("// uio-S-A01: the panel only exists for legacy section topics"));
     return /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);/.test(branch) &&
       branch.indexOf("renderSourceComments") === -1 && branch.indexOf("Comments\"") === -1;
   })());
@@ -15166,7 +15176,7 @@ section("Product Rail: Source stage info panel");
   // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
   // not a flat Created/Updated pair -- traces every import (and any edit since) back to
   // how the topic entered the platform, newest first.
-  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{[\s\S]{0,220}var body = panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\);/.test(es));
+  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic, opts\) \{[\s\S]{0,520}var body = panelSection\(host, "History", \{ collapsible: true, defaultOpen: open \}\);/.test(es));
   // uio-S-C04 (SRC-11): the timeline states each day's date ONCE (grouped), not on every row.
   ok("History groups by day — the date is stated once per day run", /var lastDate = null;[\s\S]{0,260}var showDate = d !== lastDate; lastDate = d;[\s\S]{0,120}date: showDate \? d : null/.test(es));
   // Timeline promoted to a real DSLMS component (design-system/components/structure/
@@ -15850,10 +15860,16 @@ section("uio-S-C03: source mark cards clamp to a reserved right lane");
   // — so the lane is owed only to the comment thread, the one surface still pinned beside its line.
   // The rule S-C03 established (a pinned surface never covers the passage) is unchanged; what it
   // has to cover shrank.
-  ok("the article still reserves a right lane for the one surface pinned beside its line (:has)",
-    /\.source-stage__article:has\(\[data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css) &&
-    !/:has\(\[data-source-altpanel\]\)/.test(css) && !/:has\(\[data-source-wherepanel\]\)/.test(css));
-  ok("the lane is desktop-scoped (min-width) so narrow screens aren't over-squeezed", /@media \(min-width: 1181px\) \{[\s\S]{0,260}padding-right: 312px/.test(css));
+  // uio-S-A01 RETIRED the lane. S-C03's claim was never "there is a lane" — it was that a card can
+  // never cover the prose. The gutter keeps that claim by being a real column instead of a
+  // reservation, so nothing has to be pushed out of its own way and the reserve rule is gone.
+  ok("no card covers the prose, and the article no longer has to reserve room for one",
+    !/padding-right: 312px/.test(css) &&
+    !/:has\(\[data-source-altpanel\]\)/.test(css) && !/:has\(\[data-source-wherepanel\]\)/.test(css) &&
+    !/:has\(\[data-source-commentthread\]\)/.test(css));
+  ok("the margin is a column in the layout, not an overlay clamped away from the text",
+    /\.source-doc__gutter \{ position: relative; flex: 0 0 var\(--gutter-w, 300px\)/.test(css) &&
+    !/\.source-commentthread \{ position: absolute/.test(css));
   // SRC-02: the where-used zero state reads as an invitation, and the title isn't the contradictory "Linked in 0".
   var e = src("src/editor.js");
   ok("where-used zero state is an invitation (not 'not linked')", /Not used in a course yet — place this passage from the Edit stage/.test(es));
@@ -17301,6 +17317,102 @@ section("uio-F03 scope + inheritance model");
 // uio-S-M05 (SRC-12): "no downstream consequence is visible while writing". Source exists to
 // protect the documents downstream of it, and the one screen where the approved source is
 // maintained said nothing about how exposed it is.
+// uio-S-A01 (SRC-03/09, Ambitious): the end of the clamp -> dock -> gutter arc. S-C03 stopped cards
+// covering the prose, S-M02 gathered three floating cards into one dock, and both still answered
+// "what is attached to this passage" somewhere other than beside the passage. The right panel is
+// retired: cards go to a permanent margin at their mark's own height, History goes to the rail.
+section("uio-S-A01 marks in the margin, in place");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var es = src("src/editor/source-stage.js");
+  var css = EDITOR_CSS;
+  var sp = src("design-system/tokens/spacing.css");
+  var typ = src("design-system/tokens/typography.css");
+
+  var model = SD.create([
+    { type: "heading", level: 2, text: "Overview" },
+    { type: "paragraph", text: "The unit reports its own state once a minute over the link, and keeps a local copy of the last hour." },
+    { type: "paragraph", text: "Short one." }
+  ]);
+  var k1 = model.nodes[1].key, k2 = model.nodes[2].key;
+
+  // --- the stub: two lines, and only ever two ---
+  var linkStub = SD.markStub(model, { id: "m1", type: "link", anchor: { nodeKey: k1, start: 4, len: 4 } },
+    { meta: function () { return "in 3 docs"; } });
+  ok("a stub states its KIND and its one salient fact, then the passage it sits beside",
+    linkStub.title === "Linked · in 3 docs" && linkStub.sub === "unit");
+  // The type-specific facts come in through a predicate, the way marksByHeading takes isResolved.
+  // A caller that hands in the wrong shape gets a stub with no meta — the margin still draws.
+  ok("a malformed meta hook costs the fact, not the whole margin",
+    SD.markStub(model, { id: "m1b", type: "link", anchor: { nodeKey: k1, start: 4, len: 4 } }, { meta: "oops" }).title === "Linked");
+  ok("a stub with no meta states its kind alone rather than a trailing separator",
+    SD.markStub(model, { id: "m2", type: "comment", anchor: { nodeKey: k2, start: 0, len: 5 } }, {}).title === "Comment");
+  // The label table is a TABLE for the reason S-C06 made the paint pass one: a ternary chain's
+  // default silently mislabels a type nobody thought about. An unmapped type draws nothing.
+  ok("an unrecognised mark type draws NOTHING rather than being mislabelled",
+    SD.markStub(model, { id: "m3", type: "sparkle", anchor: { nodeKey: k1, start: 0, len: 3 } }, {}) === null);
+  ok("the linked type is spelled the way the model spells it, so it cannot drift",
+    SD.markStub(model, { id: "m4", type: "link", anchor: { nodeKey: k1, start: 0, len: 3 } }, {}).title === "Linked");
+
+  // Snippet: one line, cut at a word, never mid-word with a stray fragment.
+  var longStub = SD.markStub(model, { id: "m5", type: "alternate", anchor: { nodeKey: k1, start: 0, len: 99 } }, {});
+  ok("a long snippet is cut to one line, at a word boundary, and says it was cut",
+    longStub.sub.length <= 64 && /…$/.test(longStub.sub) && !/\s…$/.test(longStub.sub));
+  ok("a whole-block mark says so rather than showing an empty second line",
+    SD.markStub(model, { id: "m6", type: "restricted", anchor: { nodeKey: k1 } }, {}).sub === "Whole block");
+
+  // Tone: the same precedence the outline dots use, so one order of urgency reads everywhere.
+  var at = { nodeKey: k1, start: 0, len: 4 };
+  ok("tone is the mark's state, most urgent first — broken beats stale beats an open comment",
+    SD.markStub(model, { id: "a", type: "comment", anchor: at, broken: true, stale: true }, {}).tone === "broken" &&
+    SD.markStub(model, { id: "b", type: "comment", anchor: at, stale: true }, {}).tone === "stale" &&
+    SD.markStub(model, { id: "c", type: "comment", anchor: at }, {}).tone === "open" &&
+    SD.markStub(model, { id: "d", type: "link", anchor: at }, {}).tone === "quiet");
+  ok("a comment whose thread is resolved stops reading as live work",
+    SD.markStub(model, { id: "e", type: "comment", anchor: at }, { resolved: function () { return true; } }).tone === "quiet");
+
+  // --- the stack: one-directional, because tidiness must not outrank truth ---
+  var placed = SD.stackStubs([{ id: "a", want: 0, height: 40 }, { id: "b", want: 10, height: 40 }, { id: "c", want: 300, height: 40 }], 8);
+  ok("two marks wanting the same height do not overlap — the later one is pushed down",
+    placed[0].top === 0 && placed[1].top === 48);
+  ok("a stub with room keeps its passage's own height, rather than being packed against its neighbour",
+    placed[2].top === 300);
+  // The rule that matters: never move UP to fill a gap. A stub that drifts away from its line to
+  // tidy the column has stopped being a margin note about that line.
+  ok("a stub is never pulled UP into a gap, however tidy that would look",
+    SD.stackStubs([{ id: "a", want: 500, height: 40 }, { id: "b", want: 20, height: 40 }], 8)[1].top === 548);
+  ok("a mark with no rectangle to sit beside still gets a position rather than being dropped",
+    SD.stackStubs([{ id: "a", height: 40 }], 8)[0].top === 0);
+
+  // --- the surface ---
+  ok("the right panel is retired for a continuous source document",
+    /if \(hasDoc\) \{ renderSourceGutter\(\); applySourceInfoVisibility\(\); return; \}/.test(es));
+  ok("its two occupants went to surfaces that already own their question",
+    /function sourceCardDock\(\) \{[\s\S]{0,320}\.source-doc__gutter-card/.test(es) &&
+    /__sourceNavTab === "history"\) \{ renderHistoryTimeline\(host, master, \{ open: true \}\)/.test(es));
+  // Built ALWAYS, hidden in Read — a mode change deliberately does not rebuild the article, so a
+  // gutter that only existed outside Read could never come back when you left Read.
+  ok("the gutter is built once and hidden in Read, not built per mode",
+    /gut\.hidden = __sourceMode === "read";/.test(es) && /gutter\.hidden = __sourceMode === "read";/.test(es));
+  ok("the margin is re-laid on the same pass that paints the marks it describes",
+    /renderSourceClassBadges\(\);\s*\n\s*\/\/ uio-S-A01[\s\S]{0,320}renderSourceGutter\(\);/.test(es));
+  ok("an open card is mounted BEFORE the stack is measured, or everything below it lands short",
+    es.indexOf("if (openId) {\n        if (__sourceRestrictMarkId)") < es.indexOf("var placed = SD.stackStubs("));
+  ok("'All marks' escalates to the rail's list rather than growing a second one in the margin",
+    /all\.addEventListener\("click", function \(\) \{ setSourceNavTab\("marks"\); \}\);/.test(es));
+  ok("a document with nothing marked says so, rather than leaving an unexplained empty column",
+    /source-doc__gutter-empty", "Nothing marked yet\./.test(es));
+  ok("the gutter is a DS structural token, not a number in a stylesheet",
+    /--gutter-w:\s*300px;/.test(sp) && /flex: 0 0 var\(--gutter-w, 300px\)/.test(css));
+
+  // --- the type fix S-M03 filed and could not make ---
+  ok("working prose has its own reading pair, off the chrome ramp",
+    /--text-source:\s*16px;/.test(typ) && /--leading-source:\s*1\.70;/.test(typ) &&
+    /\.source-doc \{[^}]*font-size: var\(--text-source, 16px\)/.test(css));
+  ok("the DS says why 13px could not be capped into the band",
+    /no cap can rescue 13px/.test(typ.replace(/\s+/g, " ")));
+})();
+
 // uio-S-M06 (2.2b): a restricted PASSAGE says so on the passage (uio-S-C06); a restricted DOCUMENT
 // has to say so before you read a word of it, because "may this leave" is a fact about the whole
 // thing. The Source half of uio-F07's document-level surface.
@@ -17448,10 +17560,13 @@ section("uio-S-M04 the rail says condition, and shares its column with the marks
   ok("the switch is the canonical SegmentedControl", /if \(U\.SegmentedControl\) \{\s*\n\s*var sw = h\("div", "source-nav__tabs"\);/.test(es));
   ok("the scroll-spy is finally visible, as a 2px accent rail",
     /\.source-toc__row\.is-current \{ box-shadow: inset 2px 0 0 var\(--accent\); \}/.test(css));
+  // uio-S-A01 gave the gutter stubs the same four tones, resolved through the SAME rules — the rail
+  // states a section's condition, a stub states one mark's, and they mean the same four things. So
+  // the selectors are shared and this asserts both surfaces at once rather than growing a copy.
   ok("each dot tone is a DS token, never a raw hue",
-    /\.source-toc__dot--broken \{ background: var\(--danger\); \}/.test(css) &&
-    /\.source-toc__dot--stale \{ background: var\(--warning\); \}/.test(css) &&
-    /\.source-toc__dot--open \{ background: var\(--mark-note\); \}/.test(css));
+    /\.source-toc__dot--broken, \.source-stub__dot--broken \{ background: var\(--danger\); \}/.test(css) &&
+    /\.source-toc__dot--stale, \.source-stub__dot--stale \{ background: var\(--warning\); \}/.test(css) &&
+    /\.source-toc__dot--open, \.source-stub__dot--open \{ background: var\(--mark-note\); \}/.test(css));
 })();
 
 section("uio-S-M03 a capped measure, and a wider one for reading");
@@ -17467,16 +17582,19 @@ section("uio-S-M03 a capped measure, and a wider one for reading");
     /--text-reading:\s*17px;/.test(typ) && /--leading-reading:\s*1\.78;/.test(typ));
   ok("the DS says the reading pair belongs to a reading surface, never to chrome",
     /never to chrome/.test(typ.replace(/\s+/g, " ")));
-  ok("both measures are DS tokens", /--measure-working:\s*700px;/.test(sp) && /--measure-reading:\s*780px;/.test(sp));
+  // uio-S-A01 retuned both against --text-source / --text-reading rather than the chrome ramp.
+  // The claim is that they are TOKENS, so the numbers move with the type they are paired to.
+  ok("both measures are DS tokens", /--measure-working:\s*600px;/.test(sp) && /--measure-reading:\s*640px;/.test(sp));
   ok("the DS states why two measures rather than one compromise",
     /two different measures, never one compromise between them/.test(sp.replace(/\s+/g, " ")));
   // A measure alone fixes nothing: the same 780px reads at ~86ch at 17px and ~101ch at 13px.
   ok("the DS says a measure is meaningless without a type size",
     /Pair --measure-reading with --text-reading; a measure alone fixes nothing/.test(sp.replace(/\s+/g, " ")));
-  // Honest record: both measures are still above the band, and why. Written down rather than
-  // fixed quietly, because the cause is Source running its prose on the CHROME type ramp.
-  ok("the residual is recorded, not papered over",
-    /BOTH ARE STILL ABOVE THE 45-75 BAND/.test(css) && /see the note\s*filed against uio-S-A01/.test(css));
+  // S-M03 recorded its residual instead of papering over it; uio-S-A01 then closed it, and the CSS
+  // says which ticket did what. The claim survives its own fix: the record is still there, now as
+  // a resolution rather than an outstanding debt.
+  ok("the residual is recorded, and its fix is recorded with it",
+    /uio-S-A01 CLOSED that residual/.test(css) && /working ~66 characters, reading ~68/.test(css));
 
   ok("the working measure is capped and reads its token",
     /\.source-doc__col \{[^}]*max-width: var\(--measure-working, 700px\)/.test(css));
@@ -17497,16 +17615,22 @@ section("uio-S-M02 one card, docked");
   var es = src("src/editor/source-stage.js");
   var css = EDITOR_CSS;
 
-  ok("there is ONE dock, and it is the first thing in the panel",
-    /var cardHost = h\("div", "source-card-dock"\); host\.appendChild\(cardHost\);/.test(es) &&
-    /function sourceCardDock\(\) \{[\s\S]{0,240}info\.querySelector\("\.source-card-dock"\)/.test(es));
+  // uio-S-A01 moved the dock from the top of the right panel into the GUTTER, at the height of the
+  // mark it belongs to — the last step of the clamp -> dock -> gutter arc. The claim is unchanged:
+  // there is exactly ONE place a card mounts, and it is not the article.
+  ok("there is ONE dock, and it is in the gutter beside its mark",
+    /function sourceCardDock\(\) \{[\s\S]{0,320}track\.querySelector\("\.source-doc__gutter-card"\)/.test(es) &&
+    (es.match(/h\("div", "source-doc__gutter-card"\)/g) || []).length === 1);
   // The dock has no fallback to the article ON PURPOSE: a card that cannot find its dock draws
   // nothing, rather than falling back to floating over the prose.
+  // uio-S-A01 brought the comment THREAD into the same slot, so it is four cards now, not three —
+  // the thread was the last card still floating on its own pin.
   ok("a card that cannot find the dock draws nothing rather than floating",
     /var host = sourceCardDock\(\); if \(!host\) return;   \/\/ uio-S-M02: docked, never over the prose/.test(es) &&
-    (es.match(/var host = sourceCardDock\(\); if \(!host\) return;/g) || []).length === 3);
-  ok("all three cards mount there, and none mounts in the article",
-    /claimSourceCard\("restrict"\);/.test(es) && /claimSourceCard\("where"\);/.test(es) && /claimSourceCard\("alt"\);/.test(es));
+    (es.match(/var host = sourceCardDock\(\); if \(!host\) return;/g) || []).length === 4);
+  ok("all four cards mount there, and none mounts in the article",
+    /claimSourceCard\("restrict"\);/.test(es) && /claimSourceCard\("where"\);/.test(es) &&
+    /claimSourceCard\("alt"\);/.test(es) && /claimSourceCard\("comment"\);/.test(es));
   ok("opening one card closes the other two, by construction",
     /function claimSourceCard\(which\) \{[\s\S]{0,700}if \(which !== "alt"\)[\s\S]{0,240}if \(which !== "where"\)[\s\S]{0,240}if \(which !== "restrict"\)/.test(es));
   // The three pin trackers are gone. A docked card has nothing to track.
@@ -20547,15 +20671,22 @@ section("Source v2: one consolidated right panel (spec 2c section 3)");
   // uio-S-M04 moved the mark LIST to the nav rail, beside the outline. This panel keeps what is
   // about the passage you clicked (the docked card) plus history and provenance — and the list is
   // NOT duplicated here, because "one place per question" is the rule the redesign runs on.
-  ok("the info panel leads with the docked card, and does not repeat the mark list",
-    /var cardHost = h\("div", "source-card-dock"\); host\.appendChild\(cardHost\);/.test(es) &&
+  // uio-S-A01 RETIRED this panel for a continuous source document: the card went to the gutter and
+  // History to the rail, so the panel survives only for legacy section topics. What the claim was
+  // protecting still holds — the mark list is in exactly one place, and it is the rail.
+  ok("the panel is retired for a source document, and still does not repeat the mark list",
+    /if \(hasDoc\) \{ renderSourceGutter\(\); applySourceInfoVisibility\(\); return; \}/.test(es) &&
     // one CALL, in the rail — the definition is the other match
     (es.match(/renderSourceMarksSection\(host, model\); return; \}/g) || []).length === 1 &&
     es.indexOf("renderSourceMarksSection(host, ensureSourceDocModel(topic))") === -1);
   ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(es));
   ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(es));
   ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
-  ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(es));
+  // uio-S-A01: still one control, but the TOPIC now outranks it — a continuous source document has
+  // no panel, so it stays hidden whatever the toggle says, and the toggle itself is not drawn.
+  ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface",
+    /function applySourceInfoVisibility\(\)[\s\S]{0,420}el\.style\.display = \(__sourceInfoOpen && !topicHasDoc\(topic\)\) \? "" : "none";/.test(es) &&
+    /if \(!topicHasDoc\(topic\)\) bar\.appendChild\(panelBtn\);/.test(es));
   ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,900}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(es));
   ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(es));
   ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(es));
@@ -20628,12 +20759,26 @@ section("Source rewrite: comments = shared canvas engine + range-mark adapter (E
   ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(es));
   ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(es) && /c\.replies\.push\(makeReply\(v\)\)/.test(src("src/editor/comments.js")));
   ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(es));
-  ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(es) && /if \(m\.type !== "comment"\) return;/.test(es) && /pinCardToSpan\(pin, m\.id\)/.test(es));
-  ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(es) && /toggleSourceCommentThread\(topic, m\.id\)/.test(es));
+  // uio-S-A01 RETIRED the pin: the margin already puts a stub at the span's height, so a 20px
+  // bubble an inch to its left was a second control for the same question. The claim survives the
+  // change — a comment is still reachable in place, beside its passage — but the stub is what does it.
+  ok("every comment is reachable in place, beside its passage", /markStubs\(model, \{/.test(es) && !/renderSourceCommentPins/.test(es));
+  ok("clicking the comment's stub opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(es) && /function openSourceCardFor\(topic, m\) \{[\s\S]{0,120}if \(m\.type === "comment"\) toggleSourceCommentThread\(topic, m\.id\);/.test(es));
+  // The rail's rows and the margin's stubs are two lists of the same marks, so "which card answers
+  // this one" is ONE function. Written twice, the two lists drift — which is how an alternate row
+  // ended up revealing a mark and leaving you to hunt for its card.
+  ok("the rail's rows and the margin's stubs open cards through one owner",
+    (es.match(/openSourceCardFor\((?:topic|t), m\);/g) || []).length === 2);
   ok("add / resolve activity is logged to History (spec 3.3)", /type: "comment-added", markId: cmark\.id/.test(es) && /type: c && c\.done \? "comment-resolved" : "comment-reopened"/.test(es));
-  ok("the thread card + pins re-sync after a re-render (survive undo/edit)", /renderSourceCommentPins\(topic\); \/\/ re-pin the comment margin pins/.test(es) && /if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\)/.test(es));
+  ok("the thread card + the margin re-sync after a re-render (survive undo/edit)", /renderSourceGutter\(\); \/\/ uio-S-A01: re-lay the margin/.test(es) && /else if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\);/.test(es));
   ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceWherePanel\(\); closeSourceCommentThread\(\);/.test(es));
-  ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(es) && /function onSourceCommentThreadOutside\(ev\)/.test(es) && /if \(card\.contains\(ev\.target\)\) return;/.test(es));
+  // uio-S-A01: Escape still closes it; CLICK-OUT was deliberately removed. A card in a permanent
+  // margin is not an overlay over the prose, and dismissing on a canvas click would make the
+  // document unusable while a thread is open — the same call uio-F05 made for the settings sheet.
+  ok("the comment thread closes on Escape, and NOT on a click into the prose it sits beside",
+    /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(es) &&
+    !/onSourceCommentThreadOutside/.test(es) &&
+    /a card in a permanent margin is not an overlay/.test(es.replace(/\s+/g, " ")));
   ok("comments stay addable while the base is locked (annotation ungated -- no unlock guard on the comment path)", !/cmd === "comment"[\s\S]{0,80}__sourceUnlocked/.test(e));
 })();
 

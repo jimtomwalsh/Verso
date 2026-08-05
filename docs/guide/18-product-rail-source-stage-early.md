@@ -119,7 +119,7 @@ top bar to get there, because there is no picker. A proper document switcher for
   variant's file is added with blank Flagship text so nothing is lost. Only import produces the
   wiki's "Technical" version of each section; the "Digestible" and "Dot-point" versions (switchable
   above the article) are yours to write afterward. You can optionally note each file's version and
-  publish date when asked — shown later in the topic's info panel under "Source".
+  publish date when asked — shown later in the rail's History tab.
 
 **Re-importing an updated manual.** Run "Import from Markdown…" again with the same filename for
 the same Product, and it updates the existing topics instead of duplicating them: a section whose
@@ -144,7 +144,7 @@ list, since a Product is now one document.
 to reorder it within the topic, or click the trash icon to delete it (you'll be asked to confirm).
 Controls stay out of the way until you're actually looking at that section.
 
-**A topic's history.** The info panel's History section shows every import and re-import that
+**A topic's history.** The rail's **History** tab shows every import and re-import that
 touched a topic as a timeline, newest first — file, version, publish date, and what changed each
 time (new sections, sections updated from source, sections flagged for review). A topic you wrote
 by hand shows a single "Created" entry. In continuous-document mode (below) the same timeline also
@@ -153,7 +153,7 @@ records your edits and annotations (see "History records what changed and why").
 **Comments.** The same comment/discussion feature as the canvas editor, for this wiki. Click the
 comment icon next to any section to open its thread — write a note, reply, mark it Resolved, or
 delete it. A count appears on the icon while a section has unresolved comments. In continuous-document
-mode the right-hand panel's **Marks** section has a **Comments** filter tab that lists every comment on
+mode the rail's **Marks** tab has a **Comments** filter that lists every comment on
 the topic — that is their single home (there is no separate comments accordion beneath it).
 
 **Continuous-document mode (beta).** A newer way to author a topic: instead of separate sections
@@ -212,7 +212,7 @@ In this mode:
   particular course needs to say a span differently, add an **alternate** — the same meaning, no new
   information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or
   "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
-  an alternate opens its card at the top of the right panel, showing the **base vs the alternate**,
+  an alternate opens its card in the margin beside it, showing the **base vs the alternate**,
   a status dot, and Edit / Delete.
 - **A classified document says so before you read it.** When a document's classification is
   anything other than the least restrictive, a banner sits above the prose naming the level. Folded,
@@ -221,18 +221,28 @@ In this mode:
   from. Open it for the full rule set, with **blocked** and **due** marked on the two rules that
   stop something. In Read mode it fades rather than disappearing: you still need to know. An
   unrestricted document shows no banner at all.
-- **The rail switches between Outline and Marks.** One column, two views: **Outline** is how you
-  move around the document, **Marks** is the list of everything annotated in it. The Marks tab
+- **The rail switches between Outline, Marks and History.** One column, three views: **Outline**
+  is how you move around the document, **Marks** is the list of everything annotated in it, and
+  **History** is what has happened to it. The Marks tab
   carries its count, so you can see there is something to answer without switching to find out.
   Outline rows carry a small dot when their section has something to report — red for a broken
   anchor, amber for a stale alternate, yellow for an open comment, grey for anything else.
   Hover it for the detail. A section with nothing to report shows nothing. The section you are
   reading takes a blue rail down its left edge.
-- **One card, in one place.** Whatever you click — an alternate, a linked passage, a restricted one
-  — its card opens at the **top of the right panel**, above the mark list. One card is open at a
-  time, so opening another replaces it, and no card ever sits on top of the prose you are reading.
-  (A comment thread still opens beside its paragraph: a conversation belongs next to the line it is
-  about.)
+- **The margin: marks in place.** A permanent column runs down the right of the document, and
+  every mark has a stub in it sitting at the height of the passage it annotates. Each stub names
+  its kind and its one useful fact — "Comment · 1 open", "Linked · in 4 docs", "Alternate · civil",
+  "Restricted · <level>" — with a line of the passage beneath it and a dot for its condition. So you
+  can see what is attached to a document without opening anything, and where it is attached without
+  clicking.
+
+  Click a stub and its card opens **in the margin, in the stub's place** — the alternate's
+  base-vs-alternate view, the linked passage's destinations, the restricted passage's rules, or a
+  comment thread. One card is open at a time, so opening another replaces it, and no card ever sits
+  on top of the prose you are reading. **All marks** at the top of the margin hands off to the
+  rail's Marks list when you want the whole set as one filterable column.
+
+  The margin is hidden in Read mode, along with the marks it points at, and on a narrow window.
 - **Restricted: what a passage may leave in.** Marking a span restricted says its distribution is
   controlled. It doesn't ask you to choose anything — the classification comes down from the
   Product, or from whatever level is set closer to the passage (§4, Classification). Selecting a
@@ -262,13 +272,13 @@ In this mode:
   its own comments / alternates / links. Select an image already in a row and the same button
   **takes it back out**. Text stays full width above and below the row.
 - **Staleness keeps alternates honest.** If you later change the base text, any alternate written
-  against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
+  against the old wording is flagged **stale** (an amber dot, a note in its card, and an entry in
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
   reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
   Ctrl/Cmd+Z brings the text and the mark back.
 - **See where a span is used, and push a wording out.** When documents link a piece of this source,
   selecting the linked span opens a **"Linked in N"** panel in the right margin (it never covers the
-  text you're reading; if the passage isn't used anywhere yet the panel invites you to place it) —
+  text you're reading; if the passage isn't used anywhere yet the card invites you to place it) —
   one row per place it's used, each tagged **base** or **alternate**, and clicking a row opens that document in Edit
   with the exact block selected. If the passage has alternates, **Push an alternate…** sends a
   forked wording to those documents — all of them, or a chosen subset — so you can roll out a better
@@ -279,18 +289,18 @@ In this mode:
   copies re-resolve to your new wording), **Keep as-is (fork)** (freeze their current wording as an
   alternate, then your source moves on), or **Cancel** (undo the edit). A placement already pinned to
   an alternate is never touched by a base edit.
-- **Comments live in the margin.** Selecting text and choosing **Comment** drops a small **blue
-  comment glyph just to the right of the text** next to that span; the pin tracks the span as you
-  scroll. It matches the canvas comment glyph — subtle, no box. Click a pin to open
-  the thread in place — the same comment threads, replies, and Resolved control as the canvas
-  editor, so a comment behaves the same everywhere. Add more comments or replies, tick **Resolved**
+- **Comments live in the margin.** Selecting text and choosing **Comment** puts a **Comment** stub
+  in the margin beside that span, saying how many replies are open. Click it to open the thread in
+  place — the same comment threads, replies, and Resolved control as the canvas editor, so a comment
+  behaves the same everywhere. Add more comments or replies, tick **Resolved**
   when it's handled, and both events show up in History. Comments can be added while the source is
-  locked. Click away or press **Esc** to close a thread.
+  locked. Press **Esc** to close a thread; clicking into the document does not, so you can read the
+  paragraph a comment is about while its thread stays open.
 - **Marks ride your edits.** An alternate or comment is anchored to the exact span you selected;
   as you edit around it the anchor moves with the text, and if you delete the anchored text the
   mark is flagged as broken. **Ctrl/Cmd+Z** is a document-aware undo — it restores deleted text
   *and* reconnects its mark, which the browser's own undo cannot do.
-- **History records what changed and why.** The info panel's **History** timeline now shows your
+- **History records what changed and why.** The rail's **History** timeline now shows your
   editing, not just imports. A run of prose edits between unlocking and locking collapses into one
   **"Edited source"** entry (with a `+added / −removed` character summary), so the log reads as
   meaningful changes rather than keystroke noise. When you **lock**, a small dialog offers an
@@ -306,22 +316,23 @@ In this mode:
   words underneath.
 - **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
   (linked blue / alternate purple / comment yellow), so annotation never clutters plain reading. Jumping to a mark —
-  clicking a row in the panel, or an alternate — turns marks back on for you if they were hidden,
+  clicking a row in the rail, a stub in the margin, or an alternate — turns marks back on if they
+  were hidden,
   so the highlight you jumped to is always visible.
 - **Jump around with the outline.** A **table of contents** down the left side lists the document's
   headings; click one to jump to it, and the heading you're currently reading stays highlighted as
   you scroll. (The outline hides itself on a narrow window so the reading column keeps its width.)
 - **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
   full text of every topic — a heading or a phrase inside the document, not just the title.
-- **One details panel on the right.** Everything about the document lives in a single right panel.
-  At the top is **Marks** — every alternate, link and comment with a status dot (green in sync /
-  amber stale / red broken / grey once a comment thread is resolved). Four **labelled filters**
-  narrow the list — **All**, **Alt**, **Linked** and **Notes** — and each one carries a live count,
-  so the filter row doubles as the document's mark summary. Click a row to jump to that mark.
-  Comments appear here under **Notes**, in one place (the old duplicate comments list below the
-  panel is gone). Below Marks sit **History** (the provenance timeline) and, for legacy per-topic
-  sources, a **Source** section. The bottom-bar panel button shows or hides the whole panel;
-  selecting a mark opens it to that mark.
+- **Everything about the document is in the rail.** The right panel is gone: its cards moved to the
+  margin beside the prose, and its History moved to the rail. The rail's **Marks** tab lists every
+  alternate, link, comment and restricted span with a status dot (green in sync / amber stale /
+  red broken / grey once a comment thread is resolved). Five **labelled filters** narrow the list —
+  **All**, **Alt**, **Linked**, **Notes** and **Restricted** — and each carries a live count, so the
+  filter row doubles as the document's mark summary. Click a row to jump to that mark and open its
+  card in the margin. Comments appear here under **Notes**, in one place. (A legacy per-topic source
+  — one that has not been converted to a continuous document — still has the old right panel, with
+  its **Source** section and its own panel button in the bottom bar.)
 - **One row per mark, and each row says where it is.** A linked passage used by four documents is a
   single row saying "in 4 docs", not four rows repeating the same passage. Under the passage each
   row states its place in the document ("Operation · Detection overview"), so you can tell two
