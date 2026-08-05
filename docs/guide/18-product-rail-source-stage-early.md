@@ -170,6 +170,11 @@ In this mode:
   - **Edit** — the signed-off prose is editable. The chip turns red, because this is the only mode
     that puts approved wording at risk.
 
+  Beside the mode, the bar states **how exposed this source is**: what share of the downstream
+  documents' words trace back to it, and how many published documents are now older than it. Both
+  are the same numbers Publish shows, from the same place, so they can never disagree. A number
+  with nothing to say isn't shown.
+
   **Read also widens the column and steps the text up**, because reading a manual end to end and
   editing one passage of it are not the same task.
 

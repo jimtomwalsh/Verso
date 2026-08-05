@@ -1735,6 +1735,29 @@
       host.appendChild(U && U.Badge
         ? U.Badge({ tone: meta.tone, size: "sm", quiet: true, children: meta.chip })
         : h("span", null, meta.chip));
+      paintSourceExposure(host);
+    }
+    // uio-S-M05 (SRC-12): "no downstream consequence is visible while writing". Source exists to
+    // protect the documents downstream of it, and the one screen where the approved source is
+    // maintained said nothing about how exposed it is. Two facts, beside the mode, in the bar that
+    // already answers "what am I working on".
+    //
+    // It computes NOTHING. Both come from uio-F04's one resolver (`f04ProductFacts`) and are drawn
+    // by uio-F04's one drawer (`f04Badge` -> the canonical quiet Badge), so Source, Edit and Publish
+    // cannot state the same number differently or in different words.
+    //
+    // ALIGNMENT ROLLS UP the product's documents; "behind" counts the published ones older than
+    // this source. A fact with nothing to say renders nothing — f04Badge returns null and this
+    // appends nothing, which is the silence-over-noise rule, not a special case here.
+    function paintSourceExposure(host) {
+      var master = activeSourceMaster(); if (!master) return;
+      var pid = activeSourceProductId(); if (!pid) return;
+      if (typeof E.f04ProductFacts !== "function" || typeof E.f04Badge !== "function") return;
+      var facts = E.f04ProductFacts(pid, master.id); if (!facts) return;
+      var al = E.f04Badge(facts.alignment, "srcexposure__badge");
+      if (al) host.appendChild(al);
+      var behind = E.f04Badge(facts.behind, "srcexposure__badge");
+      if (behind) host.appendChild(behind);
     }
 
     // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
