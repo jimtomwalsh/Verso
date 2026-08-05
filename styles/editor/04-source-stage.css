@@ -70,6 +70,9 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 ::highlight(sd-link) { background-color: var(--mark-link-wash); text-decoration: underline; text-decoration-color: var(--mark-link); text-decoration-thickness: 2px; }
 ::highlight(sd-alt) { background-color: var(--mark-alt-wash); text-decoration: underline; text-decoration-color: var(--mark-alt); text-decoration-thickness: 2px; }
 ::highlight(sd-comment) { background-color: var(--mark-note-wash); text-decoration: underline dotted; text-decoration-color: var(--warning); text-decoration-thickness: 2px; }
+/* uio-S-C06: restriction is a warning about distribution, not a note about the writing, so it
+   takes the danger ink and a double underline — the fourth treatment, distinct without the hue. */
+::highlight(sd-restricted) { background-color: var(--mark-restricted-wash); text-decoration: underline double; text-decoration-color: var(--mark-restricted); text-decoration-thickness: 1px; }
 ::highlight(sd-active) { background-color: var(--mark-focus-wash); }
 ::highlight(sd-stale) { background-color: rgba(249, 115, 22, 0.18); }
 ::highlight(sd-broken) { background-color: var(--danger-quiet); text-decoration: line-through; text-decoration-color: var(--danger); }
@@ -128,6 +131,7 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .source-drawer__row-type.sd-mark-link { color: var(--mark-link); }
 .source-drawer__row-type.sd-mark-alt { color: var(--mark-alt); }
 .source-drawer__row-type.sd-mark-comment { color: var(--mark-note); }
+.source-drawer__row-type.sd-mark-restricted { color: var(--mark-restricted); }
 /* Count + path ride the 11px chrome baseline (--text-xs), not the 10px badge size: they are
    metadata you read, not a badge. The count truncates before the type eyebrow does. */
 .source-drawer__row-count { min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -464,3 +468,34 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
   background: var(--component); border-radius: 1.5px; flex: 0 0 auto;
 }
 .comp-item__count { font-size: var(--text-xs); color: var(--text-tertiary); }
+
+/* ---- uio-S-C06: restriction on the page ---------------------------------------------------
+   A classified figure states it ON the figure, because a reader scrolling past an image never
+   opens a panel. The badge is the shield glyph plus the resolved level, and the container tints
+   only while marks are shown — the same rule every other mark treatment follows, so turning marks
+   off gives you the document as it reads. */
+.sd-obj-restricted { position: relative; box-shadow: inset 0 0 0 2px var(--mark-restricted); background-color: var(--mark-restricted-wash); }
+.source-classbadge {
+  position: absolute; top: var(--space-2, 4px); left: var(--space-2, 4px); z-index: 2;
+  display: inline-flex; align-items: center; gap: var(--space-1, 2px);
+  padding: 1px var(--space-2, 4px); border-radius: var(--radius-sm, 4px);
+  background: var(--surface-panel); border: 1px solid var(--mark-restricted); color: var(--mark-restricted);
+  font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+  pointer-events: none;
+}
+.source-classbadge svg { width: 10px; height: 10px; }
+/* The restriction card reuses the alternate/where-used card shell wholesale — same pin, same
+   close, same head — so a third card in this stage is not a third card anatomy. */
+.source-restrictpanel .source-altpanel__title { color: var(--mark-restricted); }
+.source-restrictpanel__glyph { display: inline-flex; color: var(--mark-restricted); }
+.source-restrictpanel__glyph svg { width: 13px; height: 13px; }
+.source-restrictpanel__scope { font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); }
+.source-restrictpanel__rules { display: flex; flex-direction: column; gap: var(--space-1, 2px); margin-top: var(--space-2, 4px); }
+.source-restrictpanel__rule { display: flex; align-items: baseline; gap: var(--space-2, 4px); font-size: var(--text-xs); }
+.source-restrictpanel__rule-k { flex: 0 0 var(--field-label-w, 76px); color: var(--text-tertiary, var(--text-secondary)); }
+.source-restrictpanel__rule-v { min-width: 0; color: var(--text-secondary); }
+.source-restrictpanel__actions { display: flex; gap: var(--space-2, 4px); margin-top: var(--space-3, 6px); }
+.source-restrictpanel__pending { margin-top: var(--space-2, 4px); font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); }
+/* The Classification action lands you on the panel that owns the value. A brief ring says which
+   thing moved, because a scroll on a short rail can be invisible. */
+.source-stage__product.is-flash { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--radius-sm, 4px); transition: box-shadow 200ms; }

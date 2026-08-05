@@ -38,7 +38,11 @@
   // ---- the fixed vocabulary, owned by the code -----------------------------
   // A level may say these four things about content and nothing else. A deployment that needs a
   // fifth adds it HERE, in a code change, and it then becomes a choice an admin makes.
-  var RULE_KEYS = ["internal", "external", "editCapability", "approverCapability"];
+  //
+  // THE ORDER IS THE ORDER EVERY SURFACE STATES THEM IN, and `external` leads because it is the
+  // consequential one: whether the thing may leave decides what happens at release, and the rest
+  // qualify it. uio-S-C06's card and the inspector both read this list, so they cannot disagree.
+  var RULE_KEYS = ["external", "internal", "editCapability", "approverCapability"];
 
   // `external` is a disposition, not a boolean, so "we have not decided" can never masquerade as
   // "cleared to leave". An unrecognised value normalises to `withheld`: the safe direction.

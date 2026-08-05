@@ -168,7 +168,8 @@ In this mode:
   lock. Trying to type while locked shows a brief reminder instead of changing anything.
 - **You can always annotate, even when locked.** Select any text and a small toolbar appears above
   it. **Add an alternate** (another way to say the same thing, for a particular course or
-  audience) or **Comment** — both are available whether or not the source is unlocked. The
+  audience), **Comment**, or **Mark as restricted** — all three are available whether or not the
+  source is unlocked, since saying a passage is controlled shouldn't need the prose unlocked. The
   rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
   base prose. Alongside them are four **block-format** buttons — **Heading 1**, **Heading 2**, **Body**
   and **Caution box** — that reassign the selected paragraph's type (across several paragraphs if your
@@ -195,6 +196,16 @@ In this mode:
   "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
   an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
   showing the **base vs the alternate**, a status dot, and Edit / Delete.
+- **Restricted: what a passage may leave in.** Marking a span restricted says its distribution is
+  controlled. It doesn't ask you to choose anything — the classification comes down from the
+  Product, or from whatever level is set closer to the passage (§4, Classification). Selecting a
+  restricted span opens a margin panel that names the level, says where it was inherited from, and
+  lists what that level actually means: whether it may leave the organisation, who may read it,
+  who may edit it, and whether it needs sign-off. **Classification** takes you to the panel where
+  the value is set. **Request sign-off** records that the passage is waiting on an approver — the
+  date and the fact of the request, never an approval. Restricted marks show in red, with a double
+  underline, and get their own filter tab beside Alt / Linked / Notes. A restricted image says so
+  on the image itself, with a shield badge, so you see it while scrolling.
 - **Images and tables are markable too.** An image or a table is a whole **object** — click it (a
   ring shows it's selected) and the same **Add an alternate** / **Comment** / **Add a link** actions
   appear, so you can attach, say, a simplified caption to a diagram, a note to a table, or a link on

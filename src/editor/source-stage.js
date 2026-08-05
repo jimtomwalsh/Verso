@@ -30,7 +30,8 @@
       "makeReply", "modalText", "f04ProductFacts", "panelSection", "snapshotSourceLinkBase", "sourceBaseEditImpact", "showSourceBaseEditModal",
       "finalizeSourceLock", "sourceLinkAlternates", "registry", "applyAltToLocation", "saveRegistry", "decorateSourceLinks",
       "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection", "colourForName",
-      "renderSourceProductPanel"
+      "renderSourceProductPanel",
+      "classificationSpec", "classificationLevels", "classificationChain", "resolveScoped"
     );
     // Aliased once: every one of these is stable (a function declaration, a constant, or an object
     // that is mutated but never reassigned), so the moved body reads exactly as it did.
@@ -1511,8 +1512,11 @@
     }
     function repaintSourceMarks() {
       if (!__sourceMarksEngine) return;
-      if (!__sourceShowMarks) { if (window.SourceMarks && window.SourceMarks._registry && window.SourceMarks._registry()) { var reg = window.SourceMarks._registry(); Object.keys(reg).forEach(function (k) { reg[k].clear(); }); } if (__sourceMarksEngine.clearObjectDecor) __sourceMarksEngine.clearObjectDecor(); return; }
+      if (!__sourceShowMarks) { if (window.SourceMarks && window.SourceMarks._registry && window.SourceMarks._registry()) { var reg = window.SourceMarks._registry(); Object.keys(reg).forEach(function (k) { reg[k].clear(); }); } if (__sourceMarksEngine.clearObjectDecor) __sourceMarksEngine.clearObjectDecor(); renderSourceClassBadges(); return; }
       __sourceMarksEngine.paint();
+      // uio-S-C06: the figure badges ride the same repaint as every other mark treatment, so
+      // "show marks" turns them all on and off together.
+      renderSourceClassBadges();
     }
 
     // --- History commit collapse (spec 5) --------------------------------------
@@ -1741,6 +1745,148 @@
     // is an Edit-stage ticket. Reuses the alt panel's pinned-card chrome (.source-altpanel*) + the
     // shared pinCardToSpan tracker; light-dismisses on Escape like its siblings.
     function onSourceWherePanelKey(ev) { if (ev.key === "Escape") closeSourceWherePanel(); }
+    // ---- uio-S-C06: restriction, resolved down uio-F07's ladder ------------------------------
+    // Source's rungs are the deployment default, the Product this source document belongs to, the
+    // source document itself, and the mark. It is the SAME chain builder and the SAME resolver the
+    // inspector uses — Source states the fact, it does not compute a second version of it.
+    // Returns null when the classification model is absent (a page that never loaded it) or the
+    // mark is not restricted, so every caller can decline to draw rather than draw a blank.
+    function sourceRestrictionFor(m) {
+      var SD = window.SourceDoc, C = window.VersoClassification;
+      if (!SD || !C || !m || m.type !== "restricted") return null;
+      var levels = E.classificationLevels ? E.classificationLevels() : [];
+      var pid = activeSourceProductId();
+      var spec = E.classificationSpec({
+        product: (pid && window.ProductsStore) ? window.ProductsStore[pid] : null,
+        doc: activeSourceMaster(),
+        block: m
+      });
+      var res = E.resolveScoped(E.classificationChain(spec), C.CLASSIFICATION_PROP,
+        { at: "block", choose: C.mostRestrictive(levels) });
+      return SD.restrictionView(m, res, levels, C.ruleSet(levels, res.value));
+    }
+    // A classified figure says so ON the figure — a reader scrolling past an image never opens a
+    // panel. Redrawn with the marks, and only while marks are shown, so turning them off gives you
+    // the document as it reads.
+    function renderSourceClassBadges() {
+      var host = document.getElementById("source-stage-article"); if (!host) return;
+      Array.prototype.forEach.call(host.querySelectorAll(".source-classbadge"), function (b) { b.remove(); });
+      if (!__sourceShowMarks || !__sourceDocModel) return;
+      var SD = window.SourceDoc;
+      (__sourceDocModel.marks || []).forEach(function (m) {
+        if (m.type !== "restricted" || !SD.isObjectMark(m)) return;
+        var rv = sourceRestrictionFor(m); if (!rv) return;
+        var el = host.querySelector('[data-node="' + m.anchor.nodeKey + '"]'); if (!el) return;
+        var badge = h("span", "source-classbadge");
+        badge.innerHTML = (window.Icon ? window.Icon("shield") : "") + "<span>" + rv.levelName + "</span>";
+        badge.title = rv.inherited ? ("Inherited from " + rv.fromLabel) : "Set on this figure";
+        el.appendChild(badge);
+      });
+    }
+    var __sourceRestrictMarkId = null;
+    function closeSourceRestrictPanel() {
+      __sourceRestrictMarkId = null;
+      var ex = document.querySelector("[data-source-restrictpanel]"); if (ex) ex.remove();
+      document.removeEventListener("keydown", onSourceRestrictPanelKey);
+    }
+    function onSourceRestrictPanelKey(e) { if (e.key === "Escape") { e.stopPropagation(); closeSourceRestrictPanel(); } }
+    function syncSourceRestrictPanel(topic, markId) {
+      if (!markId) { closeSourceRestrictPanel(); return; }
+      __sourceRestrictMarkId = markId;
+      renderSourceRestrictPanel(topic);
+    }
+    function positionSourceRestrictPanel() { pinCardToSpan(document.querySelector("[data-source-restrictpanel]"), __sourceRestrictMarkId); }
+    // The card. It states what applies and whose decision it was, then the rule set as rows, then
+    // two actions. It reuses the alternate/where-used card shell wholesale, so a third card in this
+    // stage is not a third card anatomy.
+    function renderSourceRestrictPanel(topic) {
+      var ex = document.querySelector("[data-source-restrictpanel]"); if (ex) ex.remove();
+      document.removeEventListener("keydown", onSourceRestrictPanelKey);
+      var model = __sourceDocModel, SD = window.SourceDoc;
+      if (!model || !__sourceRestrictMarkId) return;
+      var m = SD.markById(model, __sourceRestrictMarkId);
+      if (!m || m.type !== "restricted") { __sourceRestrictMarkId = null; return; }
+      var rv = sourceRestrictionFor(m);
+      var host = document.getElementById("source-stage-article"); if (!host) return;
+      var panel = h("aside", "source-altpanel source-restrictpanel"); panel.setAttribute("data-source-restrictpanel", "1");
+      panel.setAttribute("aria-label", "Classification");
+      var head = h("div", "source-altpanel__head");
+      var glyph = h("span", "source-restrictpanel__glyph"); glyph.innerHTML = window.Icon ? window.Icon("shield") : "";
+      head.appendChild(glyph);
+      head.appendChild(h("div", "source-altpanel__title", rv ? rv.levelName : "Restricted"));
+      var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
+      close.innerHTML = window.Icon ? window.Icon("x") : "close";
+      close.addEventListener("click", function () { closeSourceRestrictPanel(); });
+      head.appendChild(close);
+      panel.appendChild(head);
+      if (!rv) {
+        panel.appendChild(h("div", "source-altpanel__field insp-hint",
+          "No classification resolves for this passage. Set one on the Product, or on this source document."));
+      } else {
+        // Where it came from, in the spine's words. An inherited value names its scope; one set
+        // here says so plainly rather than staying silent, so "who decided this" always has an answer.
+        panel.appendChild(h("div", "source-restrictpanel__scope",
+          rv.inherited ? ("Inherited from " + rv.fromLabel) : "Set on this passage"));
+        var rules = h("div", "source-restrictpanel__rules");
+        rv.rows.forEach(function (r) {
+          var row = h("div", "source-restrictpanel__rule");
+          row.appendChild(h("span", "source-restrictpanel__rule-k", r.label));
+          row.appendChild(h("span", "source-restrictpanel__rule-v", r.value));
+          rules.appendChild(row);
+        });
+        panel.appendChild(rules);
+        var acts = h("div", "source-restrictpanel__actions");
+        if (window.VersoUI && window.VersoUI.Button) {
+          // "Classification" ROUTES to where the value is actually set rather than offering a second
+          // place to set it — the spine's cross-reference rule: show the value, link to its owner.
+          acts.appendChild(window.VersoUI.Button({
+            variant: "secondary", size: "sm", label: "Classification",
+            title: "Open the Product panel, where this document's classification is set",
+            onClick: function () { closeSourceRestrictPanel(); revealSourceProductPanel(); }
+          }));
+          var pending = !!(rv.signoff && rv.signoff.requestedAt);
+          acts.appendChild(window.VersoUI.Button({
+            variant: "secondary", size: "sm", label: pending ? "Sign-off requested" : "Request sign-off",
+            disabled: pending || !rv.signoffNeeded,
+            title: !rv.signoffNeeded ? "This level needs no sign-off"
+              : pending ? "Already requested" : "Record that this passage is waiting on an approver",
+            onClick: function () {
+              SD.requestSignoff(m, currentUserLabel(), new Date().toISOString().slice(0, 10), rv.levelId);
+              persistSourceDocModel(topic, model);
+              renderSourceRestrictPanel(topic);
+              if (topic) renderSourceInfoPanel(topic);
+              sourceToast("Recorded. It will show as waiting until an approver signs it off.");
+            }
+          }));
+        }
+        panel.appendChild(acts);
+        if (rv.signoff && rv.signoff.requestedAt) {
+          panel.appendChild(h("div", "source-restrictpanel__pending",
+            "Waiting on an approver since " + rv.signoff.requestedAt +
+            (rv.signoff.requestedBy ? " (asked by " + rv.signoff.requestedBy + ")" : "") + "."));
+        }
+      }
+      host.appendChild(panel);
+      positionSourceRestrictPanel();
+      document.addEventListener("keydown", onSourceRestrictPanelKey);
+    }
+    // Who asked. The identity layer may not be present at all (standalone, offline, signed out),
+    // and a blank requester is a truthful answer — the DATE and the fact of the request are what a
+    // release gate reads. Same principal the account menu reads, so the two can never disagree.
+    function currentUserLabel() {
+      var p = window.__versoServerPrincipal;
+      return (p && p.kind === "user" && (p.name || p.email)) || "";
+    }
+    // The Product panel is ALREADY on screen, at the top of the Source rail — so "Classification"
+    // takes you to it rather than opening a second place to set the same value. Show the value,
+    // link to its owner: the spine's cross-reference rule.
+    function revealSourceProductPanel() {
+      var el = document.getElementById("source-product-panel"); if (!el) return;
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.classList.add("is-flash");
+      setTimeout(function () { el.classList.remove("is-flash"); }, 900);
+    }
+
     function closeSourceWherePanel() {
       __sourceWhereUsedMarkId = null;
       var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
@@ -2028,7 +2174,9 @@
       { key: "all", label: "All", title: "Every mark" },
       { key: "alternate", label: "Alt", title: "Alternates" },
       { key: "link", label: "Linked", title: "Linked passages" },
-      { key: "comment", label: "Notes", title: "Comments" }
+      { key: "comment", label: "Notes", title: "Comments" },
+      // uio-S-C06: the fourth segment S-C01 deliberately left out, now that uio-F07 gives it data.
+      { key: "restricted", label: "Restricted", title: "Passages whose distribution is controlled" }
     ];
     // Reveal a mark in the consolidated panel: open the panel if hidden, highlight its row, and
     // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
@@ -2068,6 +2216,12 @@
         if (m.stale) parts.push("base changed");
         if (m.tag) parts.push(String(m.tag));
         out.meta = parts.join(" · ");
+      } else if (m.type === "restricted") {
+        // The row states the level that RESOLVES, so it agrees with the card that opens from it.
+        var rv = sourceRestrictionFor(m);
+        out.meta = rv ? (rv.levelName + (rv.inherited ? " · from " + rv.fromLabel : "")) : "";
+        if (rv && rv.signoffNeeded && !(rv.signoff && rv.signoff.requestedAt)) { out.dot = "yellow"; out.dotTitle = "Needs sign-off"; }
+        else if (rv && rv.signoff && rv.signoff.requestedAt) { out.dot = "yellow"; out.dotTitle = "Awaiting sign-off"; }
       } else if (m.type === "comment") {
         var thread = sourceCommentsForMark(topic, m.id);
         var open = thread.filter(function (c) { return !c.done; }).length;
@@ -2125,6 +2279,7 @@
             // a linked row opens the card that holds its destination list -- the instances the row
             // deliberately no longer enumerates (SRC-01).
             if (m.type === "link" && topic) syncSourceWherePanel(topic, m.id);
+            if (m.type === "restricted") syncSourceRestrictPanel(topic, m.id);
           });
           listWrap.appendChild(row);
         });
@@ -2177,6 +2332,9 @@
       bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
       bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
       bar.appendChild(seg("comment", "message-square", "Comment"));
+      // uio-S-C06: mark a passage restricted. Annotation is ungated like alternate and comment —
+      // saying "this is controlled" must not require unlocking the prose to say it.
+      bar.appendChild(seg("restricted", "shield", "Mark as restricted"));
       // B1: create-link on a source OBJECT (image/table) -- closes the link gap so an image is a full
       // source-of-truth object. Object-only (hidden for text, where linking stays Edit-stage).
       bar.appendChild(seg("link", "link", "Add a link", "source-selbar__obj"));
@@ -2446,6 +2604,27 @@
         SD.updateMark(__sourceDocModel, __sourceUpdateTarget.id, __sourceSelAnchor);
         persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
         sourceToast("Updated the mark to include the appended text."); return;
+      }
+      // uio-S-C06: restriction takes no composer — there is nothing to write. The mark carries no
+      // level of its own; the level RESOLVES down uio-F07's ladder, and the card that opens is
+      // where you see what applies and where it came from.
+      if (cmd === "restricted") {
+        var ranchor = __sourceSelAnchor || (__sourceObjectSelKey ? { nodeKey: __sourceObjectSelKey } : null);
+        if (!ranchor) return;
+        var existing = (__sourceDocModel.marks || []).filter(function (mk) {
+          return mk.type === "restricted" && mk.anchor && mk.anchor.nodeKey === ranchor.nodeKey &&
+            (ranchor.len == null ? mk.anchor.len == null : (mk.anchor.start === ranchor.start && mk.anchor.len === ranchor.len));
+        })[0];
+        var rmk = existing || SD.addMark(__sourceDocModel, { type: "restricted", anchor: ranchor });
+        if (!existing) {
+          SD.logHistory(__sourceDocModel, { type: "restricted-marked", markId: rmk.id, markType: "restricted" });
+          persistSourceDocModel(topic, __sourceDocModel);
+          refreshSourceHistory(topic);
+        }
+        repaintSourceMarks();
+        revealSourceMark(rmk);
+        syncSourceRestrictPanel(topic, rmk.id);
+        return;
       }
       if (cmd === "alternate" || cmd === "comment") {
         if (!__sourceSelAnchor) return;

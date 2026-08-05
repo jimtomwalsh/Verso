@@ -32,7 +32,10 @@
   // and is not itself markable; its image children keep their own keys + marks (nesting must not
   // change a key, or object marks orphan). Walkers that resolve a node by key descend into rows.
   var NODE_TYPES = ["heading", "paragraph", "list", "table", "image", "callout", "row"];
-  var MARK_TYPES = ["link", "alternate", "comment"];
+  // uio-S-C06 added "restricted": a passage whose distribution is controlled. It is the SOURCE-side
+// surface of uio-F07, not a decoration — the level it reads is resolved down F07's ladder, and the
+// mark may carry its own `classificationId` when the passage is tighter than the document it sits in.
+var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
 
   // ---- ids -----------------------------------------------------------------
   // Deterministic within a model instance (a monotonic counter on the model), so key
@@ -273,7 +276,7 @@
   // uio-S-C01 (SRC-06): the live per-type counts the labelled mark filter carries ("All 6 / Alt 1 /
   // Linked 2 / Notes 2"). One pass over the marks, so the segments can never disagree with the list.
   function markCounts(model) {
-    var out = { all: 0, alternate: 0, link: 0, comment: 0 };
+    var out = { all: 0, alternate: 0, link: 0, comment: 0, restricted: 0 };
     (model && model.marks || []).forEach(function (m) {
       out.all++;
       if (out[m.type] != null) out[m.type]++;
@@ -311,6 +314,13 @@
       anchor: a.len == null ? { nodeKey: a.nodeKey } : { nodeKey: a.nodeKey, start: a.start, len: a.len },
       variant: spec.variant || "",
       tag: spec.tag != null ? spec.tag : "", // what an alternate is "appropriate for" (detail/doc-type/purpose)
+      // uio-S-C06: a restricted mark's OWN classification, when the passage is tighter than the
+      // document around it. Absent means it simply inherits, which is the ordinary case.
+      classificationId: spec.classificationId || null,
+      // Sign-off, recorded as a request rather than an approval: who asked, when, and against which
+      // level. The approver themselves comes from uio-doc-roles-and-signoff, which is unbuilt, so
+      // this states a pending fact and never claims one has been given.
+      signoff: spec.signoff ? clone(spec.signoff) : null,
       baseText: null,
       alt: spec.alt != null ? spec.alt : null,
       comments: spec.comments ? clone(spec.comments) : [],
@@ -331,6 +341,55 @@
     return m;
   }
   function isObjectMark(m) { return m && m.anchor && m.anchor.len == null; }
+
+  // ---- uio-S-C06: restriction, as a fact about a passage --------------------
+  // A restricted mark states what the passage resolves to and WHERE that came from. It does not
+  // resolve anything itself: the level comes down uio-F07's ladder, which lives in the editor
+  // because the Product and document rungs do. So the caller hands the resolution in and this
+  // file only shapes the answer — the same split every other pure/chrome pair here uses.
+  //   res: a resolveScoped result for the classification property, resolved AT the mark
+  //   levels: the deployment's level set (VersoClassification-shaped)
+  // Returns null when nothing resolves, so a card can decline to draw rather than draw a blank.
+  function restrictionView(m, res, levels, rules) {
+    if (!m || m.type !== "restricted" || !res || !res.found) return null;
+    var byId = {};
+    (levels || []).forEach(function (l) { byId[l.id] = l; });
+    var lvl = byId[res.value] || null;
+    return {
+      markId: m.id,
+      levelId: res.value,
+      levelName: lvl ? lvl.name : String(res.value || ""),
+      // The two things the card leads with: what applies, and whose decision it was.
+      inherited: !res.overridden,
+      fromLabel: res.scopeLabel || "",
+      // The rule set as ROWS, in the fixed order uio-F07 declares, so Source states it exactly as
+      // the inspector does. `rules` is VersoClassification.ruleSet's answer.
+      rows: rules ? [
+        { key: "external", label: "External", value: rules.external === "allowed" ? "May leave the organisation" : "Withheld from external packages" },
+        { key: "internal", label: "Internal", value: (rules.internal && rules.internal.length) ? "Readable internally" : "Readable only by named people" },
+        { key: "editCapability", label: "Editing", value: rules.editCapability ? ("Needs " + rules.editCapability) : "Anyone who may edit" },
+        { key: "approverCapability", label: "Sign-off", value: rules.approverCapability ? ("Needs " + rules.approverCapability) : "Not required" }
+      ] : [],
+      // Sign-off is a REQUEST, never an approval: state who asked and when, or that nobody has.
+      signoffNeeded: !!(rules && rules.approverCapability),
+      signoff: m.signoff || null
+    };
+  }
+  // Record a sign-off request against a mark. Pure but for the caller's clock and identity, both
+  // injected, so this round-trips in a test. Re-requesting is a no-op rather than a second record —
+  // the question "has anyone asked?" has one answer.
+  function requestSignoff(m, who, whenIso, levelId) {
+    if (!m || m.type !== "restricted") return null;
+    if (m.signoff && m.signoff.requestedAt) return m.signoff;
+    m.signoff = { requestedBy: who || "", requestedAt: whenIso || "", levelId: levelId || m.classificationId || null };
+    return m.signoff;
+  }
+  // Every restricted mark in a document, as the parts uio-F07's documentDisposition takes. The
+  // Publish withholding ticket consumes this; nothing here decides anything about a package.
+  function restrictedParts(model, resolveFor) {
+    return (model && model.marks || []).filter(function (m) { return m.type === "restricted"; })
+      .map(function (m) { return { id: m.id, levelId: resolveFor ? resolveFor(m) : m.classificationId }; });
+  }
 
   // ---- source-link 05: format-split planner (pure) --------------------------
   // Split a link range into one block-spec per CONTIGUOUS same-format run, in document order, so a
@@ -686,7 +745,8 @@
     return {
       link: { cls: "sd-mark-link", label: "Linked" },
       alternate: { cls: "sd-mark-alt", label: "Alternate" },
-      comment: { cls: "sd-mark-comment", label: "Comment" }
+      comment: { cls: "sd-mark-comment", label: "Comment" },
+      restricted: { cls: "sd-mark-restricted", label: "Restricted" }
     }[m.type] || { cls: "sd-mark-alt", label: "Mark" };
   }
   // The alternate marks anchored on exactly a given span (spec 3.2: 0..N tagged alternates).
@@ -1675,7 +1735,7 @@
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
@@ -1696,7 +1756,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,

@@ -123,6 +123,11 @@
   --mark-note:       var(--yellow-500);
   --mark-note-wash:  rgba(255, 205, 41, 0.16);
   --mark-resolved:   var(--text-disabled);
+  /* uio-S-C06: restriction is the one mark that is a WARNING about distribution rather than a note
+     about the writing, so it takes the danger ink. It is the fourth and last hue in this palette —
+     the fixed palette only works while no hue does two jobs. */
+  --mark-restricted:      var(--danger);
+  --mark-restricted-wash: rgba(242, 72, 34, 0.16);
   --mark-focus-wash: rgba(255, 255, 255, 0.16);
 }
 
