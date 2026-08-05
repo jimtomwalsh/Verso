@@ -517,3 +517,18 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 /* The Classification action lands you on the panel that owns the value. A brief ring says which
    thing moved, because a scroll on a short rail can be invisible. */
 .source-stage__product.is-flash { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--radius-sm, 4px); transition: box-shadow 200ms; }
+
+/* ---- uio-S-M04 (SRC-10): the rail says CONDITION, not just position -------------------------
+   One column, two views. The switch sits above both so it never scrolls away from you. */
+.source-nav__tabs { padding: var(--space-2, 4px) 0 var(--space-3, 6px); }
+/* A dot per row, drawn only when a section has something to report. Its tone is the most urgent
+   thing in that section — broken, then stale, then an open comment, then mere presence — because
+   a row cannot wear four dots without becoming a chart. */
+.source-toc__dot { width: 6px; height: 6px; border-radius: var(--radius-full, 50%); flex: 0 0 auto; }
+.source-toc__dot--broken { background: var(--danger); }
+.source-toc__dot--stale { background: var(--warning); }
+.source-toc__dot--open { background: var(--mark-note); }
+.source-toc__dot--quiet { background: var(--text-tertiary, var(--text-secondary)); }
+/* Scroll-spy was specified and invisible. A 2px accent rail on the current section is the
+   smallest thing that answers "where am I" without competing with selection. */
+.source-toc__row.is-current { box-shadow: inset 2px 0 0 var(--accent); }
