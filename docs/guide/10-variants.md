@@ -19,8 +19,9 @@ plain-text view of all course copy; **Build** returns you to the canvas. With va
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
 its copy from the flagship. Click into any row to select some text and use the **B / I / U /
-Link** toolbar plus the **Weight** dropdown — the same formatting controls the canvas Inspector's
-Style row uses.
+Link** toolbar plus the **Weight** dropdown. The Copy Editor keeps its own B / I / U toolbar
+because it has no canvas to float a bar over; on the canvas, the same three appear in a small bar
+above whatever text you select.
 
 **Shared Library masters inherit variants and software versions too.** If you gave a block
 per-variant or per-software-version wording *before* saving it to the Shared Library (§9), every

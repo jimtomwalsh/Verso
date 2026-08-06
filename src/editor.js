@@ -4820,6 +4820,10 @@
   var buildFormatToggleBar = VE.bind("buildFormatToggleBar");
   var onCanvasSelectionChange = VE.bind("onCanvasSelectionChange");
   var hideCanvasFmtBar = VE.bind("hideCanvasFmtBar");
+  // uio-E-C06: the link behaviour, so the panel can render its own control over it.
+  var promptLinkForSelection = VE.bind("promptLinkForSelection");
+  var removeLinkFromSelection = VE.bind("removeLinkFromSelection");
+  var formatSelectionAnchor = VE.bind("formatSelectionAnchor");
 
 
   // arch-P3b-07prim2: the generalised custom listbox, its labelled row, the Type cluster and the
@@ -6557,6 +6561,10 @@
     isTextTarget: isTextTarget,
     convertTextListBlockType: convertTextListBlockType,
     buildFormatToggleBar: buildFormatToggleBar,
+    promptLinkForSelection: promptLinkForSelection,
+    removeLinkFromSelection: removeLinkFromSelection,
+    formatSelectionAnchor: formatSelectionAnchor,
+    settingsRow: settingsRow,
     sanitizeFieldHtml: sanitizeFieldHtml,
     sanitizeText: sanitizeText,
     scheduleSpellcheck: scheduleSpellcheck,
