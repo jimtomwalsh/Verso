@@ -15599,8 +15599,9 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(es));
   // product-rail-review-diff: a real line-level diff (LineDiff), not two flat side-by-side blocks.
   ok("the review compares via the real LineDiff.diff, not a flat two-block dump", /var ops = window\.LineDiff \? window\.LineDiff\.diff\(sec\.facets\.technical \|\| "", sec\.sourceUpdate\.text \|\| ""\) : \[\];/.test(es));
+  // uio-P-M01: the diff classes are neutral now — Publish's drift review draws the identical view.
   ok("each diff op renders on its own line with a type-specific class (removed/added/same), + and − prefixes", /var prefix = op\.type === "removed" \? "− " : op\.type === "added" \? "\+ " : "  ";/.test(es) &&
-    /h\("div", "source-stage__diff-line source-stage__diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(es));
+    /h\("div", "diff-line diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(es));
   ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(es));
 
   // Provenance MOVED under the document header (source-provenance-bug); the sidebar keeps only Linked in.
@@ -16678,6 +16679,88 @@ section("uio-E-A01: Edit work modes");
   // Gate finding: the sibling mode switch in this same zone (Source's) states what its mode does in
   // a quiet Badge. Two mode switches side by side must read the same way, not one via a tooltip.
   ok("each mode states what it arranged, in the sibling's Badge and voice", /EDIT_MODE_META = \{/.test(e) && /chip: "Source open · inspector aside"/.test(e) && /U\.Badge\(\{ tone: "neutral", size: "sm", quiet: true, children: meta\.chip \}\)/.test(e));
+})();
+
+// uio-P-M01 (PUB-02): drift becomes a reviewable row. The blocker this ticket had to clear first:
+// the baseline stored one version stamp per MASTER and no text, so "review the drift" had nothing
+// to diff and the wrong granularity to diff it at. snapshotBaseline now also records the published
+// TEXT of every linked passage, keyed by mark+alternate, and the three decisions are pure.
+section("uio-P-M01: per-passage drift + review");
+(function () {
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+  // A fixture doc with three linked placements + the resolver injected (the app passes render.js's).
+  function mk(blocks, meta) {
+    return { meta: meta || {}, pages: [{ blocks: blocks }] };
+  }
+  var live = { "m1|": "the new wording", "m2|": "unchanged words", "m3|alt1": "the fork's words" };
+  function resolve(masterId, markId, altId) {
+    var k = markId + "|" + (altId || "");
+    return k in live ? { type: "text", text: live[k] } : null;
+  }
+  var api = PR.create({ walkBlocks: function (d, fn) { (d.pages || []).forEach(function (p) { (p.blocks || []).forEach(fn); }); },
+    libraryComponents: function () { return { M: { updatedAt: 5 } }; } });
+  var blocks = [
+    { id: "b1", sourceLink: { masterId: "M", markId: "m1" } },
+    { id: "b2", sourceLink: { masterId: "M", markId: "m2" } },
+    { id: "b3", sourceLink: { masterId: "M", markId: "m3", altId: "alt1" } }
+  ];
+
+  // --- the snapshot: text, keyed by mark AND alternate ---
+  var d = mk(blocks);
+  api.snapshotBaseline(d, resolve);
+  ok("the baseline records the published TEXT, not just a version stamp", d.meta.lastPublishedSourceText["m1|"] === "the new wording");
+  ok("an alternate is its own passage key (mark + alt)", d.meta.lastPublishedSourceText["m3|alt1"] === "the fork's words" && !("m3|" in d.meta.lastPublishedSourceText));
+  ok("the master version stamps still snapshot alongside it", d.meta.lastPublishedGroundTruthVersions.M === 5);
+  ok("nothing drifted the instant it published", api.driftPassages(d, resolve).length === 0);
+
+  // --- drift is per PASSAGE, not per master ---
+  live["m1|"] = "the source moved on";
+  var rows = api.driftPassages(d, resolve);
+  ok("only the passage that moved is a row — one master, three passages, one drift", rows.length === 1 && rows[0].markId === "m1");
+  ok("the row carries both sides, so a diff has something to diff", rows[0].before === "the new wording" && rows[0].after === "the source moved on");
+
+  // --- a passage placed since the last release has no before ---
+  var d2 = mk(blocks); api.snapshotBaseline(d2, resolve);
+  d2.pages[0].blocks.push({ id: "b4", sourceLink: { masterId: "M", markId: "m4" } });
+  live["m4|"] = "freshly placed";
+  var r2 = api.driftPassages(d2, resolve).filter(function (x) { return x.markId === "m4"; })[0];
+  ok("a never-published passage is flagged isNew, not diffed against nothing", r2 && r2.isNew === true && r2.before === "");
+
+  // --- accept ONE passage without silencing its siblings ---
+  var d3 = mk(blocks); api.snapshotBaseline(d3, resolve);
+  live["m1|"] = "A moved"; live["m2|"] = "B moved";
+  ok("two passages of one master drift independently", api.driftPassages(d3, resolve).length === 2);
+  api.acceptPassage(d3, "m1|", "A moved");
+  var after = api.driftPassages(d3, resolve);
+  ok("accepting one leaves the other still owed a decision", after.length === 1 && after[0].markId === "m2");
+
+  // --- keep-with-reason, and what re-raises it ---
+  var d4 = mk(blocks); api.snapshotBaseline(d4, resolve);
+  live["m1|"] = "source says X";
+  api.keepPassage(d4, "m1|", "our audience needs the longer form", "source says X");
+  ok("a kept passage stops asking", api.driftPassages(d4, resolve).filter(function (x) { return x.markId === "m1"; }).length === 0);
+  live["m1|"] = "source says Y";
+  var reraised = api.driftPassages(d4, resolve).filter(function (x) { return x.markId === "m1"; })[0];
+  ok("but a FURTHER source change re-raises it — the reason was given about wording that is gone", !!reraised && reraised.keptReason === "our audience needs the longer form");
+  ok("publishing clears the kept decisions — what shipped is the new baseline", (function () {
+    api.snapshotBaseline(d4, resolve); return Object.keys(d4.meta.keptSourceDrift).length === 0;
+  })());
+
+  // --- object links (figures) are not text and never appear as word drift ---
+  var d5 = mk([{ id: "bo", sourceLink: { masterId: "M", markId: "fig1" } }]);
+  var objResolve = function () { return { type: "object", src: "a.png" }; };
+  api.snapshotBaseline(d5, objResolve);
+  ok("a figure link is not a text passage", Object.keys(d5.meta.lastPublishedSourceText).length === 0 && api.driftPassages(d5, objResolve).length === 0);
+
+  // --- the wiring ---
+  var e = src("src/editor.js");
+  ok("the snapshot runs off render.js's own resolver, so what is recorded is what shipped", /ProductRail\.snapshotBaseline\(doc, window\.resolveSourceLinkContent\)/.test(e));
+  ok("the queue row carries the review, and only when something drifted", /var drifted = publishDriftFor\(r\.docId\);\s*\n\s*if \(drifted\.length\) main\.appendChild\(renderPublishDriftReview\(r, drifted\)\);/.test(e));
+  ok("the three answers are wired to the pure helpers", /"Take the update"/.test(e) && /ProductRail\.acceptPassage\(d, p\.key, p\.after\)/.test(e) && /"Open in Edit"/.test(e) && /jumpToLinkedBlock\(r\.docId, p\.blockId\)/.test(e) && /ProductRail\.keepPassage\(d, p\.key, String\(v\)\.trim\(\), p\.after\)/.test(e));
+  ok("ONE diff renderer, shared with Source's reconcile view", /function renderTextDiff\(before, after\)/.test(e) && /\.diff-block \{/.test(EDITOR_CSS) && !/source-stage__diff-line/.test(EDITOR_CSS));
+  // Gate finding: the app's <details> all draw the canonical .caret, so this one does too rather
+  // than a hand-rolled text marker.
+  ok("the disclosure uses the canonical caret, like every other <details>", /sum\.appendChild\(h\("span", "caret"\)\)/.test(e) && /\.publish-drift\[open\] > \.publish-drift__summary \.caret \{ transform: rotate\(90deg\); \}/.test(EDITOR_CSS));
 })();
 
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --

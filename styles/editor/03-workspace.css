@@ -687,7 +687,9 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
    the pill shape/colour -- this only adds the clickable affordance on top of it. */
 .source-stage__source-flag { cursor: pointer; flex: 0 0 auto; }
 .source-stage__source-flag:hover { opacity: 0.8; }
-.source-stage__diff-block {
+/* uio-P-M01: ONE diff view. Source's reconcile modal drew these first; Publish's drift review
+   draws the identical thing, so the vocabulary is neutral and both surfaces call one renderer. */
+.diff-block {
   font-family: var(--font-mono, "JetBrains Mono", monospace); font-size: var(--text-sm, 13px); line-height: 1.5;
   background: var(--surface-raised, #262626); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px);
   padding: 8px 10px; margin: 4px 0 12px; max-height: 260px; overflow-y: auto;
@@ -695,10 +697,28 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
 /* product-rail-review-diff: a real line-level diff (LineDiff) -- unchanged/removed/added
    lines, each on their own row. Reuses the same red/green tint tokens Badge's
    danger/success tones already use, so a real diff view needs no new colour vocabulary. */
-.source-stage__diff-line { white-space: pre-wrap; padding: 0 4px; }
-.source-stage__diff-line--same { color: var(--text-secondary); }
-.source-stage__diff-line--removed { background: var(--red-tint, rgba(242,72,34,0.16)); color: var(--danger, #f24822); }
-.source-stage__diff-line--added { background: var(--green-tint, rgba(20,174,92,0.16)); color: var(--success, #14ae5c); }
+.diff-line { white-space: pre-wrap; padding: 0 4px; }
+.diff-line--same { color: var(--text-secondary); }
+.diff-line--removed { background: var(--red-tint, rgba(242,72,34,0.16)); color: var(--danger, #f24822); }
+.diff-line--added { background: var(--green-tint, rgba(20,174,92,0.16)); color: var(--success, #14ae5c); }
+
+/* uio-P-M01 (PUB-02): the drift review on a publish-queue row. Collapsed by default -- a queue of
+   ten rows must stay a queue -- and it only exists at all when something actually drifted. */
+.publish-drift { margin-top: 6px; }
+.publish-drift__summary {
+  display: flex; align-items: center; gap: var(--space-4, 6px);
+  cursor: pointer; font-size: var(--text-xs); color: var(--warning, #f5a623);
+  padding: 2px 0; user-select: none; list-style: none;
+}
+.publish-drift__summary::-webkit-details-marker { display: none; }
+.publish-drift__summary .caret { flex: 0 0 auto; border-left-color: var(--warning, #f5a623); }
+.publish-drift[open] > .publish-drift__summary .caret { transform: rotate(90deg); }
+.publish-drift__summary:hover { color: var(--text-primary); }
+.publish-drift__item { padding: 6px 0 2px; border-top: 1px solid var(--border-subtle); margin-top: 6px; }
+.publish-drift__head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4, 6px); margin-bottom: 4px; }
+.publish-drift__where { font-size: var(--text-xs); color: var(--text-secondary); }
+.publish-drift__tag { font-size: var(--text-2xs, 9px); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+.publish-drift__acts { display: flex; flex-wrap: wrap; gap: var(--space-4, 6px); margin-bottom: 8px; }
 /* Timeline (DS canonical, design-system/components/structure/Timeline) -- a node-based
    vertical activity trail: dot + connecting line, content to the right. Promoted from
    Product Rail's per-topic import/edit history (info panel "History" section). */

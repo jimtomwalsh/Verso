@@ -1066,12 +1066,15 @@
       // product-rail-review-diff: a real line-level diff (LineDiff, classic LCS) instead of
       // two flat side-by-side blocks -- removed lines (your text) and added lines (the
       // source's) are visually distinguished so the actual change is legible at a glance.
+      // uio-P-M01: the classes are neutral (`diff-block` / `diff-line--*`) because Publish's drift
+      // review draws the identical view; one vocabulary, so the two cannot drift apart in styling
+      // any more than in words.
       var diffBody = modalSection(shell.body, "What changed");
-      var diffBlock = h("div", "source-stage__diff-block");
+      var diffBlock = h("div", "diff-block");
       var ops = window.LineDiff ? window.LineDiff.diff(sec.facets.technical || "", sec.sourceUpdate.text || "") : [];
       ops.forEach(function (op) {
         var prefix = op.type === "removed" ? "− " : op.type === "added" ? "+ " : "  ";
-        diffBlock.appendChild(h("div", "source-stage__diff-line source-stage__diff-line--" + op.type, prefix + op.text));
+        diffBlock.appendChild(h("div", "diff-line diff-line--" + op.type, prefix + op.text));
       });
       diffBody.appendChild(diffBlock);
     }

@@ -308,12 +308,85 @@
     }
     // The instant a document finishes exporting, its badge goes to zero: record every linked
     // master's current stamp as the new "last published" point.
-    function snapshotBaseline(doc) {
+    //
+    // uio-P-M01: it also records the TEXT of every linked passage as published. The stamps above
+    // can only say THAT a master moved -- one boolean per master, no words -- so "review the
+    // drift" had nothing to show and no granularity to show it at: two passages from one master
+    // were one indistinguishable fact. The text snapshot is what makes a real diff possible, and
+    // it is written at exactly the moment the words went out, which is the only moment they can
+    // be captured truthfully.
+    //
+    // Keyed by mark AND alternate: a placement showing a fork is a different passage from one
+    // showing base, and re-pointing it is a change worth reviewing.
+    function passageKey(link) { return String(link.markId) + "|" + (link.altId || ""); }
+    // Every linked placement in a document, with the text it resolves to RIGHT NOW. `resolve` is
+    // injected (render.js's resolveSourceLinkContent in the app) so this stays pure and fixturable.
+    function linkedPassages(doc, resolve) {
+      var out = [];
+      if (!doc || typeof resolve !== "function") return out;
+      walkBlocks(doc, function (b) {
+        if (!b || !b.sourceLink || !b.sourceLink.masterId || !b.sourceLink.markId) return;
+        var got = resolve(b.sourceLink.masterId, b.sourceLink.markId, b.sourceLink.altId || null);
+        if (!got || got.type !== "text") return;   // object links (figures) diff as pixels, not words
+        out.push({ blockId: b.id || null, masterId: b.sourceLink.masterId, markId: b.sourceLink.markId,
+          altId: b.sourceLink.altId || null, key: passageKey(b.sourceLink), text: String(got.text == null ? "" : got.text) });
+      });
+      return out;
+    }
+    // WHAT changed, passage by passage: the words as published against the words now. A passage
+    // absent from the baseline is `isNew` -- placed since the last release, so there is nothing to
+    // compare and nothing to accept; it simply has not been published yet.
+    // `kept` carries a keep-with-reason decision, so a deliberate divergence stops re-asking.
+    function driftPassages(doc, resolve) {
+      var base = (doc && doc.meta && doc.meta.lastPublishedSourceText) || {};
+      var kept = (doc && doc.meta && doc.meta.keptSourceDrift) || {};
+      return linkedPassages(doc, resolve).filter(function (p) {
+        return !(p.key in base) || base[p.key] !== p.text;
+      }).map(function (p) {
+        var isNew = !(p.key in base);
+        return { blockId: p.blockId, masterId: p.masterId, markId: p.markId, altId: p.altId, key: p.key,
+          isNew: isNew, before: isNew ? "" : base[p.key], after: p.text,
+          keptReason: (kept[p.key] && kept[p.key].reason) || null,
+          keptAgainst: (kept[p.key] && kept[p.key].against) || null };
+      }).filter(function (r) {
+        // A kept passage stays quiet until the source moves AGAIN past what was kept against.
+        return !(r.keptReason && r.keptAgainst === r.after);
+      });
+    }
+    function snapshotBaseline(doc, resolve) {
       if (!doc) return doc;
       var cur = currentMasterVersions(), snap = {};
       linkedMasterIds(doc).forEach(function (id) { snap[id] = cur[id]; });
       doc.meta = doc.meta || {};
       doc.meta.lastPublishedGroundTruthVersions = snap;
+      if (typeof resolve === "function") {
+        var text = {};
+        linkedPassages(doc, resolve).forEach(function (p) { text[p.key] = p.text; });
+        doc.meta.lastPublishedSourceText = text;
+        doc.meta.keptSourceDrift = {};   // what shipped is the new baseline; nothing is owed a reason any more
+      }
+      return doc;
+    }
+    // Accept ONE passage's update: move just that passage's baseline to what it says now, leaving
+    // every other drifted passage still owed a decision. The master-level stamp is deliberately NOT
+    // touched -- other passages from the same master may still be drifted, and moving the stamp
+    // would silence them.
+    function acceptPassage(doc, key, text) {
+      if (!doc) return doc;
+      doc.meta = doc.meta || {};
+      doc.meta.lastPublishedSourceText = doc.meta.lastPublishedSourceText || {};
+      doc.meta.lastPublishedSourceText[key] = String(text == null ? "" : text);
+      if (doc.meta.keptSourceDrift) delete doc.meta.keptSourceDrift[key];
+      return doc;
+    }
+    // Keep this document's published wording, on the record. `against` freezes WHICH source wording
+    // the reason was given about, so a later source change re-raises the row instead of inheriting
+    // a decision that was never made about it.
+    function keepPassage(doc, key, reason, against) {
+      if (!doc) return doc;
+      doc.meta = doc.meta || {};
+      doc.meta.keptSourceDrift = doc.meta.keptSourceDrift || {};
+      doc.meta.keptSourceDrift[key] = { reason: String(reason == null ? "" : reason), against: String(against == null ? "" : against) };
       return doc;
     }
 
@@ -401,6 +474,12 @@
       staleCount: staleCount,
       currentMasterVersions: currentMasterVersions,
       snapshotBaseline: snapshotBaseline,
+      // uio-P-M01: per-passage drift — the text snapshot that makes a diff possible, and the two
+      // decisions a reviewed row can carry.
+      linkedPassages: linkedPassages,
+      driftPassages: driftPassages,
+      acceptPassage: acceptPassage,
+      keepPassage: keepPassage,
       sourceAlignment: sourceAlignment,
       sourceAlignmentPct: sourceAlignmentPct,
       linkedSpanWords: linkedSpanWords,
