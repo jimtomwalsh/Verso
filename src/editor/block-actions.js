@@ -317,6 +317,20 @@
       bar.style.visibility = "hidden";  // placed before it is shown, so it never flashes at 0,0
       positionBlockToolbar();
     }
+    // uio-E-M03 found this E-M01 gap: the stage overlays (Files / Source / Publish) sit ON TOP of
+    // the Edit canvas (uio-W03), so a selected block's rect stays non-zero when the author leaves
+    // Edit -- and the fixed-position bar floated over the new stage. The bar is Edit chrome: watch
+    // the workspace's stage class and suppress it (contents kept) whenever a stage overlay is up,
+    // restoring it when Edit returns with the selection intact.
+    if (typeof document !== "undefined" && typeof MutationObserver !== "undefined") {
+      var __wsForBar = document.getElementById("workspace");
+      if (__wsForBar) new MutationObserver(function () {
+        var away = /workspace--stage-/.test(__wsForBar.className);
+        if (!blockToolbarEl) return;
+        if (away) { if (!blockToolbarEl.hidden) { blockToolbarEl.hidden = true; blockToolbarEl.__stageHid = true; } }
+        else if (blockToolbarEl.__stageHid) { blockToolbarEl.__stageHid = false; blockToolbarEl.hidden = false; positionBlockToolbar(); }
+      }).observe(__wsForBar, { attributes: true, attributeFilter: ["class"] });
+    }
     // The rendered node for a block, by the id the canvas already stamps on it.
     function nodeForBlock(block) {
       if (!block || !block.id || typeof document === "undefined") return null;
