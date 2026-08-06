@@ -16658,6 +16658,28 @@ section("uio-E-M06: comments as peer tab");
   ok("editor.js relays the tab accessors for the modules that need them", /setRightTab: setRightTab, rightTabNow: rightTabNow, syncRightTabs: syncRightTabs,/.test(e));
 })();
 
+// uio-E-A01 (EDIT-05/16 in full): three named work modes -- Assemble . Style . Review. Each is an
+// ENTRY ARRANGEMENT of the surfaces the Moderate tickets built (the Source drawer, the right-panel
+// tabs, comment mode); Assemble alone changes the layout, collapsing the inspector to a 34px strip
+// whose click returns to Style. On boot only the chrome re-applies, so the drawer and tabs keep
+// their own persisted state.
+section("uio-E-A01: Edit work modes");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  var wcss = src("styles/editor/03-workspace.css");
+  ok("the switch and the strip exist, Edit-zone-hosted", /id="edit-mode-switch"/.test(html) && /id="inspector-strip"/.test(html));
+  ok("three modes, persisted under one key", /EDIT_MODE_KEY = "authoring\.editMode"/.test(e) && /m !== "assemble" && m !== "style" && m !== "review"/.test(e));
+  ok("each mode arranges the Moderate surfaces on entry", /applyLeftSection\("source"\); if \(commentModeOn\(\)\) setCommentMode\(false\); setRightTab\("design"\)/.test(e) && /applyLeftSection\("blocks"\); if \(commentModeOn\(\)\) setCommentMode\(false\); setRightTab\("design"\)/.test(e) && /applyLeftSection\("structure"\); setCommentMode\(true\);/.test(e));
+  ok("boot re-applies chrome only (no re-arranging under the author)", /applyEditMode\(__editMode, \{ chromeOnly: true \}\)/.test(e));
+  ok("assemble wins the dock the way has-sheet does (class-set --dock-w), scoped off the stage overlays", /\.workspace\.workspace--edit-assemble:not\(\.workspace--stage-files\):not\(\.workspace--stage-source\):not\(\.workspace--stage-publish\) \{ --dock-w: 34px; \}/.test(wcss));
+  ok("the strip replaces the panel chrome in assemble and routes back to Style", /\.workspace--edit-assemble > \.panel--right \.inspector-strip \{ display: flex; \}/.test(wcss) && /strip\.addEventListener\("click", function \(\) \{ applyEditMode\("style"\); \}\)/.test(e));
+  ok("the switch hides for Source, whose own mode switch shares the zone", /\.toolbar\.toolbar--source \.editor-window__editmode \{ display: none; \}/.test(wcss) || /\.editor-window__editmode \{ display: none; \}/.test(wcss.split(".toolbar--source")[1] || ""));
+  // Gate finding: the sibling mode switch in this same zone (Source's) states what its mode does in
+  // a quiet Badge. Two mode switches side by side must read the same way, not one via a tooltip.
+  ok("each mode states what it arranged, in the sibling's Badge and voice", /EDIT_MODE_META = \{/.test(e) && /chip: "Source open · inspector aside"/.test(e) && /U\.Badge\(\{ tone: "neutral", size: "sm", quiet: true, children: meta\.chip \}\)/.test(e));
+})();
+
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
 // label, track whose fill carries the band tone, value in the same tone -- with a distinct
 // "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure
@@ -18284,7 +18306,7 @@ section("uio-S-M01 three modes, one source of truth");
     /\.toolbar\.toolbar--source \.editor-window__zone--doc \{ display: flex; \}/.test(wcss) &&
     /\.toolbar\.toolbar--source \.editor-window__srcmode \{ display: flex; \}/.test(wcss));
   ok("and only that control — the canvas controls stay Edit-only, where a canvas exists",
-    /\.toolbar\.toolbar--source \.editor-window__docsettings,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__view,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__axes \{ display: none; \}/.test(wcss));
+    /\.toolbar\.toolbar--source \.editor-window__docsettings,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__view,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__axes,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__editmode \{ display: none; \}/.test(wcss));
   ok("the mode switch does not leak into Edit, which has no source prose to lock",
     /\.toolbar \.editor-window__srcmode \{ display: none; \}/.test(wcss));
   var es = src("src/editor/source-stage.js");

@@ -27,8 +27,14 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   when no course is open) and the **open-course tabs**. Each tab carries a **doc-type glyph** (course,
   presentation, or paged/print document) so a Product's course, one-pager and deck stay
   distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
-  **Document:** a **Document-settings** button (a sliders glyph, deliberately not the same cog as
-  the app-wide one on the left rail; opens this document's settings —
+  **Document:** the **work-mode** switch — **Assemble · Style · Review** — which arranges the
+  workspace for the job in front of you: *Assemble* opens the Source drawer and steps the inspector
+  back to a slim **Inspector** strip (click it to return); *Style* gives you the Insert palette and
+  the full inspector; *Review* turns comment mode on and opens the Comments tab beside the canvas.
+  A mode sets things up, it doesn't lock them — change any panel afterwards and it stays changed.
+  Verso remembers the mode you were last in. Then a **Document-settings** button (a sliders glyph,
+  deliberately not the same cog as the app-wide one on the left rail; opens this document's
+  settings —
   **Document type** (geometry + interactivity, set once), **Header**, **Footer**, the learner-nav
   sections, Theme and the rest; app-wide settings live under the left-rail cog), the **Build /
   Read** toggle (glyphs), and the
