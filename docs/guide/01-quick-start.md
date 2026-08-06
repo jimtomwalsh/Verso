@@ -19,7 +19,11 @@ Build and export your first course in a few minutes.
 course, a presentation, a facilitator guide and two source documents — one a chaptered manual with
 comments, links, alternates, a restricted passage and two declared variants, the other a shared
 glossary belonging to no product. It's invented material, there to be clicked, edited and deleted.
-Delete anything you don't want; the seed only ever fills an empty workspace, so it won't come back
-over your own work.
+
+**Already have work of your own?** Then the seed never ran — it only ever fills an empty workspace,
+so it can't arrive on top of what you've built. Load it deliberately instead: **Files → New →
+Sample workspace…**. It tells you what it will add before it adds anything, leaves everything you
+already have untouched, and skips any part of the sample that's already there — so running it twice
+adds nothing the second time.
 
 ---

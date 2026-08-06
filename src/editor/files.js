@@ -383,7 +383,7 @@
       "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse", "openSourceTopicId",
       // uio-W08: the three creation actions. All three live here, and none of them needs a
       // pre-selected product -- there is no scope left to inherit.
-      "createSourceDocument", "createProduct", "showNewDocDialog", "openSourceDocIds", "storeLocationText",
+      "createSourceDocument", "createProduct", "showNewDocDialog", "loadSampleWorkspace", "openSourceDocIds", "storeLocationText",
       "promptModal", "modalText", "saveProducts",
       "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
       "confirmModal"
@@ -788,7 +788,13 @@
         { label: "Source document…", onClick: newSourceDocumentModal },
         { label: "Design document…", onClick: function () { E.showNewDocDialog(); } },
         { sep: true },
-        { label: "Product…", onClick: newProductModal }
+        { label: "Product…", onClick: newProductModal },
+        { sep: true },
+        // The shipped sample workspace, loadable on demand. It is seeded into empty stores at first
+        // boot, so this is the only way anyone who already has work of their own can reach it -- and
+        // that is everyone who is actually testing. Below the separator because it brings in several
+        // documents at once rather than making one.
+        { label: "Sample workspace…", onClick: function () { E.loadSampleWorkspace(); } }
       ]);
     }
 

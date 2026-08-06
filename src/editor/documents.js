@@ -44,6 +44,54 @@
     };
   }
 
+  // PURE -- what loading the shipped sample workspace WOULD do, decided before anything is written.
+  //
+  // The set ships seeded into empty stores, which is right for a first run and useless for everyone
+  // else: an author who already has products and documents -- which is every author who has used
+  // the tool for an afternoon -- can never see it. So it is loadable on demand, and this is the
+  // half that decides what "loading" means when you already have work.
+  //
+  // ADDITIVE, NEVER DESTRUCTIVE. An id already in a store is SKIPPED, not overwritten and not
+  // duplicated under a new name. Overwriting would destroy real work to install a demo; renaming
+  // would leave two of everything after a second load. Skipping makes the action idempotent: load
+  // it twice and the second run adds nothing and says so.
+  //
+  // Returns the plan, so the caller can state what is about to happen BEFORE it happens rather than
+  // reporting it afterwards. Nothing here writes.
+  function sampleWorkspacePlan(shipped, stores) {
+    shipped = shipped || {};
+    stores = stores || {};
+    var plan = { products: [], sourceDocs: [], designDocs: [], skipped: [], total: 0 };
+    function sort(kind, from, existing) {
+      Object.keys(from || {}).forEach(function (id) {
+        if (existing && Object.prototype.hasOwnProperty.call(existing, id)) plan.skipped.push(id);
+        else plan[kind].push(id);
+      });
+    }
+    sort("products", shipped.products, stores.products);
+    sort("sourceDocs", shipped.sourceDocs, stores.components);
+    sort("designDocs", shipped.designDocs, stores.registry);
+    plan.total = plan.products.length + plan.sourceDocs.length + plan.designDocs.length;
+    return plan;
+  }
+  // The sentence the confirm shows. Written from the plan so it can never promise something the
+  // plan does not do -- including the case where it would do nothing at all.
+  function sampleWorkspaceSummary(plan) {
+    if (!plan || !plan.total) return "The sample workspace is already here. Nothing would be added.";
+    var parts = [];
+    function part(n, one, many) { if (n) parts.push(n + " " + (n === 1 ? one : many)); }
+    part(plan.products.length, "product", "products");
+    part(plan.sourceDocs.length, "source document", "source documents");
+    part(plan.designDocs.length, "design document", "design documents");
+    var head = "Adds " + parts.join(", ").replace(/, ([^,]*)$/, " and $1") + " alongside your own work.";
+    var tail = " Nothing you already have is changed or replaced.";
+    if (plan.skipped.length) {
+      tail += " " + plan.skipped.length + (plan.skipped.length === 1 ? " item is" : " items are") +
+        " already here and will be left alone.";
+    }
+    return head + tail;
+  }
+
   function install(kernel) {
     var E = kernel.need(
       "openDocIds", "registry", "confirmModal", "h", "saveOpenDocIds", "saveRegistry",
@@ -51,7 +99,10 @@
       "tagDocCell", "clone", "dsModalShell", "bindProjectFolder", "iconBtn", "productSelectOptions",
       "doc", "findRegistryId", "colourForName", "formatRelativeTime",
       // uio-W08: the product choice offers "+ New product…" from inside the form that needs it.
-      "promptModal", "createProduct"
+      "promptModal", "createProduct",
+      // Loading the sample workspace on demand writes to all THREE stores, because that is where a
+      // workspace lives: products, source documents (LibraryStore) and design documents (registry).
+      "libComponents", "saveLibrary", "saveProducts"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -143,6 +194,30 @@
       if (!window.__leftRail) return;
       window.__leftRail.invalidate("files");
       window.__leftRail.setStage("edit");
+    }
+
+    // ---- loading the shipped sample workspace on demand -----------------------
+    // The set is seeded into EMPTY stores at first boot, which means the people who most need it --
+    // anyone already testing, with their own products and documents in the way -- could never see
+    // it. This is the door for them. It states what it will add, adds only what is missing, and
+    // lands you in Files, because it brings in several documents rather than one and the list is
+    // what answers "what did that do".
+    function loadSampleWorkspace() {
+      var shipped = window.SAMPLE_WORKSPACE;
+      if (!shipped) return;
+      var comps = E.libComponents();
+      var plan = sampleWorkspacePlan(shipped, {
+        products: window.ProductsStore || {}, components: comps, registry: registry
+      });
+      var summary = sampleWorkspaceSummary(plan);
+      if (!plan.total) { confirmModal("Sample workspace", summary, function () {}); return; }
+      confirmModal("Add the sample workspace?", summary, function () {
+        plan.products.forEach(function (id) { window.ProductsStore[id] = clone(shipped.products[id]); });
+        plan.sourceDocs.forEach(function (id) { comps[id] = clone(shipped.sourceDocs[id]); });
+        plan.designDocs.forEach(function (code) { registry[code] = clone(shipped.designDocs[code]); });
+        E.saveProducts(); E.saveLibrary(); saveRegistry(registry);
+        if (window.__leftRail) { window.__leftRail.invalidate("files"); window.__leftRail.setStage("files"); }
+      }, { okLabel: "Add" });
     }
 
     function createBlankDoc(title, code, opts) {
@@ -445,10 +520,14 @@
       sanitizeHeaderFooterDefault: sanitizeHeaderFooterDefault, headerFooterFromDefault: headerFooterFromDefault, getHeaderFooterDefault: getHeaderFooterDefault,
       saveHeaderFooterDefault: saveHeaderFooterDefault, clearHeaderFooterDefault: clearHeaderFooterDefault, createBlankDoc: createBlankDoc,
       importDocToRegistry: importDocToRegistry, readCourseFile: readCourseFile, pickCourseFile: pickCourseFile,
-      showNewDocDialog: showNewDocDialog
+      showNewDocDialog: showNewDocDialog, loadSampleWorkspace: loadSampleWorkspace
     });
   }
 
-  window.VersoDocuments = { install: install, _pure: { newDocIdentity: newDocIdentity } };
+  window.VersoDocuments = { install: install, _pure: {
+    newDocIdentity: newDocIdentity,
+    sampleWorkspacePlan: sampleWorkspacePlan,
+    sampleWorkspaceSummary: sampleWorkspaceSummary
+  } };
   if (typeof module !== "undefined" && module.exports) module.exports = window.VersoDocuments;
 })();
