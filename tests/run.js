@@ -12395,13 +12395,25 @@ section("UI kit seam");
      /function section\(title, opts\) \{[\s\S]{0,220}return panelSection\(host, title, opts\)/.test(ep) && !/function sectionHead\(/.test(e));
   ok("#14: container chrome Position uses alignSeg for horizontal + vertical",
      /var pos = section\("Position"\)[\s\S]{0,600}alignSeg\("Horizontal"[\s\S]{0,600}alignSeg\("Vertical"/.test(ep));
-  ok("#14: container chrome hosts Layout/Appearance rows into section bodies; Actions render into the canvas overlay bar",
-     /var lay = section\("Layout"\)/.test(ep) && /var ap = section\("Appearance"\)/.test(ep) && /if \(want\("actions", true\)\) \{\s*var bar = ensureBlockToolbar\(\)/.test(ep));
-  // Split-page (+ move/duplicate/delete) reinstated onto the canvas overlay bar after the
-  // left-rail/top-bar reorg dropped them: ensureBlockToolbar mounts a contextual segment
-  // inside #canvas-overlay, and the container-chrome Actions build the split button there.
-  ok("block actions mount into the canvas overlay bar segment",
-     /function ensureBlockToolbar\(\) \{[\s\S]{0,320}canvas-overlay-bar__inner[\s\S]{0,240}"canvas-overlay-bar__actions"/.test(BA));
+  ok("#14: container chrome hosts Layout/Appearance rows into section bodies; Actions render into the docked block toolbar",
+     /var lay = section\("Layout"\)/.test(ep) && /var ap = section\("Appearance"\)/.test(ep) && /if \(want\("actions", true\)\) \{[\s\S]{0,400}var bar = ensureBlockToolbar\(/.test(ep));
+  // uio-E-M01 (EDIT-04): the actions left the overlay bar and attach to the BLOCK. The claim the
+  // guard was protecting -- that split/move/duplicate/delete are reachable from one place the
+  // container chrome feeds -- is unchanged; the place moved. The bar keeps only the view tools.
+  ok("block actions dock above the selected block, not in the canvas overlay bar",
+     /function ensureBlockToolbar\(node\) \{[\s\S]{0,400}h\("div", "block-toolbar"\)/.test(BA) &&
+     BA.indexOf("canvas-overlay-bar__actions") === -1 &&
+     BA.indexOf("blockToolbarSep") === -1);
+  // It tracks a NODE, so it has to be re-placed whenever that node's rect moves, and hidden when
+  // the block scrolls out of the viewport -- a toolbar for something you cannot see points at
+  // nothing and sits over whatever is on screen instead.
+  ok("the docked toolbar follows its block, and hides when the block leaves the viewport",
+     /ensureBlockToolbar\(opts\.node \|\| nodeForBlock\(block\)\)/.test(BA) &&
+     /if \(r\.bottom < v\.top \|\| r\.top > v\.bottom\) \{ bar\.style\.visibility = "hidden"; return; \}/.test(BA));
+  // render.js stamps data-id on every block it draws -- one attribute, no guessing.
+  ok("it finds its block by the id the canvas actually stamps",
+     /querySelector\('#canvas-viewport \[data-id="' \+ block\.id \+ '"\]'\)/.test(BA) &&
+     /if \(block\.id\) node\.setAttribute\("data-id", block\.id\);/.test(src("src/render.js")));
   ok("split page action is built into the canvas bar (not a panel section)",
      /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split/.test(ep) &&
      /acts\.forEach\(function \(a\) \{[\s\S]{0,180}bar\.appendChild\(btn\)/.test(ep));

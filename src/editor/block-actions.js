@@ -15,7 +15,8 @@
 // What the verbs DO is structure-ops.js. This file decides what is offered, to what, and how it
 // reads; the ops decide what happens to the document.
 //
-// It owns `blockToolbarSep`, the separator minted when the bar is first built. Two other modules
+// uio-E-M01: the bar is a floating element docked above the selected block, not a segment of the
+// canvas overlay bar, so the separator it used to mint is retired. Two other modules
 // read it live to show the bar again after they hide it, which is why it is provided from here
 // rather than passed.
 //
@@ -225,33 +226,73 @@
       showBlockToolbar(block, opts);
     }
 
-    // ---- contextual block actions, merged into the persistent canvas overlay bar ------
-    // The block actions (move / duplicate / split / hide / lock / delete) live as a
-    // contextual SEGMENT of the #canvas-overlay tools bar (grid / find / comment / zoom),
-    // appended when an element is selected and cleared on deselect — so they sit in ONE
-    // bigger canvas toolbar alongside the tools, rather than a separate floating bar. The
-    // bar itself is positioned by CSS (.canvas-overlay-bar), so there is nothing to place.
-    var blockToolbarEl = null, blockToolbarSep = null;
-    function ensureBlockToolbar() {
+    // ---- uio-E-M01 (EDIT-04): the block's actions attach to the BLOCK -------------------
+    // They used to be a contextual segment appended to the persistent #canvas-overlay tools bar,
+    // so acting on a block meant travelling to the bottom of the screen and back — and the bar
+    // then held two unrelated things at once: tools that act on the CANVAS (grid, find, comment,
+    // zoom) and verbs that act on ONE selected block. The bar keeps the view tools; the verbs
+    // dock above the block they belong to, where you already are.
+    //
+    // Positioned `fixed` off the block node's own rect, which already accounts for the world's
+    // zoom transform and the viewport's scroll — so there is no second copy of the pan/zoom maths
+    // here. It has to be RE-positioned whenever that rect moves, which is why positionBlockToolbar
+    // stopped being a no-op and why the viewport's scroll drives it.
+    var blockToolbarEl = null;
+    var __toolbarNode = null;   // the DOM node the open toolbar is tracking
+    // `node` is the element the bar will sit above. It is a PARAMETER rather than something this
+    // function works out, because there are two producers of the bar's contents -- showBlockToolbar
+    // here and renderContainerChrome's Actions cluster -- and only the caller knows which element
+    // the selection is really on. The first build shipped without it: the container-chrome path
+    // showed the bar and never named a node, so it drew at the viewport origin and never tracked.
+    function ensureBlockToolbar(node) {
+      if (node) __toolbarNode = node;
       if (blockToolbarEl) return blockToolbarEl;
-      var inner = document.querySelector("#canvas-overlay .canvas-overlay-bar__inner");
-      if (!inner) return null; // bar absent (zen / preview panels hidden)
-      blockToolbarSep = h("span", "canvas-overlay-bar__sep canvas-overlay-bar__sep--actions");
-      blockToolbarEl = h("div", "canvas-overlay-bar__actions");
-      inner.appendChild(blockToolbarSep);
-      inner.appendChild(blockToolbarEl);
+      blockToolbarEl = h("div", "block-toolbar");
+      blockToolbarEl.setAttribute("data-block-toolbar", "1");
+      // mousedown must not steal the selection the toolbar is acting on
+      blockToolbarEl.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      document.body.appendChild(blockToolbarEl);
       return blockToolbarEl;
     }
-    function positionBlockToolbar() {} // the overlay bar is positioned by CSS; kept for callers
+    // Put the bar just above the tracked block, clamped INTO the canvas viewport so a block at the
+    // very top of the scroll does not push its own toolbar off-screen. Hidden outright when the
+    // block has scrolled out of view — a toolbar for something you cannot see is a control pointing
+    // at nothing, and it would otherwise sit over whatever IS on screen.
+    function positionBlockToolbar() {
+      var bar = blockToolbarEl;
+      if (!bar || bar.hidden || !__toolbarNode || !__toolbarNode.isConnected) return;
+      var vp = document.getElementById("canvas-viewport");
+      var r = __toolbarNode.getBoundingClientRect();
+      if (!r.width && !r.height) { bar.style.visibility = "hidden"; return; }
+      var GAP = 6;
+      if (vp) {
+        var v = vp.getBoundingClientRect();
+        if (r.bottom < v.top || r.top > v.bottom) { bar.style.visibility = "hidden"; return; }
+        bar.style.visibility = "";
+        var bw = bar.offsetWidth || 0, bh = bar.offsetHeight || 0;
+        var top = r.top - bh - GAP;
+        if (top < v.top + 4) top = Math.min(r.top + GAP, v.bottom - bh - 4); // no room above -> just inside
+        var left = Math.max(v.left + 4, Math.min(r.left, v.right - bw - 4));
+        bar.style.top = Math.round(top) + "px";
+        bar.style.left = Math.round(left) + "px";
+      } else {
+        bar.style.visibility = "";
+        bar.style.top = Math.round(r.top - (bar.offsetHeight || 0) - GAP) + "px";
+        bar.style.left = Math.round(r.left) + "px";
+      }
+    }
     function hideBlockToolbar() {
+      __toolbarNode = null;
       if (blockToolbarEl) { blockToolbarEl.innerHTML = ""; blockToolbarEl.hidden = true; }
-      if (blockToolbarSep) blockToolbarSep.hidden = true;
     }
     function showBlockToolbar(block, opts) {
       opts = opts || {};
-      var bar = ensureBlockToolbar();
-      if (!bar) return; // canvas overlay bar not present (panels hidden)
+      var bar = ensureBlockToolbar(opts.node || nodeForBlock(block));
+      if (!bar) return;
       bar.innerHTML = "";
+      // The node the bar tracks. `opts.node` lets a retargeting caller (a card instance) name a
+      // different element than the block's own; otherwise the block's rendered node is it.
+      if (!__toolbarNode) { bar.hidden = true; return; } // nothing on screen to attach to
       var doMove = opts.move || function (d) { moveBlock(block, d); };
       var doDup = opts.duplicate || function () { duplicateBlock(block); };
       var doDelete = opts.remove || function () { deleteBlockByRef(block); };
@@ -273,15 +314,20 @@
       var del = iconBtn("trash", "Delete block", true); del.addEventListener("click", function () { doDelete(); }); bar.appendChild(del);
 
       bar.hidden = false;
-      if (blockToolbarSep) blockToolbarSep.hidden = false;
+      bar.style.visibility = "hidden";  // placed before it is shown, so it never flashes at 0,0
+      positionBlockToolbar();
+    }
+    // The rendered node for a block, by the id the canvas already stamps on it.
+    function nodeForBlock(block) {
+      if (!block || !block.id || typeof document === "undefined") return null;
+      // render.js stamps `data-id` on every block it draws (src/render.js). One attribute, so
+      // there is no guessing which one the canvas used.
+      return document.querySelector('#canvas-viewport [data-id="' + block.id + '"]');
     }
 
-    kernel.provideLive({
-      blockToolbarSep: function () { return blockToolbarSep; }
-    });
     kernel.expose({
       renderBlockActionsSection: renderBlockActionsSection, ensureBlockToolbar: ensureBlockToolbar, hideBlockToolbar: hideBlockToolbar,
-      positionBlockToolbar: positionBlockToolbar
+      positionBlockToolbar: positionBlockToolbar, nodeForBlock: nodeForBlock
     });
   }
 

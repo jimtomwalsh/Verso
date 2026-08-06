@@ -346,6 +346,21 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 .canvas-overlay-bar__sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+
+/* uio-E-M01 (EDIT-04): the selected block's verbs, docked above the block. They used to be a
+   contextual segment of the bar above, which put canvas tools (grid, find, comment, zoom) and
+   one block's actions in the same strip and made acting on a block a trip to the bottom of the
+   screen. Position is set in JS off the block's own rect; everything here is the look.
+   Borders over shadows is the DS rule, but this one lifts off live content it must not be
+   confused with, which is the documented exception the menu and popover tokens already take. */
+.block-toolbar {
+  position: fixed; z-index: 30; display: flex; align-items: center; gap: 2px;
+  padding: 3px 4px; border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-subtle); background: var(--surface-raised, var(--surface-panel));
+  box-shadow: var(--shadow-popover);
+}
+.block-toolbar[hidden] { display: none; }
+.block-toolbar .tb-sep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 3px; }
 /* contextual block-actions segment (move/duplicate/split/hide/lock/delete), appended
    to the bar when a block is selected. Its buttons adopt the flat canvas-tool look so
    the segment reads as one bar with the grid/find/comment/zoom tools. */

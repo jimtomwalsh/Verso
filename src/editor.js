@@ -3611,7 +3611,8 @@
 
   // arch-P3b-07o: the universal panel tail every block inspector ends with -- appearance plus the
   // block actions -- and the canvas overlay bar that carries the same verbs moved to
-  // editor/block-actions.js. It owns blockToolbarSep and provides it live from there.
+  // editor/block-actions.js. uio-E-M01 took the bar off the canvas overlay bar and attached it to
+  // the selected block, so the separator it used to mint between the view tools and the verbs is gone.
   var renderBlockActionsSection = VE.bind("renderBlockActionsSection");
   var ensureBlockToolbar = VE.bind("ensureBlockToolbar");
   var hideBlockToolbar = VE.bind("hideBlockToolbar");
@@ -5383,6 +5384,12 @@
     if (typeof positionBlockToolbar === "function") positionBlockToolbar(); // re-centre the static toolbar over the resized canvas
   }
   window.addEventListener("resize", function () { if (typeof positionBlockToolbar === "function") positionBlockToolbar(); });
+  // uio-E-M01: the toolbar is placed off its block's rect, so anything that moves that rect has to
+  // re-place it. Panning/zooming the canvas scrolls this viewport, which covers both.
+  (function () {
+    var vp = document.getElementById("canvas-viewport");
+    if (vp) vp.addEventListener("scroll", function () { if (typeof positionBlockToolbar === "function") positionBlockToolbar(); }, { passive: true });
+  })();
   try { if (localStorage.getItem(PANELS_HIDDEN_KEY) === "1") applyPanelsHidden(true); } catch (_) {}
 
   // ---- perf HUD (diagnostic; editor chrome, OFF by default, never ships) -------------
@@ -6557,6 +6564,7 @@
     isTextTarget: isTextTarget,
     convertTextListBlockType: convertTextListBlockType,
     buildFormatToggleBar: buildFormatToggleBar,
+    positionBlockToolbar: positionBlockToolbar,
     sanitizeFieldHtml: sanitizeFieldHtml,
     sanitizeText: sanitizeText,
     scheduleSpellcheck: scheduleSpellcheck,
