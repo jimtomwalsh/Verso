@@ -139,16 +139,23 @@
   padding: var(--space-md);
 }
 
-/* Build-time visibility aid: unfilled image / HTML-interaction slots glare NEON PINK on
+/* Build-time visibility aid: unfilled HTML-interaction slots glare NEON PINK on
    the authoring canvas so they can't be missed. Scoped to .course-root:not([data-env]) =
    the authoring canvas ONLY (demo + export both stamp data-env="runtime", export.js:371),
    so a placeholder NEVER ships hot-pink in a course and never shows in preview. */
-.course-root:not([data-env]) .block-image--empty,
 .course-root:not([data-env]) .embed__empty-hint,
 .course-root:not([data-env]) .embed--empty .embed__iframe {
   border: 2px dashed #ff2bd6;
   background: repeating-linear-gradient(45deg, rgba(255, 43, 214, 0.10), rgba(255, 43, 214, 0.10) 12px, rgba(255, 43, 214, 0.22) 12px, rgba(255, 43, 214, 0.22) 24px);
 }
+/* uio-E-M05 (EDIT-14): the image slot IS the button. The hatch shrank to a quiet 1px pink
+   border + the small "Image" label, so it survives at any zoom, and the slot invites the
+   click the editor wires (inline upload / URL picker). Same authoring-only scope. */
+.course-root:not([data-env]) .block-image--empty {
+  border: 1px solid #ff2bd6;
+  cursor: pointer;
+}
+.course-root:not([data-env]) .block-image--empty:hover { background: rgba(255, 43, 214, 0.08); }
 .course-root:not([data-env]) .block-image--empty,
 .course-root:not([data-env]) .embed__empty-title,
 .course-root:not([data-env]) .embed__empty-sub,

@@ -1413,9 +1413,11 @@
         }
         return fig;
       }
+      // uio-E-M05 (EDIT-14): the teaching sentence is gone -- on the authoring canvas the slot
+      // itself is clickable (the editor decorates it), so a label is all the placeholder needs,
+      // and it survives at any zoom. Pure: editor and export draw the same markup.
       var ph = el("div", "block-image block-image--empty");
       ph.appendChild(el("div", "embed__empty-title", "Image"));
-      ph.appendChild(el("div", "embed__empty-sub", "Select this block, then add a URL or upload in the panel"));
       return ph;
     },
 

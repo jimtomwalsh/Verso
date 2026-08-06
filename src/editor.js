@@ -2976,6 +2976,7 @@
     decorateVariantVersionBadges(frame); // #148: re-add the version-cycle badge on this page's image blocks
     decorateStyleAudit(frame); // #145: re-mark unstyled text blocks on this page
     decorateSourceLinks(frame); // source-link 03: re-add the link indicator on this page's linked blocks
+    decorateEmptyImageSlots(frame); // uio-E-M05: the empty image slot is the button
   }
   // Rebuild only the page a block lives on (falls back to full mount if it can't be located).
   function reapplyBlock(block) {
@@ -3014,6 +3015,7 @@
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
     decorateSourceLinks(); // source-link 03: link indicator on placed source-linked blocks
+    decorateEmptyImageSlots(); // uio-E-M05: the empty image slot is the button
   }
   window.__reapplyPage = reapplyPage; // perf/test hook
   window.__perf = { // perf-measurement hooks (harmless; used to profile the re-render paths)
@@ -4315,6 +4317,50 @@
     });
   }
 
+  // uio-E-M05 (EDIT-14): ONE upload flow for the two surfaces that offer it -- the inspector's
+  // Content section and the empty slot's inline picker -- so they cannot drift (the E-C06 lesson:
+  // different controls, one implementation).
+  function pickImageFileFor(block) {
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () { pushHistory(); block.src = assetRef(r.result, f); reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block"); };
+      r.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  // uio-E-M05 (EDIT-14): the empty image slot IS the button. The placeholder used to teach with a
+  // sentence ("Select this block, then add a URL or upload in the panel") -- an instruction that
+  // admitted the slot was not wired to the action, unreadable at canvas zoom anyway. Clicking the
+  // slot now opens a small inline picker with the SAME two actions the inspector offers (upload /
+  // URL; there is no image library to offer). Editor chrome only: the placeholder render.js draws
+  // stays pure, this pass decorates it on the authoring canvas the way source-link chips are.
+  function decorateEmptyImageSlots(scope) {
+    var root = scope || canvas; if (!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll(".block-image--empty"), function (ph) {
+      if (ph.__slotWired) return; ph.__slotWired = true;
+      ph.title = "Add an image — upload a file or paste a URL";
+      ph.addEventListener("click", function (e) {
+        var node = ph.closest("[data-id]") || ph;
+        var b = node.__block || (ph.closest(".canvas-block") && ph.closest(".canvas-block").__block);
+        if (!b) return;
+        e.stopPropagation(); e.preventDefault();
+        reselectBlockNode(b, "block");
+        showContextMenu(e.clientX, e.clientY, [
+          { label: "Upload image…", onClick: function () { pickImageFileFor(b); } },
+          { label: "Image URL…", onClick: function () {
+              promptModal("Image URL", "https://…", b.src || "", function (v) {
+                if (v == null || !String(v).trim()) return;
+                pushHistory(); b.src = String(v).trim();
+                reapplyStructural(findPageOfBlock(b)); reselectBlockNode(b, "block");
+              });
+            } }
+        ]);
+      });
+    });
+  }
+
   function renderImageContent(block) {
       // #160: canonical taxonomy — Content (source / alt / caption), Layout (size / fit),
       // Appearance (radius / blend), Behaviour (zoom), Light/Dark (contrast / palette /
@@ -4332,16 +4378,7 @@
       try {
       fieldRow("Image URL", block.src, function (v) { block.src = v; reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block"); }, "https://… or upload below");
       var up = h("button", "prop-btn", "Upload image…");
-      up.addEventListener("click", function () {
-        var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
-        inp.addEventListener("change", function () {
-          var f = inp.files && inp.files[0]; if (!f) return;
-          var r = new FileReader();
-          r.onload = function () { pushHistory(); block.src = assetRef(r.result, f); reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block"); };
-          r.readAsDataURL(f);
-        });
-        inp.click();
-      });
+      up.addEventListener("click", function () { pickImageFileFor(block); });
       inspector.appendChild(up);
       if (!hasImage) {
         inspector.appendChild(h("div", "insp-hint", "Add an image above (paste a URL or upload) to set alt text, size, and light/dark options."));
@@ -5336,6 +5373,7 @@
     // uio-E-M03: mount never re-added the source-link chips -- boot, switchDoc, undo and setDoc all
     // dropped them until a page-level reapply happened to run. Same decoration the reapply paths call.
     decorateSourceLinks();
+    decorateEmptyImageSlots(); // uio-E-M05: the empty image slot is the button
     renderCommentPins(); // §12: re-project review pins (canvas.innerHTML was cleared)
     if (collabChrome()) { collabChrome().ensure(); collabChrome().reproject(); } // ticket 11: presence chrome (server-mode only; inert in standalone)
 
