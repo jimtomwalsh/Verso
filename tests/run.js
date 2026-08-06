@@ -13084,6 +13084,11 @@ section("workspace transfer");
   ok("the workspace section is SYSTEM-level, beside the other things that outlive one document",
     /\{ key: "workspace", title: "Workspace", build: buildWorkspaceBody \}/.test(SS) &&
     SS.indexOf('key: "workspace"') < SS.indexOf('key: "docType"'));
+  // The library section holds its own Export Library (.json), and the workspace file already
+  // CARRIES the library -- so the narrower control must be met as a subset of the wider one, not
+  // a few pixels above it where it gets mistaken for it.
+  ok("the whole-workspace export reads BEFORE the library slice of it",
+    SS.indexOf('key: "workspace"') < SS.indexOf('key: "library"'));
   ok("the settings section states the media gap where a move is planned",
     /Images are NOT carried/.test(SS) && /also export that document as \.verso/.test(SS));
   ok("the pure core loads before editor.js", IDX.indexOf("src/workspace-transfer.js") !== -1 &&

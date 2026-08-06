@@ -230,11 +230,18 @@
             ifBody.appendChild(h("div", "insp-hint", "Shows the live document model (JSON) below the inspector for debugging. Off by default; editor-only, never exported."));
           } },
         { key: "preview", title: "Preview sizes", build: buildPreviewSizesBody },
-        { key: "library", title: "Component Library", build: buildLibraryBody },
         // A workspace is machine-level -- every document, the library and the products at once --
         // so it belongs in System beside the other things that outlive one document, not in
         // Project beside that document's own header and backup.
-        { key: "workspace", title: "Workspace", build: buildWorkspaceBody }
+        //
+        // ABOVE Component Library, deliberately. The library section carries its own "Transfer"
+        // sub-section with an Export Library (.json) button, and the two sat as near-identical
+        // export pairs a few pixels apart -- one of which is a SUBSET of the other, since the
+        // workspace file already carries the library. James went looking for the workspace export
+        // and found the library one. The bigger scope reads first, so the narrower control is met
+        // as a subset of something already understood rather than mistaken for it.
+        { key: "workspace", title: "Workspace", build: buildWorkspaceBody },
+        { key: "library", title: "Component Library", build: buildLibraryBody }
       ];
       return [
         { key: "docType", title: "Document type", build: buildDocTypeBody },
