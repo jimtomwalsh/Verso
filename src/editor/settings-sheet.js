@@ -29,7 +29,7 @@
       "BP_MIN", "BP_MAX", "currentCell", "hfSectionOpts", "backupSlug", "bpClampDim",
       "twoUp", "segmentedLive", "setCellGeo", "setCellInteractive", "colourControl", "applyCanvasBg",
       "BG_DEFAULT", "uiThemeIsLight", "applyUiTheme", "spellcheckOn", "setSpellcheckEnabled", "devToolsOn",
-      "setDevToolsEnabled", "buildLibraryBody", "buildPublishDestinationsBody", "buildHeaderBody", "buildFooterBody", "buildHeaderFooterDefaultBody", "buildLayoutBody",
+      "setDevToolsEnabled", "buildLibraryBody", "buildPublishDestinationsBody", "buildPublishPresetsBody", "buildHeaderBody", "buildFooterBody", "buildHeaderFooterDefaultBody", "buildLayoutBody",
       "renderThemeControls", "buildFontsBody", "buildComponentsBody", "buildPipelineBody", "footerCourseNav", "crossRefRow",
       "courseNavNests", "sectionGroup", "MOD_KEY", "wirePanelResizer", "togglePanels", "reapplyLayout",
       "backupMode", "backupHandleSet", "bindProjectFolder", "reconnectBackupFolder", "repeatedList", "confirmModal",
@@ -250,7 +250,10 @@
         // uio-P-M02: named publish destinations. A library of named things that outlives any one
         // document, like the two above it — so it lives where they live rather than in a modal of
         // its own. Publish's per-output popover routes here rather than managing them inline.
-        { key: "destinations", title: "Publish destinations", build: E.buildPublishDestinationsBody }
+        { key: "destinations", title: "Publish destinations", build: E.buildPublishDestinationsBody },
+        // uio-P-M04: output presets, beside the destinations they publish to. Same reasoning — a
+        // library of named things, managed where the other libraries are, not in a hover menu.
+        { key: "presets", title: "Output presets", build: E.buildPublishPresetsBody }
       ];
       return [
         { key: "docType", title: "Document type", build: buildDocTypeBody },

@@ -16820,6 +16820,38 @@ section("uio-P-M02: named publish destinations");
   ok("the library has a chrome home", /\.publish-destlib__row \{/.test(EDITOR_CSS) && /\.publish-destrow__dests \{/.test(EDITOR_CSS));
 })();
 
+// uio-P-M03 (PUB-06) + uio-P-M04 (PUB-07): one set of option controls, and a preset library.
+// The export dialog and the queue's presets were the same engine drawing two sets of controls, so
+// "which one do I use?" had no answer; and presets could only be managed from a per-row hover menu,
+// where a shared one could be deleted in passing.
+section("uio-P-M03/P-M04: one options surface + a preset library");
+(function () {
+  var x = src("src/export.js"), e = src("src/editor.js"), sheet = src("src/editor/settings-sheet.js");
+  // --- ONE builder, both surfaces ---
+  ok("the package-shaped rows are one shared builder", /function buildPresetOptionRows\(opts, hostBox, onChange, scan\)/.test(x) && /buildPresetOptionRows: buildPresetOptionRows/.test(x));
+  ok("the export dialog draws its option rows from it", /buildPresetOptionRows\(opts, box, function \(\) \{ updateName\(\); \}, scan\);/.test(x));
+  ok("the dialog no longer owns a second copy of those controls", (x.match(/section\("Optimise media"\)/g) || []).length === 1 && (x.match(/toggle\("Embed Exo 2 fonts", "embedFonts"\)/g) || []).length === 1);
+  ok("the dialog keeps only what a preset cannot carry (version / variants / folders)", /section\("Variant"\)/.test(x) && /section\("Version"\)/.test(x));
+  ok("the editor opens from the row's preset chip", /label: "Edit options…", onClick: function \(\) \{ openPublishOptionsEditor\(rowId\); \}/.test(e) && /function openPublishOptionsEditor\(rowId\)/.test(e));
+
+  // --- a per-row override is real, and reaches the RUN ---
+  ok("one resolver answers what a row publishes with", /function publishRowResolvedOptions\(row\)/.test(e));
+  ok("an override rides the run's own resolver, not just the editor", /if \(row\.optionsOverride\) Object\.keys\(row\.optionsOverride\)\.forEach\(function \(k\) \{ out\[k\] = row\.optionsOverride\[k\]; \}\);/.test(src("src/editor/publish.js")));
+  ok("editing an option back to matching drops the override rather than claiming a difference", /if \(next\[k\] !== base\[k\]\) over\[k\] = next\[k\];/.test(e) && /if \(Object\.keys\(over\)\.length\) row\.optionsOverride = over; else delete row\.optionsOverride;/.test(e));
+  // The bug the browser found: a preset stores only what it CHANGES, so comparing an edit against
+  // its raw object compares against undefined and records a "difference" that is just the default.
+  ok("the comparison base is the RESOLVED preset, not its sparse own options", /function publishPresetBaseOptions\(presetId\)/.test(e) && /var base = publishPresetBaseOptions\(row\.preset \|\| "master"\);/.test(e) && !/var base = PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\);/.test(e));
+  ok("saving as a preset clears the row's override, so the row stops diverging from what it just named", /row\.preset = np\.id; delete row\.optionsOverride;/.test(e));
+
+  // --- the library ---
+  ok("presets are managed in a sheet section, beside the destinations", /\{ key: "presets", title: "Output presets", build: E\.buildPublishPresetsBody \}/.test(sheet) && /key: "destinations"[\s\S]{0,300}key: "presets"/.test(sheet));
+  ok("the chip only chooses — rename and delete left the hover menu", /label: "Manage presets…"/.test(e) && !/label: "Delete preset", danger: true/.test(e));
+  ok("a row states how many queued rows use it", /function publishPresetUsage\(id\)/.test(e) && /\.publish-destlib__use \{/.test(EDITOR_CSS));
+  ok("and what it actually changes, against the shipped defaults", /function publishPresetSummary\(p\)/.test(e) && /Same as the shipped defaults\./.test(e));
+  ok("deleting says how many rows fall back to Master, and moves them", /queued row falls" : " queued rows fall"\) \+ " back to Master\."/.test(e) && /if \(\(r\.preset \|\| "master"\) === p\.id\) r\.preset = "master";/.test(e));
+  ok("a built-in preset offers no rename or delete", /if \(!PP\.isBuiltin\(p\.id\)\) \{\s*\n\s*var acts = h\("div", "publish-destlib__acts"\);/.test(e));
+})();
+
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
 // label, track whose fill carries the band tone, value in the same tone -- with a distinct
 // "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure

@@ -207,6 +207,10 @@
       var base = (X && X.defaultOptions) ? X.defaultOptions() : {};
       if (!P || !row) return base;
       var out = Object.assign(base, P.optionsFor(presets(), row.preset || "master"));
+      // uio-P-M03: options edited for THIS row alone sit on top of its preset. Applied here, in the
+      // one resolver the run and every "what will this write" readout already share, so an override
+      // cannot be visible in the editor and absent from the package.
+      if (row.optionsOverride) Object.keys(row.optionsOverride).forEach(function (k) { out[k] = row.optionsOverride[k]; });
       if (variant !== undefined) out.variant = variant || null;
       // Name the package for THIS row's document, not for whichever one is open. The run hands
       // these same options to buildPackage, so the filename shown is the filename that lands.
