@@ -46,6 +46,14 @@ a refresh and a stage-switch.
     published. Informational only: it never blocks or warns, and it clears the moment you publish
     the document again. A document that has **never published** shows no drift badge, because there
     is nothing for it to have drifted from — the line beside it already says "Never published".
+- **Named destinations.** A folder with a name your team recognises — "LMS drop · production",
+  "Client share" — defined once and pointed at from rows, instead of re-picking a path each time.
+  Manage them under **Settings → System → Publish destinations**: add one, choose its folder,
+  rename it, or delete it. Re-point a destination there and **every output using it moves with
+  it**, which is the whole reason it has a name. On a queue row, open the destination chip and
+  pick one; the chip then shows the destination's name. A folder chosen for that one output still
+  wins over a named destination, and choosing either clears the other so only one answer is ever
+  in play. Delete a destination and its rows fall back to inheriting the Product folder.
 - **Reviewing the drift.** A queued document whose source has moved carries a **Review source
   drift** line you can open. Each changed passage gets a row naming where it sits in its source,
   a line-by-line **diff** of the words you published against the words source has now, and three

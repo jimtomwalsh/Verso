@@ -16763,6 +16763,63 @@ section("uio-P-M01: per-passage drift + review");
   ok("the disclosure uses the canonical caret, like every other <details>", /sum\.appendChild\(h\("span", "caret"\)\)/.test(e) && /\.publish-drift\[open\] > \.publish-drift__summary \.caret \{ transform: rotate\(90deg\); \}/.test(EDITOR_CSS));
 })();
 
+// uio-P-M02 (PUB-05): a destination is a folder with a NAME, defined once and referenced by rows.
+// A path answers "where" but never "which one"; a name is what a team recognises and what makes
+// re-pointing every output that uses it one edit in one place.
+section("uio-P-M02: named publish destinations");
+(function () {
+  var PA = require(path.join(ROOT, "src/publish-paths.js"));
+  var ctx = { productId: "p1", productName: "Meridian", docId: "D1", docCode: "MER-FG-01", variant: null };
+  var key = PA.pathKey("D1", null);
+
+  var s = PA.create();
+  PA.setDestination(s, "d1", "LMS drop · production", "lms-prod");
+  PA.setDestination(s, "d2", "Client share", "client");
+  ok("destinations list by name, so the picker is stable", PA.destinations(s).map(function (d) { return d.name; }).join("|") === "Client share|LMS drop · production");
+
+  // --- resolution: named sits between the per-output override and the Product root ---
+  PA.setRoot(s, "p1", "product-root");
+  ok("with no pointer, an output still inherits the Product root", PA.resolve(s, ctx).kind === "root");
+  PA.setRowDestination(s, key, "d1");
+  var r = PA.resolve(s, ctx);
+  ok("a named destination beats the inherited root", r.kind === "named" && r.label === "lms-prod" && r.name === "LMS drop · production");
+  ok("it nests by document and variant, so one destination holds many documents", r.segments.join("/") === "Meridian/MER-FG-01");
+  ok("it carries its own handle key, distinct from the root's", r.handleKey === PA.destHandleKey("d1") && r.handleKey !== PA.rootHandleKey("p1"));
+  PA.setRowPath(s, key, "one-off");
+  ok("an explicit folder for this one output still beats a named destination", PA.resolve(s, ctx).kind === "row");
+  PA.clearRowPath(s, key);
+  ok("clearing it falls back to the named destination, not to the root", PA.resolve(s, ctx).kind === "named");
+
+  // --- deleting a destination must not strand the rows that used it ---
+  PA.removeDestination(s, "d1");
+  ok("removing a destination un-points every row that used it", PA.rowDestinationId(s, key) === null && PA.resolve(s, ctx).kind === "root");
+
+  // --- persistence, including the dangling-pointer rule ---
+  var s2 = PA.create();
+  PA.setDestination(s2, "dA", "Partner portal", "partner");
+  PA.setRowDestination(s2, key, "dA");
+  var round = PA.fromJSON(JSON.parse(JSON.stringify(PA.toJSON(s2))));
+  ok("destinations and pointers round-trip", round.dests.dA.name === "Partner portal" && PA.rowDestinationId(round, key) === "dA");
+  var orphan = PA.fromJSON({ version: 1, dests: {}, rowDest: (function () { var o = {}; o[key] = "gone"; return o; })() });
+  ok("a pointer at a destination that did not survive the load is dropped, never published blind", PA.rowDestinationId(orphan, key) === null);
+  var unnamed = PA.fromJSON({ version: 1, dests: { x: { name: "", label: "somewhere" } } });
+  ok("a destination with no name is dropped rather than kept unnameable", PA.destinations(unnamed).length === 0);
+
+  // --- the wiring ---
+  var e = src("src/editor.js");
+  ok("the row popover offers the known destinations", /var known = PA\.destinations\(publishPaths\(\)\);/.test(e) && /PA\.setRowDestination\(publishPaths\(\), dest\.key, on \? null : dd\.id\)/.test(e));
+  ok("choosing one clears a conflicting one-off folder, and vice versa", /if \(!on\) PA\.clearRowPath\(publishPaths\(\), dest\.key\);/.test(e) && /PA\.setRowDestination\(publishPaths\(\), dest\.key, null\); \/\/ an explicit folder replaces a named one/.test(e));
+  ok("managing them escalates out of the per-row popover", /"Manage destinations…"/.test(e) && /function openPublishDestinations\(\)/.test(e));
+  ok("the library renames, re-points and deletes with a confirm", /promptModal\("Rename destination"/.test(e) && /pickPublishDir\(PA\.destHandleKey\(d\.id\)\)/.test(e) && /confirmModal\("Delete destination"/.test(e));
+  // Gate finding: a library of named things that outlives a document is a SHEET section — that is
+  // where Component Library, Custom fonts and Glossary all live. A modal is for a destructive
+  // confirm or a blocking run, so this is not one.
+  ok("the library is a settings-sheet section, not a modal of its own", /\{ key: "destinations", title: "Publish destinations", build: E\.buildPublishDestinationsBody \}/.test(src("src/editor/settings-sheet.js")) && /function buildPublishDestinationsBody\(host\)/.test(e));
+  ok("it sits beside the other machine-level libraries in System", /key: "library", title: "Component Library"[\s\S]{0,400}key: "destinations"/.test(src("src/editor/settings-sheet.js")));
+  ok("the popover routes to that section rather than opening its own surface", /function openPublishDestinations\(\) \{ openSettingsSection\("system", "destinations"\); \}/.test(e));
+  ok("the library has a chrome home", /\.publish-destlib__row \{/.test(EDITOR_CSS) && /\.publish-destrow__dests \{/.test(EDITOR_CSS));
+})();
+
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
 // label, track whose fill carries the band tone, value in the same tone -- with a distinct
 // "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure

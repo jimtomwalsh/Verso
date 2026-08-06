@@ -29,7 +29,7 @@
       "BP_MIN", "BP_MAX", "currentCell", "hfSectionOpts", "backupSlug", "bpClampDim",
       "twoUp", "segmentedLive", "setCellGeo", "setCellInteractive", "colourControl", "applyCanvasBg",
       "BG_DEFAULT", "uiThemeIsLight", "applyUiTheme", "spellcheckOn", "setSpellcheckEnabled", "devToolsOn",
-      "setDevToolsEnabled", "buildLibraryBody", "buildHeaderBody", "buildFooterBody", "buildHeaderFooterDefaultBody", "buildLayoutBody",
+      "setDevToolsEnabled", "buildLibraryBody", "buildPublishDestinationsBody", "buildHeaderBody", "buildFooterBody", "buildHeaderFooterDefaultBody", "buildLayoutBody",
       "renderThemeControls", "buildFontsBody", "buildComponentsBody", "buildPipelineBody", "footerCourseNav", "crossRefRow",
       "courseNavNests", "sectionGroup", "MOD_KEY", "wirePanelResizer", "togglePanels", "reapplyLayout",
       "backupMode", "backupHandleSet", "bindProjectFolder", "reconnectBackupFolder", "repeatedList", "confirmModal",
@@ -246,7 +246,11 @@
         // and found the library one. The bigger scope reads first, so the narrower control is met
         // as a subset of something already understood rather than mistaken for it.
         { key: "workspace", title: "Workspace", build: buildWorkspaceBody },
-        { key: "library", title: "Component Library", build: buildLibraryBody }
+        { key: "library", title: "Component Library", build: buildLibraryBody },
+        // uio-P-M02: named publish destinations. A library of named things that outlives any one
+        // document, like the two above it — so it lives where they live rather than in a modal of
+        // its own. Publish's per-output popover routes here rather than managing them inline.
+        { key: "destinations", title: "Publish destinations", build: E.buildPublishDestinationsBody }
       ];
       return [
         { key: "docType", title: "Document type", build: buildDocTypeBody },
