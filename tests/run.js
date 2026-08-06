@@ -12889,6 +12889,71 @@ section("GH327 new document");
     /return null;/.test(DOCS) && /var made = createBlankDoc\(/.test(DOCS) && /if \(!made\) return;/.test(DOCS));
 })();
 
+// ---- loading the sample workspace on demand -------------------------------
+// Shipping the set seeded into empty stores made it invisible to the only people who needed it:
+// James hard-refreshed staging, saw none of it, and was right -- his workspace already had his own
+// products in it, so all three seeds skipped. A set nobody testing can reach is not a set.
+//
+// The load is ADDITIVE by construction. Overwriting would destroy real work to install a demo, and
+// renaming would leave two of everything after a second run, so an id already present is skipped.
+// That makes it idempotent, which is the property the tests below are really pinning down.
+section("load sample workspace");
+(function () {
+  var D;
+  try { D = require(path.join(ROOT, "src/editor/documents.js"))._pure; } catch (e) { ok("require documents.js", false); return; }
+  var DOCS = src("src/editor/documents.js"), FS = src("src/editor/files.js"), ED = src("src/editor.js");
+  var shipped = {
+    products: { p1: {}, p2: {} },
+    sourceDocs: { s1: {}, s2: {} },
+    designDocs: { d1: {}, d2: {}, d3: {} }
+  };
+
+  var all = D.sampleWorkspacePlan(shipped, { products: {}, components: {}, registry: {} });
+  ok("into an empty workspace, everything is added and nothing skipped",
+    all.total === 7 && all.skipped.length === 0);
+  // The case that started this: a workspace with the author's OWN products in it.
+  var theirs = D.sampleWorkspacePlan(shipped, {
+    products: { "prod-radar-a": {}, "prod-radar-b": {} }, components: {}, registry: { "THEIR-DOC": {} }
+  });
+  ok("someone else's products and documents do not block the load, and are not counted",
+    theirs.total === 7 && theirs.skipped.length === 0);
+  var partial = D.sampleWorkspacePlan(shipped, { products: { p1: {} }, components: { s2: {} }, registry: { d1: {}, d3: {} } });
+  ok("what is already here is SKIPPED, never overwritten and never duplicated",
+    partial.total === 3 && partial.skipped.length === 4 &&
+    partial.products.join() === "p2" && partial.sourceDocs.join() === "s1" && partial.designDocs.join() === "d2");
+  var none = D.sampleWorkspacePlan(shipped, { products: shipped.products, components: shipped.sourceDocs, registry: shipped.designDocs });
+  ok("loading it twice is a no-op -- the second run adds nothing", none.total === 0 && none.skipped.length === 7);
+  ok("a missing or empty shipped set plans nothing rather than throwing",
+    D.sampleWorkspacePlan(null, null).total === 0);
+
+  // What the confirm SAYS is built from the plan, so it cannot promise what the plan will not do.
+  ok("the confirm counts what will actually be added, in plain words",
+    D.sampleWorkspaceSummary(all) === "Adds 2 products, 2 source documents and 3 design documents alongside your own work. Nothing you already have is changed or replaced.");
+  ok("...and says what it is leaving alone when some of it is already here",
+    /^Adds 1 product, 1 source document and 1 design document alongside/.test(D.sampleWorkspaceSummary(partial)) &&
+    /4 items are already here and will be left alone\.$/.test(D.sampleWorkspaceSummary(partial)));
+  ok("singulars are singular", /Adds 1 product alongside/.test(
+    D.sampleWorkspaceSummary({ products: ["p"], sourceDocs: [], designDocs: [], skipped: [], total: 1 })));
+  ok("nothing to add says so rather than offering an action that would do nothing",
+    /already here\. Nothing would be added\./.test(D.sampleWorkspaceSummary(none)));
+
+  // --- and it is reachable, which was the whole problem ---
+  ok("Files' New menu offers it", /label: "Sample workspace…", onClick: function \(\) \{ E\.loadSampleWorkspace\(\); \}/.test(FS));
+  ok("it is stated BEFORE it is done, and the destructive-sounding word is not used",
+    /confirmModal\("Add the sample workspace\?", summary,/.test(DOCS) && /okLabel: "Add"/.test(DOCS));
+  ok("all three stores are written, because that is where a workspace lives",
+    /E\.saveProducts\(\); E\.saveLibrary\(\); saveRegistry\(registry\);/.test(DOCS));
+  ok("it lands FILES, not a document -- it brought in several", (function () {
+    var body = (DOCS.match(/function loadSampleWorkspace\(\)[\s\S]*?\n    \}/) || [""])[0];
+    return /setStage\("files"\)/.test(body) && /invalidate\("files"\)/.test(body);
+  })());
+  ok("the shipped data is CLONED in, so loading it never aliases the shipping literal",
+    /clone\(shipped\.products\[id\]\)/.test(DOCS) && /clone\(shipped\.sourceDocs\[id\]\)/.test(DOCS) &&
+    /clone\(shipped\.designDocs\[code\]\)/.test(DOCS));
+  ok("editor.js binds and provides the entry point", /VE\.bind\("loadSampleWorkspace"\)/.test(ED) &&
+    /loadSampleWorkspace: loadSampleWorkspace,/.test(ED));
+})();
+
 // ---- the shipped sample workspace -----------------------------------------
 // The set exists to make every surface testable against something real, so what it must CONTAIN is
 // the requirement, and these assertions are that requirement written down. An edit that quietly
