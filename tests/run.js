@@ -12963,6 +12963,101 @@ section("load sample workspace");
 // Two of the claims are checked through the REAL model rather than by reading the literal: the
 // stale alternate and the broken mark are only worth shipping if SourceDoc reaches the same verdict
 // the data claims, and a hand-set flag would be erased the first time a mark was refreshed.
+// ---- moving a whole working environment --------------------------------------
+// Source documents and products had NO export at all, so nothing could move between the Mac app,
+// staging and the browser. This is the file that carries them -- and the planner that decides what
+// an import would do BEFORE it does it, because James's constraint on the whole ticket is
+// "be conscious of data loss": no silent overwrite, no unnamed drop, no global switch answering a
+// per-document question.
+section("workspace transfer");
+(function () {
+  var W;
+  try { W = require(path.join(ROOT, "src/workspace-transfer.js")); } catch (e) { ok("require workspace-transfer.js", false); return; }
+  var stores = {
+    registry: { "A-1": { meta: { title: "A", code: "A-1" }, pages: [{ blocks: [{ src: "asset:aaa111" }] }] },
+                "B-2": { meta: { title: "B", code: "B-2" }, pages: [] } },
+    library: { components: { "topic-x": { kind: "topic", name: "X" }, "comp-y": { name: "Y" } } },
+    products: { "prod-1": { id: "prod-1", name: "One" } },
+    classification: { levels: [{ id: "class_open", rank: 0 }], defaultLevelId: "class_open" }
+  };
+  var file = W.buildWorkspaceFile(stores, { now: 1785990000000, origin: "test" });
+
+  // --- the file ---
+  ok("the file carries every store, including the two that had no export at all",
+    !!file.stores.registry && !!file.stores.library && !!file.stores.products && !!file.stores.classification);
+  ok("it is a deep copy -- mutating the file cannot reach back into the live stores", (function () {
+    file.stores.registry["A-1"].meta.title = "mutated";
+    var still = stores.registry["A-1"].meta.title === "A";
+    file.stores.registry["A-1"].meta.title = "A";
+    return still;
+  })());
+  ok("no clock is read -- the same workspace produces the same file", file.exportedAt === 1785990000000 &&
+    !/Date\.now|Math\.random/.test(src("src/workspace-transfer.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+  // The measured decision: media is NAMED, not carried.
+  ok("media is named rather than carried, and the file says so about itself",
+    file.media.carried === false && file.media.assetRefs.join() === "aaa111" && /not carried/.test(file.media.note));
+  ok("asset refs are found wherever they sit, by reading the serialised stores",
+    W.assetRefsIn({ registry: { d: { deep: { nested: [{ logo: "asset:zz9" }] } } } }).join() === "zz9");
+
+  // --- reading one back, and refusing what it cannot vouch for ---
+  var read = W.readWorkspaceFile(JSON.parse(JSON.stringify(file)));
+  ok("a workspace file reads back", read.ok && !read.errors.length);
+  ok("a file that is not a workspace is REFUSED, not repaired", !W.readWorkspaceFile({ pages: [] }).ok);
+  ok("a workspace from a newer Verso is refused rather than half-understood",
+    !W.readWorkspaceFile({ format: "verso-workspace", formatVersion: 99, stores: { registry: {} } }).ok);
+  ok("an empty workspace file is refused -- importing nothing over something is not a no-op",
+    !W.readWorkspaceFile({ format: "verso-workspace", formatVersion: 1, stores: {} }).ok);
+
+  // --- the plan, which is the whole point ---
+  var empty = { registry: {}, library: { components: {} }, products: {} };
+  var intoEmpty = W.planImport(file, empty, "replace");
+  ok("replace into an empty destination brings everything and drops nothing",
+    intoEmpty.documents.arriving.length === 2 && intoEmpty.library.arriving.length === 2 &&
+    intoEmpty.products.arriving.length === 1 && W.droppedCount(intoEmpty) === 0);
+  var dest = { registry: { "A-1": {}, "KEEP-9": {} }, library: { components: { "comp-y": {}, "keep-lib": {} } }, products: { "prod-9": {} } };
+  var rep = W.planImport(file, dest, "replace");
+  ok("REPLACE names what it would destroy, by id -- a count is not enough to agree to losing work by",
+    rep.documents.dropped.join() === "KEEP-9" && rep.library.dropped.join() === "keep-lib" &&
+    rep.products.dropped.join() === "prod-9" && W.droppedCount(rep) === 3);
+  var mer = W.planImport(file, dest, "merge");
+  ok("MERGE drops nothing, which is the whole difference between the two", W.droppedCount(mer) === 0);
+  ok("a collision is REPORTED per id, not settled by one global switch",
+    mer.documents.collisions.length === 1 && mer.documents.collisions[0].id === "A-1" &&
+    mer.library.collisions.length === 1);
+  ok("an unknown mode is treated as replace, never as a silent merge", W.planImport(file, dest, "nonsense").mode === "replace");
+  // Identity is the W00 rule, injected rather than re-derived (GH #266).
+  ok("document identity uses the caller's findRegistryId, so it cannot drift from the app's",
+    W.planImport(file, { registry: { "a-1": {} } }, "merge", function (reg, code) {
+      return Object.keys(reg).filter(function (k) { return k.toLowerCase() === String(code).toLowerCase(); })[0] || null;
+    }).documents.collisions.length === 1);
+
+  // --- applying it ---
+  var applied = W.applyImport(file, empty, intoEmpty, {});
+  ok("a replace into empty is LOSSLESS", JSON.stringify(applied.registry) === JSON.stringify(stores.registry) &&
+    JSON.stringify(applied.library) === JSON.stringify(stores.library) &&
+    JSON.stringify(applied.products) === JSON.stringify(stores.products));
+  ok("applying never mutates what it was given -- the caller still holds their workspace",
+    Object.keys(dest.registry).length === 2 && Object.keys(W.applyImport(file, dest, mer, {}).registry).length === 3);
+  var keptByDefault = W.applyImport(file, dest, mer, {});
+  ok("an UNANSWERED collision defaults to keeping what is already there",
+    JSON.stringify(keptByDefault.registry["A-1"]) === "{}");
+  ok("...and everything that did not collide still arrives", !!keptByDefault.registry["B-2"] && !!keptByDefault.registry["KEEP-9"]);
+  ok("answering 'replace' takes the incoming onto the id already here",
+    W.applyImport(file, dest, mer, { "A-1": "replace" }).registry["A-1"].meta.title === "A");
+  ok("answering 'both' brings it in ALONGSIDE, under a new id, losing neither", (function () {
+    var r = W.applyImport(file, dest, mer, { "A-1": "both" }, function (id) { return id + "-2"; }).registry;
+    return JSON.stringify(r["A-1"]) === "{}" && r["A-1-2"].meta.title === "A";
+  })());
+  ok("a replace adopts the file's classification; a merge keeps the one already configured",
+    W.applyImport(file, { classification: { levels: [], defaultLevelId: "mine" } }, rep, {}).classification.defaultLevelId === "class_open" &&
+    W.applyImport(file, { classification: { levels: [], defaultLevelId: "mine" } }, mer, {}).classification.defaultLevelId === "mine");
+
+  // --- and it says which documents will render with holes ---
+  ok("media the destination cannot resolve is named, so a document that will look broken says so",
+    W.missingMedia(intoEmpty, function (id) { return id === "present"; }).join() === "aaa111" &&
+    W.missingMedia(intoEmpty, function () { return true; }).length === 0);
+})();
+
 section("sample workspace");
 (function () {
   var W, SD, C;
