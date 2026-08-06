@@ -10800,7 +10800,9 @@ section("project auto-backup");
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(ebk) && /saveBackupHandle\(E\.activeDocId, h\)/.test(ebk));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(ebk) && /Backup OFF — this course is NOT being saved/.test(ebk) && /No backup folder — this course is NOT being saved anywhere/.test(ebk) && /\? "Reconnect folder" : "Choose folder"/.test(ebk));
   // arch-P3b-07d: the new-doc flow stayed here; only the banner it raises moved.
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(DOCS) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(DOCS) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
+  // GH #327 put a guard between the create and the prompt: a code clash returns null, and a
+  // document that was never made must not be followed by a folder picker for it.
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(DOCS) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*if \(!made\) return;\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(DOCS) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
   // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
   // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
   ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(DOCS));
@@ -12836,6 +12838,55 @@ section("HFDEF header-footer default");
   ok("the picker list is built from the shared document row, not a hand-rolled one",
     /list\.appendChild\(window\.VersoUI\.DocumentRow\(\{/.test(DOCS) && DOCS.indexOf('h("div", "modal-list__item")') === -1);
   ok("the delete button rides the row's trailing slot", /trailing: del,/.test(DOCS));
+})();
+
+// ---- GH #327: creating a document reads the form, and leaves you looking at it -----
+// The report was "Load sample copy does nothing". It did something: it wrote a document into the
+// registry with a random code, the sample's title, the sample's demo product and no type at all,
+// and then left the author on a Files list that does not re-render -- so the document existed and
+// nothing showed it. Both halves are covered here, because the invisible half is the one a
+// screenshot cannot tell you about, and it applies to Create blank and Import equally.
+section("GH327 new document");
+(function () {
+  var D;
+  try { D = require(path.join(ROOT, "src/editor/documents.js"))._pure; } catch (e) { ok("require documents.js", false); return; }
+  var DOCS = src("src/editor/documents.js");
+  var SAMPLE = { title: "Workplace Safety Essentials", code: "DEMO-WSE-101" };
+
+  // --- what the form's values mean (pure) ---
+  var typed = D.newDocIdentity(SAMPLE, { title: "Acme Field Guide", code: "ACME-FG-1" }, 7);
+  ok("a typed title and code WIN over the sample's own -- the whole of #327",
+    typed.title === "Acme Field Guide" && typed.code === "ACME-FG-1");
+  ok("whitespace is not a value", D.newDocIdentity(SAMPLE, { title: "  ", code: "  " }, 7).code === "DEMO-WSE-101-copy-7");
+  var blank = D.newDocIdentity(SAMPLE, {}, 42);
+  ok("a blank form still yields a sample in one click, named after the sample",
+    blank.title === "Workplace Safety Essentials (Copy)" && blank.code === "DEMO-WSE-101-copy-42");
+  ok("one field typed does not discard the other's fallback",
+    D.newDocIdentity(SAMPLE, { title: "Only a title" }, 3).code === "DEMO-WSE-101-copy-3");
+  ok("no sample and no form still produces a usable pair, never undefined",
+    D.newDocIdentity(null, null, 1).title === "Sample document (Copy)" && D.newDocIdentity(null, null, 1).code === "SAMPLE-copy-1");
+  ok("the suffix is supplied, not generated, so the resolver stays pure",
+    /function newDocIdentity\(sampleMeta, form, suffix\)/.test(DOCS) &&
+    !/function newDocIdentity[\s\S]{0,400}Math\.random/.test(DOCS));
+
+  // --- the sample button is wired to the form it sits in ---
+  var btn = (DOCS.match(/label: "Load sample copy"[\s\S]*?modal\.remove\(\);/) || [""])[0];
+  ok("the sample copy reads the title and code fields", /titleIn\.value/.test(btn) && /codeIn\.value/.test(btn));
+  ok("the sample copy takes the Product PICKED, which also clears the sample's demo product",
+    /tagDocProductStage\(freshSample, newDocProduct, null\)/.test(btn));
+  ok("the sample copy is stamped with the chosen preset -- the sample itself has no geo",
+    /DT\.presetToCell\(newDocPreset\)/.test(btn) && /tagDocCell\(freshSample, cell\.geo, cell\.interactive\)/.test(btn));
+  ok("nothing in the sample button invents a code any more", !/DEMO-WSE-101-copy-" \+ Math\.floor/.test(DOCS));
+
+  // --- and every route out of the dialog lands you in what you made ---
+  ok("Files is INVALIDATED, not re-rendered -- a destination is built once (uio-W03 §3.2)",
+    /function landInNewDoc\(\)[\s\S]{0,220}window\.__leftRail\.invalidate\("files"\);\s*window\.__leftRail\.setStage\("edit"\);/.test(DOCS));
+  ok("all three routes land: blank, sample and import", (DOCS.match(/landInNewDoc\b/g) || []).length === 4);
+  ok("import lands only once the document is actually committed, not before the replace confirm",
+    /function importDocToRegistry\(importedDoc, onDone\)/.test(DOCS) &&
+    /switchDoc\(targetId\);[\s\S]{0,200}if \(typeof onDone === "function"\) onDone\(targetId\);/.test(DOCS));
+  ok("a code clash lands you nowhere: createBlankDoc returns null and the dialog stays open",
+    /return null;/.test(DOCS) && /var made = createBlankDoc\(/.test(DOCS) && /if \(!made\) return;/.test(DOCS));
 })();
 
 // ---- uio-W04: the Files destination ---------------------------------------

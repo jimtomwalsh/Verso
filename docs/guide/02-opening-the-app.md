@@ -21,6 +21,12 @@ or static* — then a **title** and **code**. The document is born in that Produ
 you can change the cell later. The same dialog also opens a saved course, imports a document, or
 loads a sample.
 
+**Load sample copy uses the form too.** It fills a new document with the sample's content, and
+takes its title, code, Product and type from what you entered — so a sample copy is a document of
+the type you asked for, filed where you put it. Leave the title and code empty and it names itself
+after the sample. Whichever way you create a document — blank, sample, or imported — Verso opens it
+in **Edit**, and its row is waiting in **Files** when you go back.
+
 **Change the document type later.** The **cell chip** in the editor header (e.g. *Reflow ·
 Interactive*) opens a small menu to change the document's matrix cell after creation. Toggling
 **Interactive / Static** applies at once; switching the **geometry** (Reflow / Fixed frame /
