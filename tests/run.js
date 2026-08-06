@@ -13056,6 +13056,38 @@ section("workspace transfer");
   ok("media the destination cannot resolve is named, so a document that will look broken says so",
     W.missingMedia(intoEmpty, function (id) { return id === "present"; }).join() === "aaa111" &&
     W.missingMedia(intoEmpty, function () { return true; }).length === 0);
+
+  // --- the chrome: the order of the four acts IS the feature ---
+  var DOCS = src("src/editor/documents.js"), SS = src("src/editor/settings-sheet.js"), IDX = src("index.html");
+  var run = (DOCS.match(/function runImport\([\s\S]*?\n    \}/) || [""])[0];
+  ok("THE BACKUP RUNS FIRST, and a backup that cannot be written STOPS the import",
+    run.indexOf("BEFORE-IMPORT") !== -1 && run.indexOf("BEFORE-IMPORT") < run.indexOf("applyImport") &&
+    /if \(!backup\) \{[\s\S]{0,200}return;/.test(run));
+  ok("nothing is written until the plan has been confirmed -- applyImport is reached only from runImport",
+    (DOCS.match(/applyImport\(/g) || []).length === 1);
+  ok("the destructive path is the one marked danger, and merge is never the default",
+    /primaryLabel: "Replace…", danger: true/.test(DOCS) && /label: "Merge…"/.test(DOCS));
+  ok("the confirm LISTS the ids it would remove rather than only counting them",
+    /Removed from this machine \(" \+ dropped\.length \+ "\):/.test(DOCS) && /dropped\.slice\(0, 12\)/.test(DOCS));
+  ok("it warns when documents will render with gaps, before the import not after",
+    /referenced image\(s\) are not on this machine/.test(DOCS));
+  ok("the export says what it is NOT carrying, on the way out",
+    /but not the "\s*\+\s*n\s*\+\s*" image/.test(DOCS));
+  ok("a part-way failure tells you to restore the backup rather than reporting success",
+    /Import failed part-way/.test(DOCS) && /Restore the backup that just downloaded/.test(DOCS));
+  ok("it reloads rather than re-rendering -- every panel holds references into the replaced stores",
+    /location\.reload\(\)/.test(run));
+  ok("identity is the app's findRegistryId, passed through from the chrome",
+    /planImport\(ws, liveStores\(\), "replace", E\.findRegistryId\)/.test(DOCS));
+  // System, not Project: a workspace outlives any one document, so it must sit in the tab that
+  // holds the machine-level settings rather than beside that document's own header and backup.
+  ok("the workspace section is SYSTEM-level, beside the other things that outlive one document",
+    /\{ key: "workspace", title: "Workspace", build: buildWorkspaceBody \}/.test(SS) &&
+    SS.indexOf('key: "workspace"') < SS.indexOf('key: "docType"'));
+  ok("the settings section states the media gap where a move is planned",
+    /Images are NOT carried/.test(SS) && /also export that document as \.verso/.test(SS));
+  ok("the pure core loads before editor.js", IDX.indexOf("src/workspace-transfer.js") !== -1 &&
+    IDX.indexOf("src/workspace-transfer.js") < IDX.indexOf("src/editor.js"));
 })();
 
 section("sample workspace");

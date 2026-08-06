@@ -102,7 +102,7 @@
       "promptModal", "createProduct",
       // Loading the sample workspace on demand writes to all THREE stores, because that is where a
       // workspace lives: products, source documents (LibraryStore) and design documents (registry).
-      "libComponents", "saveLibrary", "saveProducts"
+      "libComponents", "saveLibrary", "saveProducts", "Store"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -194,6 +194,168 @@
       if (!window.__leftRail) return;
       window.__leftRail.invalidate("files");
       window.__leftRail.setStage("edit");
+    }
+
+    // ---- moving a whole working environment ----------------------------------
+    // The pure half is src/workspace-transfer.js, which builds the file and PLANS an import
+    // without writing anything. This is the half that touches the disk and the stores, and its
+    // whole job is to make sure the author sees the plan before any of it happens.
+    function liveStores() {
+      return {
+        registry: registry,
+        library: window.LibraryStore || { components: {} },
+        products: window.ProductsStore || {},
+        classification: window.ClassificationConfig || null
+      };
+    }
+    function workspaceFilename(stamp) { return "verso-workspace-" + stamp + ".versoworkspace"; }
+    // A stamp is the only thing here that needs a clock, and it is only ever a filename.
+    function stampNow(now) {
+      var d = new Date(now);
+      function p(n) { return (n < 10 ? "0" : "") + n; }
+      return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
+    }
+    function downloadWorkspace(name) {
+      var WT = window.VersoWorkspaceTransfer; if (!WT) return null;
+      var now = Date.now();
+      var file = WT.buildWorkspaceFile(liveStores(), {
+        now: now, generator: "Verso", origin: (typeof location !== "undefined" && location.href) || ""
+      });
+      var blob = new Blob([JSON.stringify(file)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name || workspaceFilename(stampNow(now));
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+      return file;
+    }
+    function exportWorkspaceFile() {
+      var file = downloadWorkspace(null);
+      if (!file) return;
+      var n = file.media.assetRefs.length;
+      // Said on the way OUT, not discovered on the way in. A workspace file that looks complete and
+      // silently leaves the images behind is the failure this whole feature is meant to prevent.
+      if (n) {
+        confirmModal("Workspace exported",
+          "The file carries your documents, source documents, products and settings — but not the " +
+          n + " image" + (n === 1 ? "" : "s") + " they reference. Media is far too large to travel this way. " +
+          "To move a document's images, export that document as .verso as well.", function () {});
+      }
+    }
+
+    // The import. Four acts, in this order, and the order is the feature: read it, plan it, SAY it,
+    // then back up what is here before touching any of it.
+    function importWorkspaceFile() {
+      var WT = window.VersoWorkspaceTransfer; if (!WT) return;
+      var input = document.createElement("input");
+      input.type = "file"; input.accept = ".versoworkspace,.json,application/json";
+      input.addEventListener("change", function () {
+        var f = input.files && input.files[0]; if (!f) return;
+        var r = new FileReader();
+        r.onload = function () {
+          var parsed; try { parsed = JSON.parse(r.result); }
+          catch (e) { confirmModal("Import failed", "That file isn't readable as JSON.", function () {}); return; }
+          var read = WT.readWorkspaceFile(parsed);
+          if (!read.ok) { confirmModal("Import failed", read.errors.join(" "), function () {}); return; }
+          chooseImportMode(read.workspace);
+        };
+        r.readAsText(f);
+      });
+      input.click();
+    }
+    // Replace is the DEFAULT and the destructive one, so it is the one that has to be stated
+    // hardest. Merge exists for the server case -- a team standing up their own instance while
+    // others bring local work in -- and must never be the default, because a merge that was meant
+    // to be a replace leaves two of everything and a replace that was meant to be a merge is
+    // unrecoverable.
+    function chooseImportMode(ws) {
+      var WT = window.VersoWorkspaceTransfer;
+      var replace = WT.planImport(ws, liveStores(), "replace", E.findRegistryId);
+      var merge = WT.planImport(ws, liveStores(), "merge", E.findRegistryId);
+      var dropped = WT.droppedCount(replace);
+      var body = "This workspace holds " + replace.total + " item" + (replace.total === 1 ? "" : "s") + ".\n\n" +
+        "REPLACE — your workspace becomes this file. " +
+        (dropped ? dropped + " item" + (dropped === 1 ? "" : "s") + " you have now would be removed." : "Nothing you have now would be removed.") + "\n\n" +
+        "MERGE — bring it in alongside your work. Nothing is removed" +
+        (merge.documents.collisions.length + merge.library.collisions.length + merge.products.collisions.length
+          ? "; anything you already have is kept as it is." : ".");
+      // Two named outcomes, so the DS modal shell carries Merge in the footer beside the primary --
+      // the same shape the New-document dialog uses for Import / Load sample copy. confirmModal
+      // takes one action and would have needed a third button bolted onto a surface every other
+      // confirm in the app shares.
+      var shell;
+      var btnMerge = window.VersoUI.Button({ variant: "secondary", label: "Merge…", onClick: function () {
+        shell.modal.close(); confirmImport(ws, "merge", merge);
+      } });
+      shell = dsModalShell({
+        id: "import-workspace-modal", title: "Import a workspace", subtitle: body,
+        extras: [btnMerge], primaryLabel: "Replace…", danger: true,
+        onPrimary: function () { shell.modal.close(); confirmImport(ws, "replace", replace); }
+      });
+    }
+    // The last screen before anything is written. It names the ids a replace would drop rather than
+    // counting them: "12 documents will be removed" is a number, and a number is not enough to
+    // agree to losing work by.
+    function confirmImport(ws, mode, plan) {
+      var WT = window.VersoWorkspaceTransfer;
+      var has = (window.AssetStore && window.AssetStore.has) ? function (id) { return window.AssetStore.has(id); } : null;
+      var missing = WT.missingMedia(plan, has);
+      var lines = [];
+      lines.push("Arriving: " + plan.documents.arriving.length + " document(s), " +
+        plan.library.arriving.length + " library item(s), " + plan.products.arriving.length + " product(s).");
+      var collisions = plan.documents.collisions.concat(plan.library.collisions, plan.products.collisions);
+      if (collisions.length) {
+        lines.push(mode === "replace"
+          ? collisions.length + " already exist here and will be overwritten by the file's version."
+          : collisions.length + " already exist here and will be LEFT AS THEY ARE.");
+      }
+      var dropped = plan.documents.dropped.concat(plan.library.dropped, plan.products.dropped);
+      if (dropped.length) {
+        lines.push("\nRemoved from this machine (" + dropped.length + "):\n" +
+          dropped.slice(0, 12).join(", ") + (dropped.length > 12 ? ", and " + (dropped.length - 12) + " more" : ""));
+      }
+      if (missing.length) {
+        lines.push("\n" + missing.length + " referenced image(s) are not on this machine, so some documents will render with gaps until you import their .verso files.");
+      }
+      lines.push("\nA backup of your CURRENT workspace downloads first, so this is reversible.");
+      confirmModal(mode === "replace" ? "Replace this workspace?" : "Merge into this workspace?",
+        lines.join("\n"),
+        function () { runImport(ws, mode, plan); },
+        { okLabel: mode === "replace" ? "Replace" : "Merge", danger: mode === "replace" });
+    }
+    // THE BACKUP RUNS FIRST, and if it cannot be written the import does not happen. This is the
+    // single most important line in the ticket: an import you cannot undo is a data-loss event
+    // wearing a confirm dialog.
+    function runImport(ws, mode, plan) {
+      var WT = window.VersoWorkspaceTransfer;
+      var backup;
+      try { backup = downloadWorkspace("verso-workspace-BEFORE-IMPORT-" + stampNow(Date.now()) + ".versoworkspace"); }
+      catch (e) { backup = null; }
+      if (!backup) {
+        confirmModal("Import stopped", "The safety backup of your current workspace could not be written, so nothing was imported. Nothing has changed.", function () {});
+        return;
+      }
+      var next;
+      try { next = WT.applyImport(ws, liveStores(), plan, {}); }
+      catch (e) { confirmModal("Import failed", "Nothing was changed: " + ((e && e.message) || e), function () {}); return; }
+      try {
+        Object.keys(registry).forEach(function (k) { delete registry[k]; });
+        Object.keys(next.registry).forEach(function (k) { registry[k] = next.registry[k]; });
+        saveRegistry(registry);
+        window.LibraryStore = next.library; E.saveLibrary();
+        window.ProductsStore = next.products; E.saveProducts();
+        if (next.classification && E.Store && E.Store.saveClassification) E.Store.saveClassification(next.classification);
+      } catch (e) {
+        confirmModal("Import failed part-way", "Some of the import was written before it failed: " + ((e && e.message) || e) +
+          "\n\nRestore the backup that just downloaded.", function () {});
+        return;
+      }
+      // Reloaded rather than re-rendered: every open tab, the active document pointer and the
+      // panels all hold references into the stores that were just replaced wholesale, and the
+      // stale-reference class of bug is exactly what a document swap causes here.
+      confirmModal("Workspace imported", "Verso will reload to open the imported workspace.", function () {
+        try { location.reload(); } catch (e) {}
+      });
     }
 
     // ---- loading the shipped sample workspace on demand -----------------------
@@ -520,7 +682,8 @@
       sanitizeHeaderFooterDefault: sanitizeHeaderFooterDefault, headerFooterFromDefault: headerFooterFromDefault, getHeaderFooterDefault: getHeaderFooterDefault,
       saveHeaderFooterDefault: saveHeaderFooterDefault, clearHeaderFooterDefault: clearHeaderFooterDefault, createBlankDoc: createBlankDoc,
       importDocToRegistry: importDocToRegistry, readCourseFile: readCourseFile, pickCourseFile: pickCourseFile,
-      showNewDocDialog: showNewDocDialog, loadSampleWorkspace: loadSampleWorkspace
+      showNewDocDialog: showNewDocDialog, loadSampleWorkspace: loadSampleWorkspace,
+      exportWorkspaceFile: exportWorkspaceFile, importWorkspaceFile: importWorkspaceFile
     });
   }
 
