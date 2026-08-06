@@ -34,14 +34,13 @@
   function install(kernel) {
     var E = kernel.need(
       "h", "pushHistory", "panelSection", "sectionGroup", "getBlockStyles", "alignSeg",
-      "ensureBlockToolbar", "colourControl", "inspector", "doc", "blockToolbarSep",
+      "ensureBlockToolbar", "positionBlockToolbar", "colourControl", "inspector", "doc", "selection",
       "scheduleSave", "buildFontPicker", "colorField", "isEmbeddableFont", "setInspector"
     );
     // The stable half: function declarations editor.js never reassigns, aliased once so the moved
-    // bodies read exactly as they did. `inspector`, `doc` and `blockToolbarSep` are deliberately
-    // NOT here -- editor.js swaps `inspector` for a section body while a panel builds and replaces
-    // `doc` wholesale on a document swap, and `blockToolbarSep` is minted by block-actions.js when
-    // it first builds the overlay bar (arch-P3b-07o). All three are read through E at use.
+    // bodies read exactly as they did. `inspector` and `doc` are deliberately NOT here -- editor.js
+    // swaps `inspector` for a section body while a panel builds and replaces `doc` wholesale on a
+    // document swap (arch-P3b-07o). Both are read through E at use.
     var buildFontPicker = E.buildFontPicker,
         colorField = E.colorField,
         isEmbeddableFont = E.isEmbeddableFont;
@@ -1050,7 +1049,10 @@
       // rather than a panel section. The 'lost' block actions from the left-rail/top-bar
       // reorg are re-joined here. Same handlers, so behaviour is unchanged.
       if (want("actions", true)) {
-        var bar = ensureBlockToolbar();
+        // uio-E-M01: name the element the bar docks above. `io.node` is the selection's own node
+        // where a caller has one; otherwise the block's rendered node. Without this the bar draws
+        // at the viewport origin, which is how the first build of E-M01 shipped.
+        var bar = ensureBlockToolbar((io && io.node) || (E.selection && E.selection.node) || null);
         if (bar) {
           bar.innerHTML = "";
           var acts = [["arrowUp", "Move up", handlers.moveUp, false], ["arrowDown", "Move down", handlers.moveDown, false],
@@ -1067,7 +1069,9 @@
             bar.appendChild(btn);
           });
           bar.hidden = false;
-          if (E.blockToolbarSep) E.blockToolbarSep.hidden = false;
+          // Place it before it is seen. ensureBlockToolbar only NAMES the node; showing the bar
+          // without this left it at the viewport origin until the next scroll moved it.
+          if (E.positionBlockToolbar) E.positionBlockToolbar();
         }
       }
     }

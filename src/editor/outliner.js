@@ -33,7 +33,7 @@
       "copySelection", "pastePage", "duplicatePage", "hasMergeableNext", "mergePageWithNext", "savePageAsLibraryMaster",
       "deletePage", "duplicateBlock", "clearBlockContentAction", "deleteBlockByRef", "refreshGridOverlay", "setMultiSel",
       "setMultiSelPages", "cap", "doc", "selection", "world", "multiSel",
-      "multiSelPages", "currentPage", "frameDescs", "activeVariant", "blockToolbarSep", "interactMode",
+      "multiSelPages", "currentPage", "frameDescs", "activeVariant", "interactMode",
       "pageClipboard",
       "setCurrentPage",
       "pageNumberOf", "pageTitlePart"
@@ -306,7 +306,6 @@
       del.addEventListener("click", function () { deleteSelection(); });
       bar.appendChild(del);
       bar.hidden = false;
-      if (E.blockToolbarSep) E.blockToolbarSep.hidden = false;
     }
     // Inverse of groupMulti: unwrap a `group` block, splicing its children back
     // into the group's parent array at the group's position (order preserved).
