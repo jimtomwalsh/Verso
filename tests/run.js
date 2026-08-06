@@ -17341,6 +17341,14 @@ section("uio-S-A01 marks in the margin, in place");
     { meta: function () { return "in 3 docs"; } });
   ok("a stub states its KIND and its one salient fact, then the passage it sits beside",
     linkStub.title === "Linked · in 3 docs" && linkStub.sub === "unit");
+  // Type and meta stay separate the way the rail's mark row keeps them: a coloured type eyebrow,
+  // tertiary meta beside it. Joined into one coloured string, "in 3 docs" would wear the link hue.
+  ok("type and meta are two facts, so colour never lands on the one that is not about the type",
+    linkStub.label === "Linked" && linkStub.meta === "in 3 docs" && linkStub.cls === "sd-mark-link");
+  ok("the type's label and ink come from the ONE table the rail's rows already read",
+    (src("src/source-doc.js").match(/var MARK_TYPE_META = \{/g) || []).length === 1 &&
+    /return MARK_TYPE_META\[m\.type\] \|\| \{ cls: "sd-mark-alt", label: "Mark" \};/.test(src("src/source-doc.js")) &&
+    /\.source-drawer__row-type\.sd-mark-link, \.source-stub__type\.sd-mark-link \{ color: var\(--mark-link\); \}/.test(css));
   // The type-specific facts come in through a predicate, the way marksByHeading takes isResolved.
   // A caller that hands in the wrong shape gets a stub with no meta — the margin still draws.
   ok("a malformed meta hook costs the fact, not the whole margin",
@@ -17404,6 +17412,13 @@ section("uio-S-A01 marks in the margin, in place");
     /source-doc__gutter-empty", "Nothing marked yet\./.test(es));
   ok("the gutter is a DS structural token, not a number in a stylesheet",
     /--gutter-w:\s*300px;/.test(sp) && /flex: 0 0 var\(--gutter-w, 300px\)/.test(css));
+  // A new presentation gets settled in the spine BEFORE it ships, the way F05 added the Sheet
+  // contract and F06 settled that the palette is not a seventh surface.
+  ok("the spine settles what the margin is, rather than leaving a seventh surface unnamed", (function () {
+    var rm = src("design-system/readme.md").replace(/\s+/g, " ");
+    return /The annotation margin is not a seventh presentation/.test(rm) &&
+      /Two things it may not do: take a scrim, or grow a list of its own/.test(rm);
+  })());
 
   // --- the type fix S-M03 filed and could not make ---
   ok("working prose has its own reading pair, off the chrome ramp",

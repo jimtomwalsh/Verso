@@ -2167,9 +2167,13 @@
       el.setAttribute("data-mark-id", s.id);
       el.appendChild(h("span", "source-stub__dot source-stub__dot--" + s.tone));
       var body = h("div", "source-stub__body");
-      var title = h("span", "source-stub__title", s.title);
-      title.style.color = "var(--mark-" + (s.type === "link" ? "link" : s.type === "alternate" ? "alt" : s.type === "restricted" ? "restricted" : "note") + ", var(--text-primary))";
-      body.appendChild(title);
+      // Same head anatomy as the rail's mark row: a coloured type eyebrow, then the meta in
+      // tertiary ink. Two lists of the same marks read the same way, and colour never lands on a
+      // fact that is not about the mark's kind. The classes carry the ink so it stays in CSS.
+      var head = h("div", "source-stub__head");
+      head.appendChild(h("span", "source-stub__type " + s.cls, s.label));
+      if (s.meta) head.appendChild(h("span", "source-stub__meta", s.meta));
+      body.appendChild(head);
       body.appendChild(h("span", "source-stub__sub", s.sub));
       el.appendChild(body);
       el.title = s.title + (s.sub ? " — " + s.sub : "");

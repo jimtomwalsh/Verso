@@ -393,14 +393,16 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
   // how many documents a linked passage reaches, what a restricted passage classifies as) comes
   // in through opts.meta, the same predicate-injection marksByHeading already uses for exactly
   // this reason. This file shapes the answer; the editor supplies the facts.
-  // The keys are the model's own type names. `link` is the linked-passage type — spelled that way
-  // in the marks, the filter segments and markCounts, so it is spelled that way here too rather
-  // than being tidied to "linked" in one place and drifting.
-  var STUB_TYPE_LABEL = { comment: "Comment", link: "Linked", alternate: "Alternate", restricted: "Restricted" };
   function markStub(model, m, opts) {
     if (!m || !m.anchor) return null;
-    var label = STUB_TYPE_LABEL[m.type];
-    if (!label) return null;              // an unmapped type draws nothing rather than mis-labelling
+    // MARK_TYPE_META is the one table (markMeta reads it too). Looked up DIRECTLY rather than
+    // through markMeta, because markMeta's fallback labels an unknown type "Mark" and paints it
+    // as an alternate — fine for a row that already exists, wrong for deciding whether to draw
+    // one at all. An unmapped type draws nothing rather than being mislabelled, which is the same
+    // call S-C06 made when it turned the paint pass's ternary default into a table.
+    var tm = MARK_TYPE_META[m.type];
+    if (!tm) return null;
+    var label = tm.label;
     var meta = (opts && typeof opts.meta === "function") ? opts.meta(m) : "";
     var snippet = anchorText(model, m.anchor) || "";
     snippet = snippet.replace(/\s+/g, " ").trim();
@@ -409,9 +411,16 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
     // Tone is the mark's STATE and follows the same precedence the outline dots use, so a
     // reviewer reads one order of urgency everywhere in the stage.
     var tone = m.broken ? "broken" : m.stale ? "stale" : (m.type === "comment" && !(opts && opts.resolved && opts.resolved(m))) ? "open" : "quiet";
+    // Type and meta stay SEPARATE, because the rail's mark row already states them as two things:
+    // the type is a coloured eyebrow, the meta is tertiary ink beside it. A stub that joined them
+    // into one coloured string would put "1 open" in the comment hue and give the same object two
+    // anatomies a column apart. `title` is the joined form, for the tooltip only.
     return {
       id: m.id,
       type: m.type,
+      label: label,
+      cls: tm.cls,
+      meta: meta || "",
       title: meta ? (label + " · " + meta) : label,
       sub: snippet || (isObjectMark(m) ? "Whole block" : ""),
       tone: tone,
@@ -839,13 +848,16 @@ var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
     return { dot: "green", label: "In sync" };
   }
   // The permanent-id + type metadata a mark carries (spec 1.2): its distinct visual class and label.
+  // ONE table. The rail's mark rows and uio-S-A01's margin stubs both read it, so the two lists of
+  // the same marks cannot end up calling a type by two names or painting it two colours.
+  var MARK_TYPE_META = {
+    link: { cls: "sd-mark-link", label: "Linked" },
+    alternate: { cls: "sd-mark-alt", label: "Alternate" },
+    comment: { cls: "sd-mark-comment", label: "Comment" },
+    restricted: { cls: "sd-mark-restricted", label: "Restricted" }
+  };
   function markMeta(m) {
-    return {
-      link: { cls: "sd-mark-link", label: "Linked" },
-      alternate: { cls: "sd-mark-alt", label: "Alternate" },
-      comment: { cls: "sd-mark-comment", label: "Comment" },
-      restricted: { cls: "sd-mark-restricted", label: "Restricted" }
-    }[m.type] || { cls: "sd-mark-alt", label: "Mark" };
+    return MARK_TYPE_META[m.type] || { cls: "sd-mark-alt", label: "Mark" };
   }
   // The alternate marks anchored on exactly a given span (spec 3.2: 0..N tagged alternates).
   function alternatesFor(model, nodeKey, start, len) {

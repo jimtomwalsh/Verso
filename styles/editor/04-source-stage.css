@@ -46,10 +46,15 @@
 .source-stub.is-active { box-shadow: inset 0 0 0 1px var(--accent); border-color: var(--accent); }
 .source-stub__dot { flex: none; width: 7px; height: 7px; margin-top: 5px; border-radius: var(--radius-full, 50%); }
 .source-stub__body { min-width: 0; }
-/* Type ink names the mark's KIND, the dot names its STATE. Two facts, two channels, neither
-   relying on the other -- and the title carries the words as well, so colour is never alone. */
-.source-stub__title { display: block; font: var(--type-label-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.source-stub__sub { display: block; font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The stub's head is the rail mark row's head, at margin scale: a coloured TYPE eyebrow then the
+   meta in tertiary ink. Type ink names the mark's KIND, the dot names its STATE, and the words say
+   both -- so neither colour is carrying a fact on its own, and the meta never borrows the type's
+   hue for something that is not about the type. The .sd-mark-* inks are shared with the row below
+   rather than restated. */
+.source-stub__head { display: flex; align-items: baseline; gap: var(--space-2, 6px); margin-bottom: 2px; }
+.source-stub__type { flex: 0 0 auto; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.source-stub__meta { min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-stub__sub { display: block; font: var(--type-label); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* An opened card takes the stub's place in the margin, at the same height. It is the same card
    shell the dock held, so the three renderers did not need rewriting -- only their host moved. */
 .source-doc__gutter-card { position: absolute; left: 0; width: 100%; }
@@ -181,10 +186,12 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
    passage sits. The path is what lets a row identify itself when the snippet is truncated. */
 .source-drawer__row-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
 .source-drawer__row-type { flex: 0 0 auto; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-.source-drawer__row-type.sd-mark-link { color: var(--mark-link); }
-.source-drawer__row-type.sd-mark-alt { color: var(--mark-alt); }
-.source-drawer__row-type.sd-mark-comment { color: var(--mark-note); }
-.source-drawer__row-type.sd-mark-restricted { color: var(--mark-restricted); }
+/* uio-S-A01: shared with the margin's stubs. The rail lists the marks, the margin places them —
+   the same four types, so one rule rather than two that drift. */
+.source-drawer__row-type.sd-mark-link, .source-stub__type.sd-mark-link { color: var(--mark-link); }
+.source-drawer__row-type.sd-mark-alt, .source-stub__type.sd-mark-alt { color: var(--mark-alt); }
+.source-drawer__row-type.sd-mark-comment, .source-stub__type.sd-mark-comment { color: var(--mark-note); }
+.source-drawer__row-type.sd-mark-restricted, .source-stub__type.sd-mark-restricted { color: var(--mark-restricted); }
 /* Count + path ride the 11px chrome baseline (--text-xs), not the 10px badge size: they are
    metadata you read, not a badge. The count truncates before the type eyebrow does. */
 .source-drawer__row-count { min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
