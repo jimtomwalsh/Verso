@@ -29,7 +29,7 @@
     var E = kernel.need(
       "h", "canvas", "view", "pushHistory", "scheduleSave", "panning",
       "demoStageEl", "demoIsOpen", "renderInspector", "walkBlocks", "isTextTarget", "mount",
-      "demoDeviceEl", "setInteractMode", "clearSelection", "clearAllMulti",
+      "demoDeviceEl", "setInteractMode", "setRightTab", "rightTabNow", "syncRightTabs", "clearSelection", "clearAllMulti",
       "refreshCanvasSelection", "panelSection", "iconBtn", "reapplyStructural", "rebindTourBuilderToLiveDoc",
       "applyView", "cycleGrid", "updateGridBtn", "toggleStyleAudit", "updateStyleAuditBtn",
       "startMarquee", "updateMarquee", "panDrag", "endMarquee", "fitCycle", "addPageAfterCurrent",
@@ -226,7 +226,10 @@
       if (commentBtn) commentBtn.classList.toggle("is-active", commentMode);
       if (commentMode) { if (E.interactMode) setInteractMode(false); closeCommentPopover(); clearSelection(); clearAllMulti(); refreshCanvasSelection(); }
       else closeCommentPopover();
-      renderInspector();   // slice 3 swaps the panel to the comment list while in-mode
+      // uio-E-M06 (EDIT-16): the mode no longer evicts the inspector -- it lands the panel on the
+      // Comments TAB (and hands it back on the way out), and the tab stays freely switchable while
+      // the mode is on, so reviewing and fixing coexist.
+      E.setRightTab(commentMode ? "comments" : "design");
       renderCommentPins();
     }
     // §12 slice 3: the right panel becomes the comment LIST while in comment mode.
@@ -309,10 +312,10 @@
         E.inspector.appendChild(orphanWrap);
       }
     }
-    // Re-render the panel list after a comment change (only while in comment mode —
+    // Re-render the panel list after a comment change (only while the Comments TAB is showing —
     // renderInspector clears + routes to renderCommentList; calling it directly would
-    // double-append). No-op otherwise so leaving the mode shows the normal inspector.
-    function refreshCommentPanel() { if (commentMode) renderInspector(); }
+    // double-append). No-op otherwise so the Design/Interact panels are not churned.
+    function refreshCommentPanel() { if (E.rightTabNow() === "comments") renderInspector(); }
     // §12 slice 5: author identity + colour (per reviewer). Stored in localStorage so
     // this machine's drops carry a stable name + a deterministic colour; the schema
     // already reserved author/colour, so this is additive (no migration).
@@ -971,9 +974,18 @@
       var xy = clampPopover(pos, vw, vh, pop.offsetWidth || 240, pop.offsetHeight || 0, 8);
       pop.style.left = xy.left + "px"; pop.style.top = xy.top + "px";
     }
+    // uio-E-M06: the Comments tab's open-count badge follows the pins -- every path that changes
+    // a comment already re-renders them (mount, doc switch, add/resolve/delete/import). This runs
+    // per pan/zoom frame too, so it only calls the tab sync when the count actually moved.
+    var __lastBadgeCount = -1;
+    function syncCommentsBadge() {
+      var openN = ((E.doc && E.doc.comments) || []).filter(function (c) { return !c.done; }).length;
+      if (openN !== __lastBadgeCount) { __lastBadgeCount = openN; E.syncRightTabs(); }
+    }
     // Re-project + redraw every pin. Pins are ALWAYS shown (Design mode too), so this
     // runs from mount() + applyView() (pan/zoom) as well as on any comment change.
     function renderCommentPins() {
+      syncCommentsBadge();
       var s = activeSurf();
       if (!s.layerParent) return;
       // Fast path (#150): applyView() calls this on EVERY pan/zoom frame. When the course

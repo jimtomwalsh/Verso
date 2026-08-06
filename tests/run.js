@@ -7584,11 +7584,11 @@ section("comment mode (canvas)");
 section("comment list (panel)");
 (function () {
   var t = src("src/editor/comments.js");   // arch-P3b-07
-  ok("renderInspector routes to the comment list in comment mode", (function () {
+  ok("renderInspector routes to the comment list on the Comments tab (uio-E-M06)", (function () {
     var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
-    // comment mode wins over the selection AND over interact mode (arch-P3-04: the table's order)
-    return VI.pick({ commentMode: true, selectionType: "block" }).render === "renderCommentList" &&
-      VI.pick({ commentMode: true, interactMode: true, multiSelCount: 5 }).render === "renderCommentList";
+    // the Comments TAB wins over the selection AND over interact mode (arch-P3-04: the table's order)
+    return VI.pick({ commentsTab: true, selectionType: "block" }).render === "renderCommentList" &&
+      VI.pick({ commentsTab: true, interactMode: true, multiSelCount: 5 }).render === "renderCommentList";
   })());
   ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(E\.interactMode\) setInteractMode\(false\)/.test(t));
   ok("list filters Open vs Resolved", /function renderCommentList[\s\S]*?commentFilter === "resolved" \? c\.done : !c\.done/.test(t));
@@ -16636,6 +16636,28 @@ section("uio-E-M05: image slot is the button");
   ok("all three render paths decorate the slots", (e.match(/decorateEmptyImageSlots\(\);|decorateEmptyImageSlots\(frame\);/g) || []).length === 3);
 })();
 
+// uio-E-M06 (EDIT-16): comments are a peer TAB beside Design and Interact, with an open-count
+// badge. Comment mode used to evict the inspector; the mode now lands the panel on the Comments
+// tab and hands it back on the way out, and the tab stays freely switchable while the mode is on.
+section("uio-E-M06: comments as peer tab");
+(function () {
+  var I = src("src/editor/interact.js");
+  var C = src("src/editor/comments.js");
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
+  ok("the third tab exists with its count host", /data-ptab="comments"/.test(html) && /id="ptab-comments-count"/.test(html));
+  ok("one tab selector owns the panel (rightTab, three values)", /var rightTab = "design"; \/\/ "design" \| "interact" \| "comments"/.test(I) && /function setRightTab\(k\)/.test(I));
+  ok("interactMode stays true exactly when the Interact tab is active", /rightTab = on \? "interact" : \(rightTab === "interact" \? "design" : rightTab\);/.test(I));
+  ok("the dispatch routes on the TAB, not the mode", VI.pick({ commentsTab: true, selectionType: "block" }).key === "comment" && VI.pick({ commentMode: true, selectionType: "block" }).key === "block");
+  ok("comment mode lands the panel on the tab and hands it back", /E\.setRightTab\(commentMode \? "comments" : "design"\);/.test(C));
+  ok("the list repaints keyed to the tab, not the mode", /function refreshCommentPanel\(\) \{ if \(E\.rightTabNow\(\) === "comments"\) renderInspector\(\); \}/.test(C));
+  ok("the badge follows the pins, and only when the count moved", /function syncCommentsBadge\(\)[\s\S]{0,300}if \(openN !== __lastBadgeCount\) \{ __lastBadgeCount = openN; E\.syncRightTabs\(\); \}/.test(C) && /renderCommentPins\(\) \{\s*\n\s*syncCommentsBadge\(\);/.test(C));
+  ok("the badge is the OPEN count, hidden at zero", /badge\.textContent = String\(open\);\s*\n\s*badge\.hidden = !open;/.test(I));
+  ok("the badge has a chrome home", /\.ptab__count \{/.test(EDITOR_CSS));
+  ok("editor.js relays the tab accessors for the modules that need them", /setRightTab: setRightTab, rightTabNow: rightTabNow, syncRightTabs: syncRightTabs,/.test(e));
+})();
+
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
 // label, track whose fill carries the band tone, value in the same tone -- with a distinct
 // "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure
@@ -22690,9 +22712,9 @@ section("arch-P3-04 inspector dispatch");
 
   // ---- precedence, top to bottom ----
   ok("kit mode wins over everything and renders nothing",
-    VI.pick({ kitMode: true, commentMode: true, interactMode: true, multiSelCount: 9, selectionType: "block" }).render === null);
-  ok("comment mode beats interact mode, a multi-selection and the selection type",
-    VI.pick({ commentMode: true, interactMode: true, multiSelCount: 4, selectionType: "page" }).key === "comment");
+    VI.pick({ kitMode: true, commentsTab: true, interactMode: true, multiSelCount: 9, selectionType: "block" }).render === null);
+  ok("the Comments tab beats interact mode, a multi-selection and the selection type (uio-E-M06)",
+    VI.pick({ commentsTab: true, interactMode: true, multiSelCount: 4, selectionType: "page" }).key === "comment");
   ok("interact mode beats a multi-selection and the selection type",
     VI.pick({ interactMode: true, multiSelCount: 4, selectionType: "page" }).key === "interact");
   ok("two or more selected beats the single selection's type",
