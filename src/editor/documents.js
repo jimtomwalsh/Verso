@@ -21,6 +21,29 @@
   "use strict";
   var window = (typeof globalThis !== "undefined" && globalThis.window) || Object.create(null);
 
+  // PURE -- what the New-document form's values mean for the document about to be created.
+  //
+  // GH #327: "Load sample copy" read NOTHING from the dialog it sits in. It minted a random code,
+  // appended " (Copy)" to the sample's own title, and left the sample's demo product and its
+  // (absent) type untouched -- so the product, type, title and code the author had just chosen
+  // were all discarded. A TYPED VALUE WINS here, which is the whole of the fix. A blank one falls
+  // back, because the button is also the one-click "just give me sample content" route and making
+  // it refuse to run without a title would trade one broken button for another.
+  //
+  // `suffix` is passed in rather than generated so this stays pure and testable; the caller
+  // supplies the random part, and a code collision is caught by findRegistryId downstream either
+  // way.
+  function newDocIdentity(sampleMeta, form, suffix) {
+    sampleMeta = sampleMeta || {};
+    form = form || {};
+    var title = String(form.title || "").trim();
+    var code = String(form.code || "").trim();
+    return {
+      title: title || ((sampleMeta.title || "Sample document") + " (Copy)"),
+      code: code || ((sampleMeta.code || "SAMPLE") + "-copy-" + suffix)
+    };
+  }
+
   function install(kernel) {
     var E = kernel.need(
       "openDocIds", "registry", "confirmModal", "h", "saveOpenDocIds", "saveRegistry",
@@ -106,13 +129,29 @@
     // flow. When present, the new doc is stamped with its Product (doc.meta.productId) and its
     // matrix cell (doc.meta.geo/interactive) at birth. Omitted -> an untagged doc = today's
     // {reflow, interactive} default, so the old callers are unchanged.
+    // WHERE A NEW DOCUMENT PUTS YOU (GH #327). Every route out of the New dialog wrote the
+    // registry and stopped there, so from Files -- where the dialog is opened -- the modal closed
+    // and the list in front of you was unchanged. The document existed; nothing showed it. That is
+    // worse than a button that fails, because a second press makes a second orphan.
+    //
+    // So creating a document lands you IN it -- the same shape as creating a source document,
+    // which lands Source and marks Files stale. The document is already active (switchDoc has run),
+    // the rail moves to Edit, and Files is INVALIDATED rather than re-rendered: a destination is
+    // built once and re-entering shows what is already there (uio-W03 §3.2), which is precisely why
+    // leaving and coming back did not reveal the new row either.
+    function landInNewDoc() {
+      if (!window.__leftRail) return;
+      window.__leftRail.invalidate("files");
+      window.__leftRail.setStage("edit");
+    }
+
     function createBlankDoc(title, code, opts) {
       // Same resolver the import path uses: a code that differs only in case is not a new
       // document, and letting one through is how two rows end up sharing a name.
       var clash = E.findRegistryId(registry, code);
       if (clash) {
         alert("A document with code '" + clash + "' already exists.");
-        return;
+        return null;
       }
       var newDoc = {
         meta: { title: title, code: code },
@@ -140,9 +179,14 @@
       openDocIds.push(code);
       saveOpenDocIds(openDocIds);
       switchDoc(code);
+      return code; // null on a clash -- the caller only lands you in a document that was made
     }
 
-    function importDocToRegistry(importedDoc) {
+    // `onDone` (optional) runs after the document is actually committed, which for a replace is
+    // after the author answers the confirm rather than when this returns. The New dialog uses it to
+    // land you in what you imported; the callers that have their own surface to refresh pass
+    // nothing and are unchanged.
+    function importDocToRegistry(importedDoc, onDone) {
       if (!importedDoc.meta || typeof importedDoc.meta !== "object") importedDoc.meta = {};
       var code = importedDoc.meta.code || ("IMPORTED-" + Math.floor(Math.random() * 1000));
       // WHICH ENTRY IS THIS A BACKUP OF? Not necessarily registry[code]. The registry key is a
@@ -169,6 +213,7 @@
           }
           switchDoc(targetId);
           if (window.console && console.log) console.log("[import] loaded course '" + targetId + "'");
+          if (typeof onDone === "function") onDone(targetId);
         } catch (e) {
           if (window.console && console.error) console.error("[import] commit failed:", e);
           confirmModal("Import failed", "Could not load the document: " + (e && e.message || e), function () {});
@@ -250,14 +295,29 @@
       var newDocProduct = "";
       var newDocPreset = "elearning";
       var btnImport = window.VersoUI.Button({ variant: "secondary", label: "Import…", onClick: function () {
-        pickCourseFile(function (imported) { importDocToRegistry(imported); modal.remove(); });
+        pickCourseFile(function (imported) { importDocToRegistry(imported, landInNewDoc); modal.remove(); });
       } });
+      // GH #327. The sample copy is created FROM THIS FORM, like every other route out of this
+      // dialog: the title and code you typed, the Product you picked, the preset you chose. What it
+      // borrows from the sample is the CONTENT.
+      //
+      // Two of those need saying. The sample carries `productId: "prod-demo"` and `stage`, so
+      // leaving the Product unset has to CLEAR them rather than pass them through -- otherwise
+      // "None (shared)" silently files your copy under the demo product. And the sample has no
+      // geo/interactive at all, which is why a copy always landed as a Course whatever type you
+      // picked; the preset is stamped on here. Picking a static type keeps the sample's interactive
+      // blocks (the matrix model never drops content) -- they render statically, and switching the
+      // cell back restores them.
       var btnSample = window.VersoUI.Button({ variant: "secondary", label: "Load sample copy", onClick: function () {
-        var code = "DEMO-WSE-101-copy-" + Math.floor(Math.random() * 1000);
         var freshSample = clone(window.SAMPLE_DOC || E.doc);
-        freshSample.meta.code = code;
-        freshSample.meta.title += " (Copy)";
-        importDocToRegistry(freshSample);
+        var id = newDocIdentity((freshSample && freshSample.meta) || {},
+          { title: titleIn.value, code: codeIn.value }, Math.floor(Math.random() * 1000));
+        var cell = (DT && DT.presetToCell(newDocPreset)) || { geo: "reflow", interactive: true };
+        freshSample.meta.title = id.title;
+        freshSample.meta.code = id.code;
+        tagDocProductStage(freshSample, newDocProduct, null);
+        tagDocCell(freshSample, cell.geo, cell.interactive);
+        importDocToRegistry(freshSample, landInNewDoc);
         modal.remove();
       } });
 
@@ -272,8 +332,13 @@
           var code = codeIn.value.trim();
           if (!title || !code) { alert("Title and Code are required."); return; }
           var cell = (DT && DT.presetToCell(newDocPreset)) || { geo: "reflow", interactive: true };
-          createBlankDoc(title, code, { productId: newDocProduct, geo: cell.geo, interactive: cell.interactive });
+          // GH #327 found this route was equally invisible: a blank document recorded its title,
+          // code, product and type correctly and then left you on the same unchanged Files list.
+          // A clash returns null and the dialog stays put, so a failed create never lands anywhere.
+          var made = createBlankDoc(title, code, { productId: newDocProduct, geo: cell.geo, interactive: cell.interactive });
+          if (!made) return;
           modal.remove();
+          landInNewDoc();
           // Slice 2: MANDATORY backup-folder setup — prompt the picker immediately (still
           // within this click gesture, required for the native/FSA folder pickers). If the
           // author cancels, the loud "no backup folder" banner nags until they bind.
@@ -384,6 +449,6 @@
     });
   }
 
-  window.VersoDocuments = { install: install };
+  window.VersoDocuments = { install: install, _pure: { newDocIdentity: newDocIdentity } };
   if (typeof module !== "undefined" && module.exports) module.exports = window.VersoDocuments;
 })();
