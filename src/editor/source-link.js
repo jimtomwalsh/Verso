@@ -495,9 +495,11 @@
         var b = node.__block;
         if (b && b.sourceLink && b.sourceLink.markId) {
           node.classList.add("is-source-linked");
+          // uio-E-M03 (EDIT-06): the chip is a LOCK, and it is persistent -- the audit's finding was
+          // that a linked paragraph looks exactly like an authored one until typing is refused.
           var badge = h("button", "source-link-badge"); badge.type = "button";
-          badge.innerHTML = window.Icon ? window.Icon("link") : "";
-          badge.title = "Linked from source — jump, or pick / create an alternate";
+          badge.innerHTML = window.Icon ? window.Icon("lock") : "";
+          badge.title = "Linked from source — read-only here. Jump to source, or pick / create an alternate";
           badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); openSourceLinkMenu({ kind: "block", block: b }, b.sourceLink.masterId, b.sourceLink.markId, e.clientX, e.clientY); });
           node.appendChild(badge);
         }

@@ -75,6 +75,10 @@
 .insp-provenance { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-1) 0 var(--space-4); min-height: var(--row-height, 28px); }
 .insp-provenance__label { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
 .insp-provenance__name { font-size: var(--text-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+/* uio-E-M03 (EDIT-06): the lock leads the line; Edit in Source is its one action, pushed to the tail. */
+.insp-provenance__lock { display: inline-flex; align-items: center; color: var(--text-tertiary, var(--text-secondary)); }
+.insp-provenance__lock svg { width: 12px; height: 12px; }
+.insp-provenance__action { margin-left: auto; }
 /* SPEC 7: a geometry-tool entry row in the Document-context inspector. */
 .insp-doc-tool { display: flex; align-items: center; height: 26px; padding: 0 2px; color: var(--text-secondary); }
 .insp-doc-tool .insp-row__label { flex: 1 1 auto; font-size: var(--text-sm); color: var(--text-primary); }

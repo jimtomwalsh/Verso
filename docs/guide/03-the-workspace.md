@@ -108,11 +108,14 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   linked span carries its own indicator. Drag a source **figure** (a diagram) as a whole and it
   drops as a linked **image** block. Linked copy is **locked** — you can't edit it directly, so it
   can't drift from the source — and it updates automatically whenever the source wording changes. A
-  linked block (or span) shows a **link badge**; click it for a menu that jumps back to the exact
-  source passage, or lets you say it differently here. Select a linked block and the inspector opens
-  with a **From source** line naming the source document it came from, how many documents use that
-  passage, and a **Source changed** flag if the source has moved since this document was last
-  published. **Alternates** are the sanctioned way to
+  linked block (or span) carries a small **lock chip**, always visible, so linked copy never looks
+  authored; click it for a menu that jumps back to the exact source passage, or lets you say it
+  differently here. Select a linked block and the inspector opens with a **From source** line: a
+  lock stating the content is read-only here (your styling stays yours), the source document, where
+  in it the passage sits, the source's version if the import stamped one, how many documents use
+  that passage, and a **Source changed** flag if the source has moved since this document was last
+  published — with one action, **Edit in Source**, which opens the Source stage at that exact
+  passage. **Alternates** are the sanctioned way to
   diverge without breaking the link: pick **Create an alternate…** to fork a named wording that
   applies to *this block only* (and registers on the source, so you can reuse or push it later), or
   pick an existing alternate — or **Base wording** to reset. Passages you've already linked into the

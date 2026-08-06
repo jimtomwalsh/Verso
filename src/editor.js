@@ -3715,16 +3715,34 @@
   // uio-F04 (EDIT-06): a source-linked block used to say only "linked" (a badge on the canvas). It now
   // states the same facts every other stage states -- which source it came from, how many other
   // documents use that passage, and whether the source has moved since this document last went out.
-  // Same resolver, same phrasing, same badge as the Publish row. uio-E-M03 adds the lock chip and the
-  // Edit-in-Source jump on top of this line.
+  // Same resolver, same phrasing, same badge as the Publish row.
+  // uio-E-M03 (EDIT-06 in full): the line now states read-only BEFORE it is attempted -- a lock
+  // leads it -- and carries the mark's chapter path + the source's version, with the ONE action the
+  // audit asked for: Edit in Source (the stage, at the exact passage). Style stays editable; only
+  // the content is the source's.
   function renderSourceLinkProvenance(block) {
     if (!block || !block.sourceLink || !block.sourceLink.masterId) return null;
     var masterId = block.sourceLink.masterId, markId = block.sourceLink.markId || null;
     var comps = (typeof libComponents === "function" && libComponents()) || {};
     var master = comps[masterId];
     var line = h("div", "insp-provenance");
+    var lock = h("span", "insp-provenance__lock");
+    lock.innerHTML = Icon("lock");
+    lock.title = "Linked content is read-only here — it follows the source wording. Style stays yours.";
+    line.appendChild(lock);
     line.appendChild(h("span", "insp-provenance__label", "From source"));
     line.appendChild(h("span", "insp-provenance__name", (master && master.name) || "an unknown source document"));
+    // The mark's chapter path + the imported source's version, when the master can say.
+    if (master && master.doc && markId && window.SourceDoc) {
+      var model = window.SourceDoc.fromJSON(master.doc);
+      var mk = window.SourceDoc.markById(model, markId);
+      var path = mk ? window.SourceDoc.markPath(model, mk) : "";
+      if (path) { var pf = h("span", "insp-provenance__fact", path); pf.title = "Where this passage sits in the source"; line.appendChild(pf); }
+    }
+    if (master && master.source && master.source.version) {
+      var vf = h("span", "insp-provenance__fact", master.source.version);
+      vf.title = "The imported source's stated version"; line.appendChild(vf);
+    }
     var used = f04WhereUsedFact(sourceLinkWhereUsed(masterId, markId));
     var ub = f04Badge(used, "insp-provenance__fact"); if (ub) line.appendChild(ub);
     var docFacts = f04DocFacts(activeDocId);
@@ -3733,6 +3751,16 @@
         title: "This source document has changed since “" + docFacts.title + "” was last published." }, "insp-provenance__fact");
       if (db) line.appendChild(db);
     }
+    var edit = h("button", "prop-btn insp-provenance__action", "Edit in Source");
+    edit.title = "Open the Source stage at this passage";
+    edit.addEventListener("click", function () {
+      jumpToSourceTopic(masterId);
+      // The stage mounts synchronously, but the article paints on the same frame -- reveal after it.
+      requestAnimationFrame(function () {
+        if (markId && window.__sourceRw && window.__sourceRw.revealMark) window.__sourceRw.revealMark(markId);
+      });
+    });
+    line.appendChild(edit);
     return line;
   }
   function renderBlockTwoLevel(node, label, decl, renderContent, io, handlers) {
@@ -5305,6 +5333,9 @@
     if (interactModeOn()) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
+    // uio-E-M03: mount never re-added the source-link chips -- boot, switchDoc, undo and setDoc all
+    // dropped them until a page-level reapply happened to run. Same decoration the reapply paths call.
+    decorateSourceLinks();
     renderCommentPins(); // §12: re-project review pins (canvas.innerHTML was cleared)
     if (collabChrome()) { collabChrome().ensure(); collabChrome().reproject(); } // ticket 11: presence chrome (server-mode only; inert in standalone)
 

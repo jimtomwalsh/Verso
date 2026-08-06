@@ -7559,7 +7559,7 @@ section("comment mode (canvas)");
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
   // arch-P3b-07: mount, the drill handler and the keyboard shortcut all stayed here; comment mode
   // is asked for rather than read, because editor/comments.js owns it now.
-  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactModeOn\(\)\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
+  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactModeOn\(\)\) decorateInteractHandle\(\);[\s\S]{0,700}renderCommentPins\(\);/.test(src("src/editor.js")));
   // arch-P3b-02: applyView moved to src/editor/canvas-view.js, so this drives it instead of
   // matching its text. A pin rebuild on every pan/zoom frame is the whole contract -- pins are
   // absolutely positioned in canvas space, so a view change that skipped this would leave them
@@ -16569,10 +16569,35 @@ section("uio-F04: cross-stage data surfacing");
   ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(es));
   ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(es) && /\.source-stage__facts/.test(EDITOR_CSS));
   ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,400}f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
-  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(EDITOR_CSS));
+  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,2400}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(EDITOR_CSS));
   ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
   ok("the retired one-off alignment + staleness chips are gone from the picker", !/publish-pickrow__stale/.test(e) && !/apct \+ "% source"/.test(e));
   ok("a read API is exposed for the tickets that consume this layer (P-C01 / P-C08)", /window\.__f04 = \{[\s\S]{0,400}docFacts: f04DocFacts[\s\S]{0,400}productFacts: f04ProductFacts/.test(e));
+})();
+
+// uio-E-M03 (EDIT-06): a linked block STATES read-only before it is attempted. The lock leads the
+// provenance line; the line carries the mark's chapter path + the source's version; its ONE action
+// is Edit in Source (the stage, at the exact passage). The canvas chip is persistent -- a linked
+// paragraph must not look authored until typing is refused.
+section("uio-E-M03: linked-block lock chip + provenance + Edit in Source");
+(function () {
+  var e = src("src/editor.js");
+  var SL = src("src/editor/source-link.js");
+  var body = (function () { var i = e.indexOf("function renderSourceLinkProvenance"); return e.slice(i, i + 3200); })();
+  ok("the lock leads the provenance line", /insp-provenance__lock/.test(body) && body.indexOf("insp-provenance__lock") < body.indexOf("insp-provenance__label") && /Icon\("lock"\)/.test(body));
+  ok("read-only is stated in words, not just a glyph", /read-only here/.test(body));
+  ok("the chapter path comes from the pure markPath, on the mark itself", /window\.SourceDoc\.markById\(model, markId\)/.test(body) && /window\.SourceDoc\.markPath\(model, mk\)/.test(body));
+  ok("the version is stated only when the imported source stamped one", /master\.source && master\.source\.version/.test(body));
+  ok("Edit in Source opens the stage at the exact passage", /"Edit in Source"/.test(body) && /jumpToSourceTopic\(masterId\)/.test(body) && /__sourceRw\.revealMark\)\s*window\.__sourceRw\.revealMark\(markId\)/.test(body));
+  ok("the canvas chip is a lock, and persistent (visible at rest, not hover-only)", /window\.Icon\("lock"\)/.test(SL) && /\.source-link-badge \{[^}]*opacity: 0\.6/.test(EDITOR_CSS));
+  ok("the provenance action + lock have chrome homes", /\.insp-provenance__lock/.test(EDITOR_CSS) && /\.insp-provenance__action \{ margin-left: auto; \}/.test(EDITOR_CSS));
+  // The bug this ticket surfaced: mount() decorated variant badges, the style audit and comment
+  // pins but never source links, so boot/switchDoc/undo dropped every chip until a page reapply.
+  ok("mount() decorates source links like the reapply paths do", /decorateStyleAudit\(\); \/\/ #145[^\n]*\n[\s\S]{0,300}decorateSourceLinks\(\);\s*\n\s*renderCommentPins\(\);/.test(e));
+  // Second bug it surfaced: the stage overlays sit OVER the Edit canvas, so the E-M01 block
+  // toolbar floated above Source/Files/Publish. It is Edit chrome; the workspace stage class hides it.
+  var BA = src("src/editor/block-actions.js");
+  ok("the block toolbar is suppressed while a stage overlay is up, restored on return", /workspace--stage-/.test(BA) && /__stageHid/.test(BA) && /attributeFilter: \["class"\]/.test(BA));
 })();
 
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
@@ -20357,7 +20382,7 @@ section("SPEC 8: source-link 03 — select + place a linked block");
   ok("gap placement mints per-run link marks, persists them, THEN inserts blocks (persist before insert, #161)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,1100}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)\.id;[\s\S]{0,160}master\.doc = SD\.toJSON\(model\); saveLibrary\(\);[\s\S]{0,300}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}markId: markIds\[i\]/.test(SL));
   ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(SL));
   ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(SL) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(SL));
-  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(SL));
+  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,700}source-link-badge[\s\S]{0,500}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(SL));
   ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(SL) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(SL));
   ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(SL) && /\.is-source-linked-passage/.test(css));
   ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
