@@ -29,11 +29,15 @@ adds nothing the second time.
 ---
 
 **Moving your work to another machine, or another Verso.** **Settings → System → Workspace →
-Export workspace…** writes one file holding every document, every source document, your products
-and your settings. **Import workspace…** brings one back. It offers **Replace** (your workspace
+Export everything to a folder…** asks for a folder once and writes your whole workspace into it:
+one workspace file holding every document, every source document, your products and your settings,
+plus a **.verso for each document carrying that document's images**. You don't export documents one
+at a time. It needs Chrome or Edge — Safari and Firefox can't write to a folder, and Verso says so
+rather than quietly giving you less. **Import workspace…** brings a workspace file back. It offers **Replace** (your workspace
 becomes the file) or **Merge** (bring it in alongside), tells you exactly what will be added and
 what will be removed *by name* before it does anything, and downloads a backup of your current
 workspace first — so any import can be undone.
 
-Images are the one thing it doesn't carry; they're far larger than everything else put together.
-To move a document's images, also export that document as **.verso** from its row in Files.
+If any document can't be packed, the others still are — and the summary names the ones that
+failed, so nothing goes missing quietly. The **Workspace file only** button is there when you want
+the structure without the images; it's labelled with what it leaves out.

@@ -36,7 +36,7 @@
       "doc", "inspector", "canvasBg",
       // Moving a whole working environment. The pure planner is src/workspace-transfer.js; these
       // two are the disk-and-stores half, which lives beside the document import it generalises.
-      "exportWorkspaceFile", "importWorkspaceFile",
+      "exportWorkspaceFile", "importWorkspaceFile", "exportWorkspaceEverything",
       // The panel host is swapped while a section body builds, and a write crosses as a function.
       "setInspector"
     );
@@ -169,14 +169,19 @@
       host.appendChild(h("div", "insp-hint",
         "A workspace file carries EVERY document, every source document, your products and your settings — the whole machine, not one document. It is how work moves between the app, staging and this browser."));
       var row = h("div", "insp-row insp-row--actions");
-      row.appendChild(U.Button({ variant: "secondary", label: "Export workspace…", onClick: function () { E.exportWorkspaceFile(); } }));
+      // The PRIMARY export is the complete one. Exporting the structure and leaving the author to
+      // fetch each document's images by hand is what made the flow "far too much work", and every
+      // manual repetition is a document that can be missed without anyone noticing.
+      row.appendChild(U.Button({ variant: "primary", label: "Export everything to a folder…", onClick: function () { E.exportWorkspaceEverything(); } }));
       row.appendChild(U.Button({ variant: "secondary", label: "Import workspace…", onClick: function () { E.importWorkspaceFile(); } }));
       host.appendChild(row);
-      // Said here as well as on the way out, because this is where someone plans a move and the
-      // gap is the thing that will bite them. Media is orders of magnitude larger than everything
-      // else combined, so it travels per document or not at all.
       host.appendChild(h("div", "insp-hint",
-        "Images are NOT carried — they are far larger than everything else put together. To move a document's images, also export that document as .verso from its row in Files."));
+        "Pick a folder once and Verso writes the whole thing into it: the workspace file, plus a .verso for every document carrying that document's images. Chrome or Edge — Safari and Firefox can't write to a folder."));
+      // The structure-only download stays, quietly, for the case where the folder is not wanted --
+      // and it is labelled with what it leaves out rather than looking like the same act, smaller.
+      var row2 = h("div", "insp-row insp-row--actions");
+      row2.appendChild(U.Button({ variant: "secondary", label: "Workspace file only (no images)", onClick: function () { E.exportWorkspaceFile(); } }));
+      host.appendChild(row2);
       host.appendChild(h("div", "insp-hint",
         "Importing offers Replace or Merge, tells you exactly what it will add and remove first, and downloads a backup of your current workspace before it touches anything."));
     }
