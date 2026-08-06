@@ -153,8 +153,24 @@
     return Store.getRegistry(function () {
       var defaultRegistry = {};
       defaultRegistry[window.SAMPLE_DOC.meta.code] = window.SAMPLE_DOC;
+      // The shipped sample workspace's design documents (a presentation, a facilitator guide, an
+      // untagged one) land beside the sample course, so a first boot has more than one document
+      // type in it. Seeds an EMPTY registry only -- Store.getRegistry never calls this when there
+      // is real authored work to read.
+      seedSampleWorkspace(defaultRegistry);
       return defaultRegistry;
     });
+  }
+  // Copy the shipped design documents into a registry being seeded. Deep-cloned, because the
+  // literal in sample-workspace.js is shared with anything else that reads it and an author editing
+  // their copy must not write back into the shipping data.
+  function seedSampleWorkspace(target) {
+    var W = window.SAMPLE_WORKSPACE;
+    if (!W || !W.designDocs) return target;
+    Object.keys(W.designDocs).forEach(function (code) {
+      target[code] = clone(W.designDocs[code]);
+    });
+    return target;
   }
 
   // #71 recents: last-edited / last-opened ordering for the file browser. PURE
@@ -1197,7 +1213,12 @@
   // out of the box — never overwrites a real, already-persisted store.
   function loadProducts() {
     return Store.loadProducts(function () {
-      return { "prod-demo": { id: "prod-demo", name: "Sample Product Line", createdAt: 0 } };
+      var seed = { "prod-demo": { id: "prod-demo", name: "Sample Product Line", createdAt: 0 } };
+      // Plus the sample workspace's products. Three rather than one is the whole point: a band, a
+      // facet and a cross-product view all say nothing when everything belongs to the same place.
+      var W = window.SAMPLE_WORKSPACE;
+      if (W && W.products) Object.keys(W.products).forEach(function (id) { seed[id] = clone(W.products[id]); });
+      return seed;
     });
   }
   window.ProductsStore = loadProducts();

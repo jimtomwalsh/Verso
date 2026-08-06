@@ -15,4 +15,11 @@ Build and export your first course in a few minutes.
 > **Reassurance.** You can't lose work by exploring — every edit autosaves, and ⌘Z undoes.
 > There's no "save" button for normal editing.
 
+**You don't start on a blank page.** A first run seeds a small sample workspace: three products, a
+course, a presentation, a facilitator guide and two source documents — one a chaptered manual with
+comments, links, alternates, a restricted passage and two declared variants, the other a shared
+glossary belonging to no product. It's invented material, there to be clicked, edited and deleted.
+Delete anything you don't want; the seed only ever fills an empty workspace, so it won't come back
+over your own work.
+
 ---
