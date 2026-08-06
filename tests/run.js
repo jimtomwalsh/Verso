@@ -9349,7 +9349,12 @@ section("inline links");
   // text inspector mounts. The claim was always about that bar; it only read against editor.js
   // because the bar and the inspector sat in one file.
   var FMT = src("src/editor/text-format.js");
-  ok("the shared format bar has a Link button using createLink", /var linkB = h\("button"[\s\S]*?execCommand\("createLink", false, url\)/.test(FMT));
+  // uio-E-C06 extracted the link BEHAVIOUR so the panel and the toolbar can render different
+  // controls over it. The claim is unchanged -- a Link control that uses createLink -- but the
+  // mechanic now lives in promptLinkForSelection and the toolbar's button routes to it.
+  ok("the shared format bar has a Link button using createLink",
+    /var linkB = h\("button"[\s\S]*?promptLinkForSelection\(io\)/.test(FMT) &&
+    /function promptLinkForSelection\(io, done\)[\s\S]*?execCommand\("createLink", false, url\)/.test(FMT));
   ok("created anchor gets target=_blank + rel=noopener", /setAttribute\("target", "_blank"\); el\.setAttribute\("rel", "noopener noreferrer"\)/.test(FMT));
   ok("empty URL removes the link (unlink)", /if \(!url\) \{ document\.execCommand\("unlink", false, null\)/.test(FMT));
   ok("link/BIU commits are sanitised so the drag-handle can't ride in", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\)/.test(PARTS));
@@ -18918,7 +18923,7 @@ section("#170/#158 shared formatting toggle-bar");
   ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(FMT));
   ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(FMT));
   ok("inline-exec toggle calls io.getNode()/document.execCommand/io.onChange (behaviour unchanged)", /var node = io\.getNode\(\); if \(!node\) return;\s*\n\s*node\.focus\(\);\s*\n\s*document\.execCommand\(t\.cmd, false, null\);\s*\n\s*io\.onChange\(\);/.test(body));
-  ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(body));
+  ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(FMT));
   ok("bar.refresh() resyncs is-on state against the CURRENT selection (for a bar that persists across re-focus)", /bar\.refresh = function \(\) \{/.test(body));
   ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(FMT));
 
@@ -18930,7 +18935,23 @@ section("#170/#158 shared formatting toggle-bar");
   // something is added above them (uio-F04's provenance line, uio-E-C03's scope spec).
   var insStart = PARTSSRC.indexOf("function renderFieldInspector(node)");
   var insBody = PARTSSRC.slice(insStart, PARTSSRC.indexOf("function renderInstanceInspector(card)", insStart));
-  ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
+  // uio-E-C06 (EDIT-11): the field inspector STOPPED mounting the bar. Character formatting acts on
+  // a selection and the canvas has a bar that follows one, so the panel keeps only what is not
+  // character formatting -- a link (a property of the run) and List (a property of the block), both
+  // as canonical rows. The Copy Editor is the bar's only caller now, and keeps B/I/U because the
+  // floating bar cannot reach its rows.
+  ok("the field inspector renders Link + List as canonical rows, not a glyph bar",
+    /E\.settingsRow\(\{ label: "Link", control: linkBtn, tail: clearLink \}\);/.test(insBody) &&
+    /E\.switchRow\("List",/.test(insBody) &&
+    insBody.indexOf("buildFormatToggleBar({") === -1);
+  // The clear rides the row's TAIL slot -- where uio-F01 put a row's trailing affordance and where
+  // uio-F03's Reset already sits -- rather than being appended raw after the control.
+  ok("unlink is the link row's clear action, in the canonical tail slot, only when there is a link",
+    /var clearLink = null;\s*\n\s*if \(href\) \{[\s\S]{0,400}removeLinkFromSelection\(io,/.test(insBody) &&
+    /E\.settingsRow\(\{ label: "Link", control: linkBtn, tail: clearLink \}\);/.test(insBody));
+  ok("the Copy Editor keeps its B\\/I\\/U -- the floating bar never reaches its rows",
+    /var biu = buildFormatToggleBar\(\{/.test(src("src/editor/copy-editor.js")) &&
+    src("src/editor/copy-editor.js").indexOf("data-edit") === -1);
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // arch-P3b-07j: the copy editor's bar moved with the Read view; the field inspector's stayed.

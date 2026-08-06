@@ -34,6 +34,8 @@
       "scheduleSave", "buildFormatToggleBar", "convertTextListBlockType", "reapplyStructural", "findPageOfBlock", "fieldRow",
       "colorFieldFlat", "iconField", "endSections", "versionEditable", "renderContainerChrome", "CONTENT_DECL",
       "blockChromeIo", "blockChromeHandlers", "blurActiveText", "resetDrill", "buildActions", "iconBtn",
+      // uio-E-C06: the panel renders Link + List as canonical rows, over text-format's behaviour.
+      "settingsRow", "switchRow", "promptLinkForSelection", "removeLinkFromSelection", "formatSelectionAnchor",
       "propHeader", "setSelection", "renderBlockActionsSection", "clone", "clearSelection", "setInspector",
       "measureTextBaseline",
       "inspector", "selection", "panelFields"
@@ -206,9 +208,16 @@
       // convertTextListBlockType, remembering the prior type for a lossless round-trip. Only
       // genuine top-level text-content blocks (obj.type in TEXT_CONTENT_TYPES) can convert --
       // a quiz sub-field (obj has no .type) never shows the List toggle.
-      E.inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Style"));
       var rootIsList = node.tagName === "UL" || node.tagName === "OL";
-      var biu = buildFormatToggleBar({
+      // uio-E-C06 (EDIT-11): character formatting is GONE from this panel. B/I/U act on a text
+      // SELECTION, and the canvas already has a bar that follows one (`canvas-fmtbar`) -- so
+      // asking an author to hold a selection while travelling to a panel was the divergence.
+      // What is left here is not character formatting: a link is a property of the selected run
+      // and List is a property of the BLOCK, and both read as canonical rows rather than glyphs.
+      //
+      // The Course Copy Editor keeps its B/I/U, because its rows carry no `[data-edit]` and the
+      // floating bar never reaches them -- see `hasSelectionBar` in text-format.js.
+      var io = {
         getNode: function () { return node; },
         onChange: function () { obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); },
         isListToggleable: function () { return field === "text" && !!obj && !!obj.type && !!TEXT_CONTENT_TYPES[obj.type]; },
@@ -219,8 +228,33 @@
           reapplyStructural(findPageOfBlock(obj));
           reselectBlockNode(obj, "field"); // re-renders the inspector fresh (new type + marker section)
         }
-      });
-      E.inspector.appendChild(biu);
+      };
+      // Link: one row that SAYS whether the selected text is linked and where to. Unlink stopped
+      // being a glyph of its own and became this row's clear action -- the destructive half sits on
+      // the thing it destroys, and it appears only when there is a link to remove.
+      var anchorEl = E.formatSelectionAnchor();
+      var href = anchorEl ? (anchorEl.getAttribute("href") || "") : "";
+      var linkBtn = h("button", "prop-btn", href || "Add a link\u2026");
+      linkBtn.type = "button";
+      linkBtn.title = href ? ("Linked to " + href + " \u2014 click to change") : "Link the selected text to an external URL (opens in a new tab)";
+      linkBtn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
+      linkBtn.addEventListener("click", function () { E.promptLinkForSelection(io, function () { renderInspector(); }); });
+      var clearLink = null;
+      if (href) {
+        clearLink = iconBtn("unlink", "Remove the link");
+        clearLink.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        clearLink.addEventListener("click", function () { E.removeLinkFromSelection(io, function () { renderInspector(); }); });
+      }
+      // The clear goes in the row's TAIL slot, which is where uio-F01 put a row's own trailing
+      // affordance and where uio-F03's Reset already sits -- not appended raw after the control.
+      // Same slot, same place on every row, so "undo what this row set" is always in one spot.
+      E.settingsRow({ label: "Link", control: linkBtn, tail: clearLink });
+      // List is a whole-block TYPE conversion, so in a panel it is a switch on the block, not a
+      // glyph in a format bar. A quiz sub-field can never become a list block, so it draws nothing.
+      if (io.isListToggleable()) {
+        E.switchRow("List", function () { return io.isListBlock(); }, function () { io.toggleListBlock(); },
+          E.inspector, true);
+      }
 
       // List marker settings — the on/off toggle now lives in the inline-format bar above.
       // Purely the marker styling, shown only when the field IS a list block (#31: the quiz
