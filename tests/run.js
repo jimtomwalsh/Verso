@@ -16600,6 +16600,22 @@ section("uio-E-M03: linked-block lock chip + provenance + Edit in Source");
   ok("the block toolbar is suppressed while a stage overlay is up, restored on return", /workspace--stage-/.test(BA) && /__stageHid/.test(BA) && /attributeFilter: \["class"\]/.test(BA));
 })();
 
+// uio-E-M04 (EDIT-13): the canvas chapter header is a flat label, not a tab. It carried ‹ › ×
+// buttons and tab chrome, so a chapter marker read as a closable document window -- a third
+// navigator after the outline and the document tabs. The verbs were duplicates of the outline's
+// (drag to reorder, right-click to delete), which keeps them.
+section("uio-E-M04: chapter header loses its chrome");
+(function () {
+  var W = src("src/editor/world.js");
+  var css = EDITOR_CSS;
+  ok("the ‹ › × action cluster is gone from the canvas header", !/chapter-header__acts/.test(W) && !/chapter-header__btn/.test(W));
+  ok("its chrome classes are gone from the CSS too", !/chapter-header__acts/.test(css) && !/chapter-header__btn/.test(css));
+  ok("the header is flat (no fill, no border)", /\.chapter-header \{[^}]*background: transparent; border: none;/.test(css));
+  ok("rename stays on double-click; fit stays on click", /hdr\.addEventListener\("dblclick"/.test(W) && /fitChapter\(col\)/.test(W));
+  ok("the outline keeps the chapter verbs (delete + drag-reorder)", /Delete chapter/.test(src("src/editor/outliner.js")) && /structMoveChapter/.test(src("src/editor/outliner.js")));
+  ok("the + Chapter affordance keeps its dashed invitation", /\.chapter-header--add \{ border: 1px dashed/.test(css));
+})();
+
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
 // label, track whose fill carries the band tone, value in the same tone -- with a distinct
 // "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure

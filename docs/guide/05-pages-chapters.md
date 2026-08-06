@@ -11,6 +11,9 @@ Pages are the unit a learner reads; chapters group them and drive navigation.
   chapter, from the page's frame-label menu or the outliner. When you split, the parts are named
   **`Base · 1 of 2`, `Base · 2 of 2`** (renumbered if you split again) — no piling-up suffixes.
 - **Collapse the tree.** The glyph beside **Pages** folds the outline to chapter level and back.
+- **Chapter labels on the canvas.** Each chapter column carries a flat label (name + page count)
+  above its pages — click it to fit the chapter in view, double-click to rename. Moving or
+  deleting a chapter happens in the outline (drag to reorder; right-click → Delete chapter).
 
 > **Note.** Pages auto-title themselves from the first line of copy, with the derived
 > `chapter.page` number shown in its **own column** beside the name (so names stay clean and

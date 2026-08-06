@@ -33,11 +33,11 @@
     var E = kernel.need(
       "h", "SVGNS", "LABEL_H", "frameX", "frameY", "pushHistory",
       "mount", "colX", "GAP_Y", "setSelection", "worldW", "focusFrame",
-      "setActivePage", "showContextMenu", "mergePageWithNext", "revealFrameBlocks", "promptModal", "reorderChapter",
+      "setActivePage", "showContextMenu", "mergePageWithNext", "revealFrameBlocks", "promptModal",
       "showAllConnectorsOn", "BREAKPOINTS", "currentDoc", "editorAssetResolve", "pageDisplayName", "pageDragSuppressed",
       "previewVariant", "copySelection", "pageClipboardNow", "pastePage", "duplicatePage", "hasMergeableNext",
       "savePageAsLibraryMaster", "deletePage", "wirePageDrag", "REVEAL_GLYPH_SVG", "activeModeNow", "applyLayoutVars",
-      "cap", "makeGridOverlay", "makeDropTarget", "fitChapter", "confirmModal", "deleteChapter",
+      "cap", "makeGridOverlay", "makeDropTarget", "fitChapter",
       "createChapter", "CHAPTER_HEADER_H", "FRAME_CULL", "interactModeOn", "clamp", "conditionSources",
       "isPreview", "addPageAfter", "activeTheme", "setWorld", "setFramePos", "setFrameDescs",
       "setWorldH", "setNumCols", "setCurrentPage", "FRAME_W", "doc", "selection",
@@ -63,7 +63,6 @@
         mergePageWithNext = E.mergePageWithNext,
         revealFrameBlocks = E.revealFrameBlocks,
         promptModal = E.promptModal,
-        reorderChapter = E.reorderChapter,
         showAllConnectorsOn = E.showAllConnectorsOn,
         BREAKPOINTS = E.BREAKPOINTS,
         currentDoc = E.currentDoc,
@@ -86,8 +85,6 @@
         makeGridOverlay = E.makeGridOverlay,
         makeDropTarget = E.makeDropTarget,
         fitChapter = E.fitChapter,
-        confirmModal = E.confirmModal,
-        deleteChapter = E.deleteChapter,
         createChapter = E.createChapter,
         CHAPTER_HEADER_H = E.CHAPTER_HEADER_H,
         FRAME_CULL = E.FRAME_CULL,
@@ -221,8 +218,12 @@
       });
       } finally { if (__restoreMedia) __restoreMedia(); }
 
-      // JJJJ: a header bar atop each chapter COLUMN (name + page count; double-click
-      // to rename). Empty chapters still show a header so they're a visible column.
+      // JJJJ: a header atop each chapter COLUMN (name + page count; double-click to rename).
+      // Empty chapters still show a header so they're a visible column.
+      // uio-E-M04 (EDIT-13): the header is a flat LABEL, not a tab -- it used to carry a border,
+      // a fill and ‹ › × buttons, so a chapter marker read as a closable document window (a third
+      // navigator, nearest the work). The verbs were duplicates: the outline's chapter row already
+      // drags to reorder and right-clicks to delete, and that is where movement belongs.
       chapters.forEach(function (ch, c) {
         var hdr = h("div", "chapter-header");
         hdr.style.left = colX(c) + "px"; hdr.style.top = "0px"; hdr.style.width = E.FRAME_W + "px";
@@ -239,21 +240,6 @@
             if (real) { pushHistory(); real.name = nm; mount(); }
           });
         });
-        if (ch.id) {
-          var acts = h("div", "chapter-header__acts");
-          function chBtn(glyph, title, danger, fn) {
-            var b = h("button", "chapter-header__btn" + (danger ? " chapter-header__btn--danger" : ""), glyph);
-            b.type = "button"; b.title = title;
-            b.addEventListener("click", function (e) { e.stopPropagation(); fn(); });
-            return b;
-          }
-          acts.appendChild(chBtn("‹", "Move chapter left", false, function () { pushHistory(); if (reorderChapter(ch.id, -1)) mount(); }));
-          acts.appendChild(chBtn("›", "Move chapter right", false, function () { pushHistory(); if (reorderChapter(ch.id, 1)) mount(); }));
-          acts.appendChild(chBtn("×", "Delete chapter (pages move to the previous chapter)", true, function () {
-            confirmModal("Delete chapter", "Delete chapter “" + (ch.name || "") + "”? Its pages move to the previous chapter.", function () { pushHistory(); if (deleteChapter(ch.id)) mount(); }, { okLabel: "Delete", danger: true });
-          }));
-          hdr.appendChild(acts);
-        }
         E.world.appendChild(hdr);
       });
 
