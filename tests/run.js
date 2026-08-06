@@ -17338,6 +17338,30 @@ section("uio-F03 scope + inheritance model");
 // covering the prose, S-M02 gathered three floating cards into one dock, and both still answered
 // "what is attached to this passage" somewhere other than beside the passage. The right panel is
 // retired: cards go to a permanent margin at their mark's own height, History goes to the rail.
+// GH #324: typing in Source was writing the WHOLE library to storage on every keystroke --
+// JSON.stringify(LibraryStore), every source document and component, per character -- and re-laying
+// the annotation margin on top of it. The model still commits per keystroke (the caret and every
+// mark offset depend on it); only the WRITE and the margin came off the typing path.
+section("GH #324 typing does not write the whole library per keystroke");
+(function () {
+  var es = src("src/editor/source-stage.js");
+  ok("the keystroke path commits the model but DEFERS the write",
+    /persistSourceDocModel\(topic, model, \{ defer: true \}\); \/\/ GH #324/.test(es) &&
+    /function persistSourceDocModel\(topic, model, opts\)[\s\S]{0,160}stampTopicUpdated\(topic, opts\);/.test(es));
+  // `defer` is opt-IN. Every other caller of stampTopicUpdated keeps its immediate write, so this
+  // change cannot quietly alter the durability of a call site that never asked for it.
+  ok("deferral is opt-in, so no other caller's durability changed",
+    /function stampTopicUpdated\(topic, opts\) \{[\s\S]{0,240}if \(opts && opts\.defer\) scheduleSourceLibrarySave\(\); else \{ flushSourceLibrarySave\(\); saveLibrary\(\); \}/.test(es));
+  // The durability half. Deferred must never mean lost: anything that ends the edit flushes.
+  ok("a deferred write is flushed by anything that ends the edit",
+    /function flushSourceLibrarySave\(\) \{[\s\S]{0,160}saveLibrary\(\);/.test(es) &&
+    /window\.addEventListener\("pagehide", flushSourceLibrarySave\);/.test(es) &&
+    /window\.addEventListener\("beforeunload", flushSourceLibrarySave\);/.test(es) &&
+    /function flushSourceEditSession\(topic, opts\) \{[\s\S]{0,400}flushSourceLibrarySave\(\);/.test(es));
+  ok("an immediate write cancels any pending deferred one, so they cannot race",
+    /else \{ flushSourceLibrarySave\(\); saveLibrary\(\); \}/.test(es));
+})();
+
 section("uio-S-A01 marks in the margin, in place");
 (function () {
   var SD = require(path.join(ROOT, "src/source-doc.js"));
@@ -17419,8 +17443,15 @@ section("uio-S-A01 marks in the margin, in place");
   // gutter that only existed outside Read could never come back when you left Read.
   ok("the gutter is built once and hidden in Read, not built per mode",
     /gut\.hidden = __sourceMode === "read";/.test(es) && /gutter\.hidden = __sourceMode === "read";/.test(es));
-  ok("the margin is re-laid on the same pass that paints the marks it describes",
-    /renderSourceClassBadges\(\);\s*\n\s*\/\/ uio-S-A01[\s\S]{0,320}renderSourceGutter\(\);/.test(es));
+  // GH #324: the re-lay is SCHEDULED off the paint, not run inside it. A full re-lay costs a
+  // registry scan per linked mark and a classification resolve per restricted one, and this pass
+  // runs on every keystroke -- so the margin catches up when you pause. Anything that needs the
+  // margin THIS instant (a card, whose slot must exist before its renderer runs) still calls
+  // renderSourceGutter directly, and a direct call cancels the queued one.
+  ok("the margin is re-laid off the pass that paints the marks, without riding the keystroke",
+    /renderSourceClassBadges\(\);\s*\n\s*\/\/ uio-S-A01: and so does the margin[\s\S]{0,700}scheduleSourceGutter\(\);/.test(es) &&
+    /function scheduleSourceGutter\(\) \{\s*\n\s*if \(__gutterT\) return;/.test(es) &&
+    /if \(__gutterT\) \{ clearTimeout\(__gutterT\); __gutterT = null; \}/.test(es));
   ok("an open card is mounted BEFORE the stack is measured, or everything below it lands short",
     es.indexOf("if (openId) {\n        if (__sourceRestrictMarkId)") < es.indexOf("var placed = SD.stackStubs("));
   ok("'All marks' escalates to the rail's list rather than growing a second one in the margin",
@@ -20888,7 +20919,7 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
   // --- editor.js wiring (browser-verified live; asserted structurally here) ---
   var e = src("src/editor.js");
   ok("prose edits buffer per unlock->lock cycle (recordSourceEdit on the input path)", /recordSourceEdit\(res && res\.edit\)/.test(es) && /function beginSourceEditSession\(\) \{ __sourceEditSession = \{ edits: \[\] \}; \}/.test(es));
-  ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,400}SD\.summarizeEdits\(s\.edits\)/.test(es) && /type: "commit", charsAdded:/.test(es));
+  ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,900}SD\.summarizeEdits\(s\.edits\)/.test(es) && /type: "commit", charsAdded:/.test(es));
   ok("the commit why-note is optional + skippable (Skip / Escape still commits)", /function sourceCommitNoteModal\(onCommit\)[\s\S]{0,700}onClose: function \(\) \{ if \(done\) return; done = true; onCommit\(""\); \}/.test(es));
   // Still ONE begin/flush entry point; uio-S-M01 only changed who calls it — the mode switch
   // rather than a lock toggle. Leaving Edit for either locked mode runs the same lock path.

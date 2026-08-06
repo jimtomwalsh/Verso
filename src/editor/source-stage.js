@@ -966,7 +966,38 @@
       sec.overrides[variant].facets = sec.overrides[variant].facets || {};
       return sec.overrides[variant].facets;
     }
-    function stampTopicUpdated(topic) { topic.updatedAt = Date.now(); saveLibrary(); }
+    // GH #324. `saveLibrary()` is `JSON.stringify(the whole LibraryStore)` plus an adapter write --
+    // every source document and component, not just this one. On the typing path that ran per
+    // KEYSTROKE, and it is the dominant cost of the Source editor's lag.
+    //
+    // The split: the in-memory model still commits on every keystroke, because the caret and every
+    // mark offset depend on it being current. Only the WRITE is deferred, so nothing about editing
+    // behaviour changes -- what changes is how often the library is serialised.
+    //
+    // Deferred writes are FLUSHED by anything that ends the edit (locking, leaving the page), so
+    // "deferred" never means "lost".
+    var __libSaveT = null;
+    function scheduleSourceLibrarySave() {
+      if (__libSaveT) clearTimeout(__libSaveT);
+      __libSaveT = setTimeout(function () { __libSaveT = null; saveLibrary(); }, 600);
+    }
+    function flushSourceLibrarySave() {
+      if (!__libSaveT) return;
+      clearTimeout(__libSaveT); __libSaveT = null; saveLibrary();
+    }
+    if (typeof window !== "undefined" && window.addEventListener) {
+      // The same pair editor.js uses for its own debounced save; pagehide covers what beforeunload
+      // misses in a WKWebView.
+      window.addEventListener("pagehide", flushSourceLibrarySave);
+      window.addEventListener("beforeunload", flushSourceLibrarySave);
+    }
+    // `defer` is opt-IN, so every existing caller keeps its immediate write and only the keystroke
+    // path asks for the deferred one. Defaulting to deferred would have quietly changed the
+    // durability of a dozen call sites that never asked for it.
+    function stampTopicUpdated(topic, opts) {
+      topic.updatedAt = Date.now();
+      if (opts && opts.defer) scheduleSourceLibrarySave(); else { flushSourceLibrarySave(); saveLibrary(); }
+    }
 
     // Drag state for the section grip handle (source-stage-section-disclosure) -- only the
     // handle itself is draggable=true (the section box holds an editable heading input and
@@ -1324,9 +1355,9 @@
       __sourceDocModelTopicId = topic.id;
       return __sourceDocModel;
     }
-    function persistSourceDocModel(topic, model) {
+    function persistSourceDocModel(topic, model, opts) {
       topic.doc = window.SourceDoc.toJSON(model);
-      stampTopicUpdated(topic);
+      stampTopicUpdated(topic, opts);
     }
 
     // Project one node to its DOM block, keyed by node.key. Text blocks (heading/paragraph/callout)
@@ -1615,7 +1646,7 @@
         if (!block) return;
         var res = SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
         recordSourceEdit(res && res.edit); // buffer for the unlock->lock History commit
-        persistSourceDocModel(topic, model);
+        persistSourceDocModel(topic, model, { defer: true }); // GH #324: model now, write shortly
         repaintSourceMarks();
         // a base edit can flip an open alternate to stale -> re-render its panel (status + base line).
         if (__sourceAltPanelMarkId) renderSourceAltPanel(topic);
@@ -1729,10 +1760,14 @@
       // uio-S-C06: the figure badges ride the same repaint as every other mark treatment, so
       // "show marks" turns them all on and off together.
       renderSourceClassBadges();
-      // uio-S-A01: and so does the margin. A stub's position is derived from its mark's painted
-      // rectangle, so it has to be re-laid on the same pass that produced the rectangle — otherwise
-      // adding, breaking or resolving a mark leaves the margin describing the previous paint.
-      renderSourceGutter();
+      // uio-S-A01: and so does the margin -- a stub's position derives from its mark's painted
+      // rectangle, so it is re-laid on the pass that produced the rectangle.
+      // GH #324: SCHEDULED, not immediate. This runs on every keystroke, and a full re-lay costs a
+      // registry scan per linked mark and a classification resolve per restricted one. Marks do not
+      // change while you type -- their offsets shift and the paint follows -- so the margin only has
+      // to catch up once you pause. Anything needing it THIS instant (opening a card, whose slot
+      // must exist before its renderer runs) calls renderSourceGutter directly and still does.
+      scheduleSourceGutter();
     }
 
     // --- History commit collapse (spec 5) --------------------------------------
@@ -1746,6 +1781,10 @@
     }
     function flushSourceEditSession(topic, opts) {
       opts = opts || {};
+      // GH #324: the edit session is over, so any deferred library write lands NOW rather than
+      // waiting out its timer. This runs even when there is nothing to commit to History below --
+      // an edit that produced no History entry was still an edit to the document.
+      flushSourceLibrarySave();
       var s = __sourceEditSession; __sourceEditSession = null;
       var SD = window.SourceDoc, model = __sourceDocModel;
       if (!s || !s.edits.length || !topic || !SD || !model) return;
@@ -2097,7 +2136,15 @@
     // Lay the margin out. Order matters: build every child FIRST (so an open card is mounted and
     // has measured its own height), then stack, then place. Measuring before the card exists puts
     // every stub below it in the wrong place by exactly the card's height.
+    // GH #324: coalesce re-lays. A queued pass is not re-queued, so a burst of typing costs one
+    // re-lay rather than one per character.
+    var __gutterT = null;
+    function scheduleSourceGutter() {
+      if (__gutterT) return;
+      __gutterT = setTimeout(function () { __gutterT = null; renderSourceGutter(); }, 180);
+    }
     function renderSourceGutter() {
+      if (__gutterT) { clearTimeout(__gutterT); __gutterT = null; } // a direct call supersedes a queued one
       if (typeof document === "undefined") return;
       var track = document.querySelector(".source-doc__gutter-track"); if (!track) return;
       track.innerHTML = "";
@@ -4160,7 +4207,8 @@
     }
 
     kernel.expose({
-      activeSourceDocName: activeSourceDocName, activeSourceProductName: activeSourceProductName,
+      activeSourceDocName: activeSourceDocName,
+      flushSourceLibrarySave: flushSourceLibrarySave, activeSourceProductName: activeSourceProductName,
       // editor.js's __sourceLink browser-verify hook still names this one.
       pushSourceAlternate: pushSourceAlternate,
       applySourceLockState: applySourceLockState, flushSourceEditSession: flushSourceEditSession, persistSourceDocModel: persistSourceDocModel,
