@@ -45,7 +45,9 @@ small unlink button appears beside it once there is a link to remove. **List** i
 turning a block into a bulleted list changes the whole block rather than the words you highlighted;
 it only appears on blocks that can become one.
 
-> **Tip.** An unfilled image or interaction placeholder glows neon-pink on the canvas so you
-> never miss a slot. It's an authoring cue only — it never shows in preview or the export.
+> **Tip.** An unfilled slot shows in pink on the canvas so you never miss one — an authoring cue
+> only, never in preview or the export. An empty **image** slot is itself the button: click it and
+> pick **Upload image…** or **Image URL…** right there, no trip to the panel. Interaction slots
+> keep the fuller pink hatch.
 
 ---

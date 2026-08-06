@@ -11840,7 +11840,10 @@ section("neon-pink empty placeholders");
 (function () {
   var css = COURSE_CSS;
   // scoped to the authoring canvas (:not([data-env])) so it never ships / never shows in preview
-  ok("empty image/embed placeholders glare neon pink on the authoring canvas", /\.course-root:not\(\[data-env\]\) \.block-image--empty,[\s\S]*?\.course-root:not\(\[data-env\]\) \.embed--empty \.embed__iframe \{\s*border: 2px dashed #ff2bd6/.test(css));
+  // uio-E-M05: the IMAGE slot shrank to a quiet 1px border (the slot is the button now); the
+  // HTML-interaction/embed slots keep the full hatch.
+  ok("empty embed placeholders glare neon pink on the authoring canvas", /\.course-root:not\(\[data-env\]\) \.embed__empty-hint,[\s\S]*?\.course-root:not\(\[data-env\]\) \.embed--empty \.embed__iframe \{\s*border: 2px dashed #ff2bd6/.test(css));
+  ok("the empty image slot is a quiet 1px clickable invitation", /\.course-root:not\(\[data-env\]\) \.block-image--empty \{\s*border: 1px solid #ff2bd6;\s*cursor: pointer;/.test(css));
   ok("neon-pink text on empty titles/subs/frame", /\.course-root:not\(\[data-env\]\) \.block-frame__empty \{ color: #ff2bd6; \}/.test(css));
   // guarded to authoring-only: the neon pink must NOT appear under a runtime env
   ok("neon pink is NOT applied under data-env=runtime", !/\[data-env="runtime"\][^\n]*#ff2bd6/.test(css));
@@ -16593,7 +16596,7 @@ section("uio-E-M03: linked-block lock chip + provenance + Edit in Source");
   ok("the provenance action + lock have chrome homes", /\.insp-provenance__lock/.test(EDITOR_CSS) && /\.insp-provenance__action \{ margin-left: auto; \}/.test(EDITOR_CSS));
   // The bug this ticket surfaced: mount() decorated variant badges, the style audit and comment
   // pins but never source links, so boot/switchDoc/undo dropped every chip until a page reapply.
-  ok("mount() decorates source links like the reapply paths do", /decorateStyleAudit\(\); \/\/ #145[^\n]*\n[\s\S]{0,300}decorateSourceLinks\(\);\s*\n\s*renderCommentPins\(\);/.test(e));
+  ok("mount() decorates source links like the reapply paths do", /decorateStyleAudit\(\); \/\/ #145[^\n]*\n[\s\S]{0,300}decorateSourceLinks\(\);[\s\S]{0,200}renderCommentPins\(\);/.test(e));
   // Second bug it surfaced: the stage overlays sit OVER the Edit canvas, so the E-M01 block
   // toolbar floated above Source/Files/Publish. It is Edit chrome; the workspace stage class hides it.
   var BA = src("src/editor/block-actions.js");
@@ -16614,6 +16617,23 @@ section("uio-E-M04: chapter header loses its chrome");
   ok("rename stays on double-click; fit stays on click", /hdr\.addEventListener\("dblclick"/.test(W) && /fitChapter\(col\)/.test(W));
   ok("the outline keeps the chapter verbs (delete + drag-reorder)", /Delete chapter/.test(src("src/editor/outliner.js")) && /structMoveChapter/.test(src("src/editor/outliner.js")));
   ok("the + Chapter affordance keeps its dashed invitation", /\.chapter-header--add \{ border: 1px dashed/.test(css));
+})();
+
+// uio-E-M05 (EDIT-14): the empty image slot IS the button. The placeholder taught with a sentence
+// that admitted the slot was not wired to the action; the slot is clickable now, opening a small
+// inline picker with the SAME two actions the inspector offers, through ONE shared upload flow.
+section("uio-E-M05: image slot is the button");
+(function () {
+  var e = src("src/editor.js");
+  var r = src("src/render.js");
+  ok("the teaching sentence is gone from the image placeholder", !/Select this block, then add a URL or upload in the panel/.test(r));
+  ok("the placeholder keeps its label (pure, editor and export agree)", /block-image--empty"\);\s*\n\s*ph\.appendChild\(el\("div", "embed__empty-title", "Image"\)\);\s*\n\s*return ph;/.test(r));
+  ok("one upload flow feeds both surfaces (inspector + slot picker)", /function pickImageFileFor\(block\)/.test(e) && /up\.addEventListener\("click", function \(\) \{ pickImageFileFor\(block\); \}\)/.test(e));
+  var d = (function () { var i = e.indexOf("function decorateEmptyImageSlots"); return e.slice(i, i + 1800); })();
+  ok("the slot opens the canonical menu with upload + URL", /showContextMenu\(e\.clientX, e\.clientY/.test(d) && /"Upload image…"/.test(d) && /"Image URL…"/.test(d));
+  ok("the URL action goes through promptModal and history", /promptModal\("Image URL"/.test(d) && /pushHistory\(\); b\.src = String\(v\)\.trim\(\);/.test(d));
+  ok("decoration is idempotent and selects the block first", /__slotWired/.test(d) && /reselectBlockNode\(b, "block"\)/.test(d));
+  ok("all three render paths decorate the slots", (e.match(/decorateEmptyImageSlots\(\);|decorateEmptyImageSlots\(frame\);/g) || []).length === 3);
 })();
 
 // uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
