@@ -46,6 +46,16 @@ a refresh and a stage-switch.
     published. Informational only: it never blocks or warns, and it clears the moment you publish
     the document again. A document that has **never published** shows no drift badge, because there
     is nothing for it to have drifted from — the line beside it already says "Never published".
+- **Reviewing the drift.** A queued document whose source has moved carries a **Review source
+  drift** line you can open. Each changed passage gets a row naming where it sits in its source,
+  a line-by-line **diff** of the words you published against the words source has now, and three
+  answers: **Take the update** (record source's wording as this document's published text),
+  **Open in Edit** (go to the block and change it yourself), or **Keep ours…** (keep this
+  document's wording and say why — the reason shows on the row from then on). Passages are
+  answered one at a time, so taking one update never silently accepts another. A kept passage
+  stays quiet until source changes *again*, because the reason you gave was about wording that has
+  since moved on. Passages placed since the last release are listed as **Not published before** —
+  there is nothing to compare them against yet.
   - **N% aligned** — the share of the document's words linked to approved source rather than novel
     copy written here. Green at 85% or more, amber from 60 to 84, plain below. **Not indexed** means
     there is nothing to measure yet.

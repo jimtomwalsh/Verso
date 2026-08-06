@@ -1605,7 +1605,11 @@
   function driftedMasterIds(doc, versions) { return ProductRail.driftedMasterIds(doc, versions); }
   function groundTruthStaleCount(doc, versions) { return ProductRail.staleCount(doc, versions); }
   function currentMasterVersions() { return ProductRail.currentMasterVersions(); }
-  function snapshotGroundTruthBaseline(doc) { return ProductRail.snapshotBaseline(doc); }
+  // uio-P-M01: the baseline is stamps AND the published words. resolveSourceLinkContent is
+  // render.js's live resolver -- the same one that bakes the text into the export -- so what gets
+  // snapshotted is exactly what shipped, not a second reading of it.
+  function snapshotGroundTruthBaseline(doc) { return ProductRail.snapshotBaseline(doc, window.resolveSourceLinkContent); }
+  function docDriftPassages(doc) { return ProductRail.driftPassages(doc, window.resolveSourceLinkContent); }
 
   // ---- Product Rail: source-alignment metric (linked-to-approved-source vs novel) ----
   // What share of a document's prose is linked to approved source vs authored novel here. A whole
@@ -2126,6 +2130,10 @@
         ].forEach(function (b) { if (b) meta.appendChild(b); });
       }
       main.appendChild(meta);
+      // uio-P-M01 (PUB-02): drift stops being a number you cannot act on. Every changed passage is
+      // a row you can read and answer, right here on the thing about to run.
+      var drifted = publishDriftFor(r.docId);
+      if (drifted.length) main.appendChild(renderPublishDriftReview(r, drifted));
       row.appendChild(main);
       if (r.status !== "running") {
         var rm = U ? U.IconButton({ icon: "x", label: "Remove from the queue", onClick: function () { PQ.removeRow(q, r.id); savePublishQueue(); renderPublishQueue(); } }) : h("button", null, "x");
@@ -2136,6 +2144,98 @@
     scroller.appendChild(list);
     renderPublishHistory(host);
   }
+  // ---- uio-P-M01 (PUB-02): drift as a reviewable row --------------------------------------------
+  // The drift badge could only ever say "3 changed" -- a number with no way to see what changed or
+  // to answer it, on the one screen whose whole job is deciding whether to ship. Each drifted
+  // passage is now a row carrying the actual diff (published words vs source words) and the three
+  // answers the audit named: take the update, go fix it in Edit, or keep this wording and say why.
+  //
+  // It COMPUTES NOTHING: the rows come from ProductRail.driftPassages over the published-text
+  // snapshot, and the diff is the existing LineDiff. Accepting or keeping writes through the same
+  // pure helpers, so the queue row and any later surface cannot disagree about what drifted.
+  function publishDriftFor(docId) {
+    var d = docId && registry[docId];
+    return d ? docDriftPassages(d) : [];
+  }
+  // The shared diff renderer. Source's reconcile modal drew these lines first; Publish needs the
+  // identical view, so the classes are neutral (`diff-block` / `diff-line--*`) and both call here
+  // rather than each owning a copy that can drift in styling as well as in words.
+  function renderTextDiff(before, after) {
+    var block = h("div", "diff-block");
+    var ops = window.LineDiff ? window.LineDiff.diff(before || "", after || "") : [];
+    ops.forEach(function (op) {
+      var prefix = op.type === "removed" ? "− " : op.type === "added" ? "+ " : "  ";
+      block.appendChild(h("div", "diff-line diff-line--" + op.type, prefix + op.text));
+    });
+    return block;
+  }
+  function renderPublishDriftReview(r, rows) {
+    var wrap = h("details", "publish-drift");
+    var sum = h("summary", "publish-drift__summary");
+    var changed = rows.filter(function (x) { return !x.isNew; }).length;
+    var fresh = rows.length - changed;
+    var parts = [];
+    if (changed) parts.push(changed + (changed === 1 ? " passage has" : " passages have") + " changed in source");
+    if (fresh) parts.push(fresh + " not published before");
+    // The canonical caret, the same one every other <details> in the chrome draws, so open/closed
+    // reads identically here and in the release list right below it.
+    sum.appendChild(h("span", "caret"));
+    sum.appendChild(h("span", null, "Review source drift — " + parts.join(" · ")));
+    wrap.appendChild(sum);
+    rows.forEach(function (p) {
+      var item = h("div", "publish-drift__item");
+      var head = h("div", "publish-drift__head");
+      // Where the passage sits in its source, so a row is identifiable without opening anything.
+      var master = libComponents()[p.masterId];
+      var where = (master && master.name) || "source";
+      if (master && master.doc && window.SourceDoc) {
+        var model = window.SourceDoc.fromJSON(master.doc);
+        var mk = window.SourceDoc.markById(model, p.markId);
+        var path = mk ? window.SourceDoc.markPath(model, mk) : "";
+        if (path) where += " · " + path;
+      }
+      head.appendChild(h("span", "publish-drift__where", where));
+      if (p.isNew) head.appendChild(h("span", "publish-drift__tag", "Not published before"));
+      if (p.keptReason) head.appendChild(h("span", "publish-drift__tag", "Kept: " + p.keptReason));
+      item.appendChild(head);
+      // A passage that has never shipped has no "before" to diff -- show what it says, not a diff
+      // against nothing, which would paint the whole passage as an addition and read as a change.
+      if (p.isNew) item.appendChild(h("div", "diff-block", p.after));
+      else item.appendChild(renderTextDiff(p.before, p.after));
+      if (!p.isNew) {
+        var acts = h("div", "publish-drift__acts");
+        var take = h("button", "prop-btn", "Take the update");
+        take.title = "Record the source's wording as this document's published text";
+        take.addEventListener("click", function () {
+          var d = registry[r.docId]; if (!d) return;
+          pushHistory(); ProductRail.acceptPassage(d, p.key, p.after);
+          saveRegistry(registry); renderPublishQueue();
+        });
+        acts.appendChild(take);
+        var open = h("button", "prop-btn", "Open in Edit");
+        open.title = "Go to this passage's block in the document";
+        open.addEventListener("click", function () {
+          if (typeof jumpToLinkedBlock === "function") jumpToLinkedBlock(r.docId, p.blockId);
+        });
+        acts.appendChild(open);
+        var keep = h("button", "prop-btn", p.keptReason ? "Change the reason" : "Keep ours…");
+        keep.title = "Keep this document's wording, on the record";
+        keep.addEventListener("click", function () {
+          promptModal("Keep this wording", "Why this document differs from source", p.keptReason || "", function (v) {
+            if (v == null || !String(v).trim()) return;
+            var d = registry[r.docId]; if (!d) return;
+            pushHistory(); ProductRail.keepPassage(d, p.key, String(v).trim(), p.after);
+            saveRegistry(registry); renderPublishQueue();
+          });
+        });
+        acts.appendChild(keep);
+        item.appendChild(acts);
+      }
+      wrap.appendChild(item);
+    });
+    return wrap;
+  }
+
   // Release history (Epic 6): the append-only whole-family export log, newest first, each release
   // expandable to its per-document entries (format / variant / version). Provenance only -- it never
   // re-exports or mutates a package.
