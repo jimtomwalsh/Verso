@@ -17672,6 +17672,19 @@ section("uio-S-M02 one card, docked");
 
 section("uio-S-M01 three modes, one source of truth");
 (function () {
+  // REGRESSION, found by James 2026-08-06 and confirmed in the browser: the mode switch was in the
+  // DOM with all three buttons and completely invisible, because uio-W10 hid the whole doc-controls
+  // zone for Source. Source was locked in Review with no way to reach Edit — the stage could not be
+  // edited at all. The zone hid four children on one rule; each declares its own stage now.
+  // A test that only counts the buttons cannot see this, which is why it asserts VISIBILITY rules.
+  var wcss = src("styles/editor/03-workspace.css");
+  ok("Source can reach its own mode switch — the control that unlocks the prose",
+    /\.toolbar\.toolbar--source \.editor-window__zone--doc \{ display: flex; \}/.test(wcss) &&
+    /\.toolbar\.toolbar--source \.editor-window__srcmode \{ display: flex; \}/.test(wcss));
+  ok("and only that control — the canvas controls stay Edit-only, where a canvas exists",
+    /\.toolbar\.toolbar--source \.editor-window__docsettings,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__view,\s*\n\s*\.toolbar\.toolbar--source \.editor-window__axes \{ display: none; \}/.test(wcss));
+  ok("the mode switch does not leak into Edit, which has no source prose to lock",
+    /\.toolbar \.editor-window__srcmode \{ display: none; \}/.test(wcss));
   var es = src("src/editor/source-stage.js");
   var sl = src("src/editor/source-link.js");
   var css = EDITOR_CSS;

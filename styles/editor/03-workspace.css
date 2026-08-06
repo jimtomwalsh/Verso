@@ -41,6 +41,19 @@
    else. The doc controls and the output cluster stay Edit-only, because they act on a canvas Source
    does not have. */
 .toolbar.toolbar--source .editor-window__zone--tabs { display: flex; }
+/* ...and the DOC zone, for one control only. The rule above hid this zone wholesale for Source on
+   the grounds that doc controls act on a canvas Source does not have -- true of doc settings, the
+   Build/Read toggle and the variant axes, but NOT of uio-S-M01's Read/Review/Edit switch, which
+   lives in this zone (a document's own live switches belong together) and is Source's ONLY way to
+   unlock prose. Hiding it left Source permanently locked in Review with no way out.
+   So each child now declares the stage it belongs to, rather than the zone deciding for all four. */
+.toolbar.toolbar--source .editor-window__zone--doc { display: flex; }
+.toolbar.toolbar--source .editor-window__docsettings,
+.toolbar.toolbar--source .editor-window__view,
+.toolbar.toolbar--source .editor-window__axes { display: none; }
+.toolbar .editor-window__srcmode { display: none; }
+.toolbar.toolbar--source .editor-window__srcmode { display: flex; }
+.toolbar.toolbar--source .editor-window__sep--doc { display: block; }
 /* One strip at a time, in the one host. The other is not merely empty -- it is absent, so it cannot
    take the gap its `gap` would give it. */
 .toolbar #source-tabs { display: none; }
