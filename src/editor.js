@@ -2302,24 +2302,86 @@
       } });
     });
     items.push({ sep: true });
+    // uio-P-M03 (PUB-06): the options ARE the preset. The dialog's controls open here, over this
+    // row's own options, so the two surfaces stop being "which one do I use?".
+    items.push({ label: "Edit options…", onClick: function () { openPublishOptionsEditor(rowId); } });
     items.push({ label: "Save current as new preset…", onClick: function () {
       promptPublishPresetName("Save output preset", PP.presetName(store, row.preset || "master") + " copy", function (name) {
-        var np = PP.saveCustom(store, name, PP.optionsFor(store, row.preset || "master"));
-        if (np) { row.preset = np.id; PP.setLastForDoc(store, row.docId, np.id); savePublishQueue(); savePublishPresets(); renderPublishQueue(); }
+        var np = PP.saveCustom(store, name, publishRowResolvedOptions(row));
+        if (np) { row.preset = np.id; delete row.optionsOverride; PP.setLastForDoc(store, row.docId, np.id); savePublishQueue(); savePublishPresets(); renderPublishQueue(); }
       });
     } });
-    if (!PP.isBuiltin(row.preset || "master")) {
-      items.push({ label: "Rename preset…", onClick: function () {
-        promptPublishPresetName("Rename preset", PP.presetName(store, row.preset), function (name) {
-          PP.renameCustom(store, row.preset, name); savePublishPresets(); renderPublishQueue();
-        });
-      } });
-      items.push({ label: "Delete preset", danger: true, onClick: function () {
-        PP.deleteCustom(store, row.preset); row.preset = "master";
-        savePublishPresets(); savePublishQueue(); renderPublishQueue();
-      } });
-    }
+    // uio-P-M04 (PUB-07): renaming and deleting a shared preset from a transient hover menu is how
+    // a team preset disappears by accident. Management moved to the settings sheet, beside the
+    // other named libraries; the chip CHOOSES.
+    items.push({ label: "Manage presets…", onClick: function () { openSettingsSection("system", "presets"); } });
     showContextMenu(x, y, items);
+  }
+  // What a row publishes with BEFORE its own edits: the shipped defaults with the preset's own
+  // options over them. A preset stores only what it changes, so comparing an edit against the
+  // preset's raw object compares against `undefined` and records "differs" for a value that is
+  // simply the default — which left a row carrying a phantom override after being edited back.
+  function publishPresetBaseOptions(presetId) {
+    var PP = window.PublishPresets, SX = window.SCORMExport;
+    var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
+    var own = PP ? PP.optionsFor(publishPresets(), presetId || "master") : {};
+    Object.keys(own).forEach(function (k) { base[k] = own[k]; });
+    return base;
+  }
+  // What this row will actually publish with: the above, plus any options edited for this row
+  // alone. One resolver, so the editor, the "save as preset" action and the run cannot disagree.
+  function publishRowResolvedOptions(row) {
+    var base = publishPresetBaseOptions(row.preset || "master");
+    var over = row.optionsOverride || {};
+    Object.keys(over).forEach(function (k) { base[k] = over[k]; });
+    return base;
+  }
+  // uio-P-M03 (PUB-06): the preset editor. Same controls as the export dialog (one builder), opened
+  // from the row that will use them, live-applying to that row -- so a single-document publish is a
+  // queue of one rather than a separate dialog with its own copy of the fields.
+  function openPublishOptionsEditor(rowId) {
+    var PQ = window.PublishQueue, PP = window.PublishPresets, SX = window.SCORMExport, U = window.VersoUI;
+    if (!PQ || !PP || !SX || !SX.buildPresetOptionRows) return;
+    var row = PQ.rowById(publishQueue(), rowId); if (!row) return;
+    var opts = publishRowResolvedOptions(row);
+    var box = h("div", null);
+    var note = h("div", "insp-hint", "");
+    function paintNote() {
+      var n = Object.keys(row.optionsOverride || {}).length;
+      note.textContent = n
+        ? n + (n === 1 ? " option differs" : " options differ") + " from “" + PP.presetName(publishPresets(), row.preset || "master") + "” for this row only. Save them as a preset to reuse them."
+        : "These are “" + PP.presetName(publishPresets(), row.preset || "master") + "”'s options. Changing one here applies to this row only until you save it as a preset.";
+    }
+    box.appendChild(note);
+    SX.buildPresetOptionRows(opts, box, function (next) {
+      // Only what actually DIFFERS from the preset is kept, so a row stops carrying an override the
+      // moment it is edited back to matching -- and the chip stops claiming a difference it lost.
+      // Against the RESOLVED base, not the preset's sparse own options (see publishPresetBaseOptions).
+      var base = publishPresetBaseOptions(row.preset || "master");
+      var over = {};
+      Object.keys(next).forEach(function (k) { if (next[k] !== base[k]) over[k] = next[k]; });
+      if (Object.keys(over).length) row.optionsOverride = over; else delete row.optionsOverride;
+      savePublishQueue(); paintNote(); renderPublishQueue();
+    }, null);
+    paintNote();
+    var save = h("button", "prop-btn", "Save as preset…");
+    save.addEventListener("click", function () {
+      promptPublishPresetName("Save output preset", PP.presetName(publishPresets(), row.preset || "master") + " copy", function (name) {
+        var np = PP.saveCustom(publishPresets(), name, publishRowResolvedOptions(row));
+        if (!np) return;
+        row.preset = np.id; delete row.optionsOverride;
+        PP.setLastForDoc(publishPresets(), row.docId, np.id);
+        savePublishQueue(); savePublishPresets(); renderPublishQueue();
+        if (modal) modal.remove();
+      });
+    });
+    box.appendChild(save);
+    // A blocking decision surface with a live canvas behind it is exactly what the sheet is for,
+    // but these options belong to ONE queued row rather than to the machine, so they ride the
+    // canonical modal shell the export dialog uses — same controls, same frame, no Save/Cancel:
+    // every edit above has already applied.
+    var modal = U.Modal({ title: "Output options", description: "What the package is. Applies to this row; save it as a preset to reuse it.", children: box, footer: [], onClose: null });
+    document.body.appendChild(modal);
   }
   // T3: the destination popover. It is the row's "where does this land, and what is it called"
   // surface — one path row PER OUTPUT (flagship + each variant), each independently pickable and
@@ -2497,6 +2559,71 @@
     paint();
   }
   function openPublishDestinations() { openSettingsSection("system", "destinations"); }
+
+  // uio-P-M04 (PUB-07): the preset library. Save, rename and delete used to live inside a per-row
+  // chip menu, so a shared preset could be deleted from a transient popover and you could not see
+  // which presets existed, what they differed on, or how many rows used one without queuing
+  // something first. It is a sheet section beside the other named libraries, like destinations --
+  // the chip now only CHOOSES.
+  function publishPresetUsage(id) {
+    var q = publishQueue();
+    return ((q && q.rows) || []).filter(function (r) { return (r.preset || "master") === id; }).length;
+  }
+  // What a preset actually changes, against the shipped defaults — so a row of names is a row of
+  // differences rather than three words you have to open one by one.
+  function publishPresetSummary(p) {
+    var SX = window.SCORMExport; if (!SX || !SX.defaultOptions) return "";
+    var base = SX.defaultOptions(), o = (p && p.options) || {};
+    var LABEL = { format: "format", embedFonts: "fonts", scrollbar: "scrollbar", learnerTheme: "theme toggle",
+      webVideo: "web video", reviewFile: "review file", optimiseMedia: "image optimising",
+      maxImageDim: "max image size", imageQuality: "image quality", externalizeMedia: "media packaging" };
+    var diffs = Object.keys(LABEL).filter(function (k) { return k in o && o[k] !== base[k]; }).map(function (k) { return LABEL[k]; });
+    if (!diffs.length) return "Same as the shipped defaults.";
+    return "Changes " + (diffs.length > 3 ? diffs.slice(0, 3).join(", ") + " and " + (diffs.length - 3) + " more" : diffs.join(", ")) + ".";
+  }
+  function buildPublishPresetsBody(host) {
+    var PP = window.PublishPresets; if (!PP) return;
+    function paint() {
+      host.innerHTML = "";
+      host.appendChild(h("div", "insp-hint", "Saved output options a publish row can choose. Master is the shipped default and cannot be changed."));
+      PP.allPresets(publishPresets()).forEach(function (p) {
+        var rowEl = h("div", "publish-destlib__row");
+        var main = h("div", "publish-destlib__main");
+        var nameEl = h("div", "publish-destlib__name", p.name);
+        var used = publishPresetUsage(p.id);
+        if (used) nameEl.appendChild(h("span", "publish-destlib__use", used + (used === 1 ? " row" : " rows")));
+        main.appendChild(nameEl);
+        main.appendChild(h("div", "publish-destlib__path", publishPresetSummary(p)));
+        rowEl.appendChild(main);
+        if (!PP.isBuiltin(p.id)) {
+          var acts = h("div", "publish-destlib__acts");
+          var ren = h("button", "prop-btn", "Rename");
+          ren.addEventListener("click", function () {
+            promptPublishPresetName("Rename preset", p.name, function (name) {
+              PP.renameCustom(publishPresets(), p.id, name); savePublishPresets(); paint(); renderPublishQueue();
+            });
+          });
+          acts.appendChild(ren);
+          var del = h("button", "prop-btn prop-btn--danger", "Delete");
+          del.addEventListener("click", function () {
+            // The audit's point: deleting a shared preset must say what falls back, and how much.
+            var n = publishPresetUsage(p.id);
+            confirmModal("Delete preset", "Delete “" + p.name + "”?" + (n ? " " + n + (n === 1 ? " queued row falls" : " queued rows fall") + " back to Master." : " No queued row is using it."), function () {
+              var q = publishQueue();
+              ((q && q.rows) || []).forEach(function (r) { if ((r.preset || "master") === p.id) r.preset = "master"; });
+              PP.deleteCustom(publishPresets(), p.id);
+              savePublishPresets(); savePublishQueue(); paint(); renderPublishQueue();
+            }, { okLabel: "Delete", danger: true });
+          });
+          acts.appendChild(del);
+          rowEl.appendChild(acts);
+        }
+        host.appendChild(rowEl);
+      });
+      host.appendChild(h("div", "insp-hint", "New presets are saved from a publish row: set its options, then “Save as preset…”."));
+    }
+    paint();
+  }
   // The Product root folder, set once for the whole family (T3, Q1). It lives in the pane head rather
   // than on a row because it is a Product-scoped setting that every row inherits — putting it on a row
   // would imply it belonged to that row.
@@ -6857,6 +6984,7 @@
     buildHeaderBody: buildHeaderBody,
     buildLibraryBody: buildLibraryBody,
     buildPublishDestinationsBody: buildPublishDestinationsBody,   // uio-P-M02
+    buildPublishPresetsBody: buildPublishPresetsBody,             // uio-P-M04
     setDevToolsEnabled: setDevToolsEnabled,
     devToolsOn: devToolsOn,
     setSpellcheckEnabled: setSpellcheckEnabled,

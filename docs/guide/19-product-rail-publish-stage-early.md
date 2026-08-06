@@ -46,6 +46,14 @@ a refresh and a stage-switch.
     published. Informational only: it never blocks or warns, and it clears the moment you publish
     the document again. A document that has **never published** shows no drift badge, because there
     is nothing for it to have drifted from — the line beside it already says "Never published".
+- **Output options and presets.** A row's **preset chip** names the options its package is built
+  with. Open it and pick **Edit options…** to see those options — the same controls the export
+  dialog uses, because they are the same engine. Changes apply to that row straight away; the note
+  at the top says how many differ from the preset. **Save as preset…** turns the row's current
+  options into a named preset you can point other rows at. Manage them under **Settings → System →
+  Output presets**: each one says what it changes and how many queued rows use it, and deleting one
+  tells you how many rows fall back to **Master** before it happens. Master is the shipped default
+  and can't be edited.
 - **Named destinations.** A folder with a name your team recognises — "LMS drop · production",
   "Client share" — defined once and pointed at from rows, instead of re-picking a path each time.
   Manage them under **Settings → System → Publish destinations**: add one, choose its folder,

@@ -1179,6 +1179,104 @@
   // ---- export options modal ------------------------------------------------
   function elh(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
 
+  // uio-P-M03 (PUB-06): ONE set of option controls, two surfaces. The rich export dialog and the
+  // queue's presets were always the same engine reading the same fields, but each drew its own
+  // controls -- so "which one do I use?" had no answer and options set in one place looked lost in
+  // the other. These are the fields a PRESET carries (what the package IS); the dialog keeps the
+  // per-run things around them that a preset cannot hold: the version, which variants to build, and
+  // where each one lands.
+  //
+  // `host` is where the sections go, `opts` is mutated live, `onChange` fires after any edit so a
+  // caller can persist and re-render. Pure DOM over an options object -- no store, no modal, so the
+  // preset editor and the dialog cannot drift apart in fields, order or wording.
+  function buildPresetOptionRows(opts, hostBox, onChange, scan) {
+    var UI = window.VersoUI;
+    var host = hostBox;
+    function changed() { if (typeof onChange === "function") onChange(opts); }
+    function section(title) {
+      var sec = UI.PanelSection({ title: title });
+      hostBox.appendChild(sec);
+      host = sec.querySelector(".insp-section__body");
+    }
+    function row(labelText) {
+      var r = elh("div", "modal-field");
+      r.appendChild(elh("span", "modal-field__label", labelText));
+      host.appendChild(r); return r;
+    }
+    function seg(labelText, key, pairs, after, isToggle) {
+      var r = row(labelText);
+      var group = elh("div", "prop-toggle-row modal-field__control" + (isToggle ? " is-toggle" : ""));
+      pairs.forEach(function (p) {
+        var b = elh("button", "prop-toggle" + (opts[key] === p[1] ? " is-on" : ""), p[0]); b.type = "button";
+        b.addEventListener("click", function () {
+          opts[key] = p[1];
+          Array.prototype.forEach.call(group.children, function (c) { c.classList.remove("is-on"); });
+          b.classList.add("is-on");
+          if (after) after();
+          changed();
+        });
+        group.appendChild(b);
+      });
+      r.appendChild(group);
+    }
+    function toggle(labelText, key) { seg(labelText, key, [["On", true], ["Off", false]], null, true); }
+
+    section("Format");
+    var fmtRow = row("Package type");
+    var sel = elh("select", "prop-select modal-field__control");
+    FORMATS.forEach(function (f) { var o = elh("option", null, f.label + (f.enabled ? "" : " (soon)")); o.value = f.value; if (!f.enabled) o.disabled = true; if (f.value === opts.format) o.selected = true; sel.appendChild(o); });
+    sel.addEventListener("change", function () { opts.format = sel.value; changed(); });
+    fmtRow.appendChild(sel);
+
+    section("Include");
+    toggle("Embed Exo 2 fonts", "embedFonts");
+    toggle("Always-visible scrollbar", "scrollbar");
+    toggle("Learner dark / light toggle", "learnerTheme");
+
+    // Optimise media (§286) — downscale + recompress oversized raster images so a
+    // heavy course ships smaller. Non-destructive: originals are untouched; only the
+    // exported copies are optimised. Video/SVG are never touched.
+    section("Optimise media");
+    toggle("Downscale + recompress images", "optimiseMedia");
+    var dimRow = row("Max image size");
+    var dimSel = elh("select", "prop-select modal-field__control");
+    [["Original (off)", 0], ["1280 px", 1280], ["1600 px", 1600], ["2000 px", 2000], ["2560 px", 2560]].forEach(function (p) {
+      var o = elh("option", null, p[0]); o.value = String(p[1]); if (p[1] === opts.maxImageDim) o.selected = true; dimSel.appendChild(o);
+    });
+    dimSel.addEventListener("change", function () { opts.maxImageDim = parseInt(dimSel.value, 10) || 0; changed(); });
+    dimRow.appendChild(dimSel);
+    seg("Quality", "imageQuality", [["Small", 0.7], ["Balanced", 0.85], ["High", 0.92]], null);
+    host.appendChild(elh("div", "insp-hint", "Caps each image's longest edge and re-encodes it (JPEG stays JPEG; PNG/WebP/static GIF become WebP). Animated GIFs are re-encoded as GIFs (downscaled + fewer colours; Small also halves the frame rate) so they finally shrink too - they are usually the heaviest thing in a course. Only applied when it actually shrinks the file; small images and video/SVG are left as-is."));
+
+    // #193: media as separate files vs one inlined index.html. Separate files keep
+    // index.html tiny so the LMS can start the course immediately (the ~30s Moodle
+    // Start-button freeze was the LMS downloading the whole inlined file first).
+    section("Package structure");
+    toggle("Package media as separate files (recommended)", "externalizeMedia");
+    host.appendChild(elh("div", "insp-hint", "Ships images, GIFs and video as separate files INSIDE this same SCORM zip (referenced by relative path), instead of base64-inlining everything into index.html. Keeps index.html tiny so the course starts at once and media streams in - fixes the ~30s delay before the Start button responds in Moodle on heavy courses. Everything still lives in the one uploaded zip; nothing is hosted elsewhere. Turn off only to reproduce the old single-file behaviour."));
+
+    // Review (Verso Viewer) — also emit the frozen .versopub.json snapshot so this
+    // exact version can go out for review alongside the SCORM package.
+    section("Review");
+    toggle("Also publish review file", "reviewFile");
+    host.appendChild(elh("div", "insp-hint", "Emits a Verso Viewer snapshot (.versopub.json) of this version — to the connected review folder, or a download — so reviewers can comment on it."));
+
+    section("Web video embeds");
+    seg("Video handling", "webVideo", [["Package locally", "package"], ["Link on web", "link"]], function () { updateVideoNote(); });
+    var vidNote = elh("div", "insp-hint", ""); host.appendChild(vidNote);
+    function updateVideoNote() {
+      if (!scan) { vidNote.textContent = "Applies to any web video embeds in the documents this preset publishes."; return; }
+      if (scan.live === 0 && scan.local === 0) { vidNote.textContent = "No web video embeds in this course."; return; }
+      var msg = [];
+      if (scan.local) msg.push(scan.local + " uploaded video(s) will be packaged offline.");
+      if (scan.live) msg.push(opts.webVideo === "package"
+        ? scan.live + " web-link video(s) can't be packaged (no uploaded file) — they'll show an 'upload to include' placeholder."
+        : scan.live + " web-link video(s) will stream live (needs network in the LMS).");
+      vidNote.textContent = msg.join(" ");
+    }
+    updateVideoNote();
+  }
+
   function showExportModal() {
     if (location.protocol === "file:") {
       alert("Export needs the http:// origin so it can bundle the fonts, course.css and interactions.\n\nRun ./serve.command (python3 -m http.server 8123) and open http://localhost:8123, then export again.");
@@ -1210,31 +1308,13 @@
       r.appendChild(elh("span", "modal-field__label", labelText));
       host.appendChild(r); return r;
     }
-    // segmented control bound to opts[key]; pairs = [[label,value],...]
-    function seg(labelText, key, pairs, onChange, isToggle) {
-      var r = row(labelText);
-      var group = elh("div", "prop-toggle-row modal-field__control" + (isToggle ? " is-toggle" : ""));
-      pairs.forEach(function (p) {
-        var b = elh("button", "prop-toggle" + (opts[key] === p[1] ? " is-on" : ""), p[0]); b.type = "button";
-        b.addEventListener("click", function () {
-          opts[key] = p[1];
-          Array.prototype.forEach.call(group.children, function (c) { c.classList.remove("is-on"); });
-          b.classList.add("is-on");
-          if (onChange) onChange();
-        });
-        group.appendChild(b);
-      });
-      r.appendChild(group);
-    }
-    function toggle(labelText, key) { seg(labelText, key, [["On", true], ["Off", false]], null, true); }
+    // uio-P-M03: the segmented/toggle row builders moved into buildPresetOptionRows with the fields
+    // they drew. What is left here is the per-RUN half a preset cannot carry: version, which
+    // variants to build, and the folder each lands in.
 
-    // Format
-    section("Format");
-    var fmtRow = row("Package type");
-    var sel = elh("select", "prop-select modal-field__control");
-    FORMATS.forEach(function (f) { var o = elh("option", null, f.label + (f.enabled ? "" : " (soon)")); o.value = f.value; if (!f.enabled) o.disabled = true; if (f.value === opts.format) o.selected = true; sel.appendChild(o); });
-    sel.addEventListener("change", function () { opts.format = sel.value; });
-    fmtRow.appendChild(sel);
+    // uio-P-M03: the package-shaped fields come from the ONE shared builder, so this dialog and the
+    // queue's preset editor cannot offer different controls for the same engine.
+    buildPresetOptionRows(opts, box, function () { updateName(); }, scan);
 
     // Variant (only shown when the course defines variants) — #154: a multi-select
     // checklist (flagship + each variant), each row with its own output-folder
@@ -1278,55 +1358,6 @@
     verRow.appendChild(verIn);
     var verHint = elh("div", "insp-hint", "Suggested next version — bumps automatically each export.");
     host.appendChild(verHint);
-
-    // Include toggles
-    section("Include");
-    toggle("Embed Exo 2 fonts", "embedFonts");
-    toggle("Always-visible scrollbar", "scrollbar");
-    toggle("Learner dark / light toggle", "learnerTheme");
-
-    // Optimise media (§286) — downscale + recompress oversized raster images so a
-    // heavy course ships smaller. Non-destructive: originals are untouched; only the
-    // exported copies are optimised. Video/SVG are never touched.
-    section("Optimise media");
-    toggle("Downscale + recompress images", "optimiseMedia");
-    var dimRow = row("Max image size");
-    var dimSel = elh("select", "prop-select modal-field__control");
-    [["Original (off)", 0], ["1280 px", 1280], ["1600 px", 1600], ["2000 px", 2000], ["2560 px", 2560]].forEach(function (p) {
-      var o = elh("option", null, p[0]); o.value = String(p[1]); if (p[1] === opts.maxImageDim) o.selected = true; dimSel.appendChild(o);
-    });
-    dimSel.addEventListener("change", function () { opts.maxImageDim = parseInt(dimSel.value, 10) || 0; });
-    dimRow.appendChild(dimSel);
-    seg("Quality", "imageQuality", [["Small", 0.7], ["Balanced", 0.85], ["High", 0.92]], null);
-    host.appendChild(elh("div", "insp-hint", "Caps each image's longest edge and re-encodes it (JPEG stays JPEG; PNG/WebP/static GIF become WebP). Animated GIFs are re-encoded as GIFs (downscaled + fewer colours; Small also halves the frame rate) so they finally shrink too - they are usually the heaviest thing in a course. Only applied when it actually shrinks the file; small images and video/SVG are left as-is."));
-
-    // #193: media as separate files vs one inlined index.html. Separate files keep
-    // index.html tiny so the LMS can start the course immediately (the ~30s Moodle
-    // Start-button freeze was the LMS downloading the whole inlined file first).
-    section("Package structure");
-    toggle("Package media as separate files (recommended)", "externalizeMedia");
-    host.appendChild(elh("div", "insp-hint", "Ships images, GIFs and video as separate files INSIDE this same SCORM zip (referenced by relative path), instead of base64-inlining everything into index.html. Keeps index.html tiny so the course starts at once and media streams in - fixes the ~30s delay before the Start button responds in Moodle on heavy courses. Everything still lives in the one uploaded zip; nothing is hosted elsewhere. Turn off only to reproduce the old single-file behaviour."));
-
-    // Review (Verso Viewer) — also emit the frozen .versopub.json snapshot so this
-    // exact version can go out for review alongside the SCORM package.
-    section("Review");
-    toggle("Also publish review file", "reviewFile");
-    host.appendChild(elh("div", "insp-hint", "Emits a Verso Viewer snapshot (.versopub.json) of this version — to the connected review folder, or a download — so reviewers can comment on it."));
-
-    // Web video
-    section("Web video embeds");
-    seg("Video handling", "webVideo", [["Package locally", "package"], ["Link on web", "link"]], updateVideoNote);
-    var vidNote = elh("div", "insp-hint", ""); host.appendChild(vidNote);
-    function updateVideoNote() {
-      if (scan.live === 0 && scan.local === 0) { vidNote.textContent = "No web video embeds in this course."; return; }
-      var msg = [];
-      if (scan.local) msg.push(scan.local + " uploaded video(s) will be packaged offline.");
-      if (scan.live) msg.push(opts.webVideo === "package"
-        ? scan.live + " web-link video(s) can't be packaged (no uploaded file) — they'll show an 'upload to include' placeholder."
-        : scan.live + " web-link video(s) will stream live (needs network in the LMS).");
-      vidNote.textContent = msg.join(" ");
-    }
-    updateVideoNote();
 
     // filename preview
     var nameLine = elh("div", "modal-filename");
@@ -1373,7 +1404,10 @@
   }
 
   // expose builders + the whole assemble path for headless testing / driving
-  window.SCORMExport = { makeZip: makeZip, crc32: crc32, themeCss: themeCss, manifest: manifest, tokenBody: tokenBody, buildPackage: buildPackage, defaultOptions: defaultOptions, formats: formats, suggestVersion: suggestVersion, packageName: packageName, variantList: variantList };
+  window.SCORMExport = { makeZip: makeZip, crc32: crc32, themeCss: themeCss, manifest: manifest, tokenBody: tokenBody, buildPackage: buildPackage, defaultOptions: defaultOptions, formats: formats, suggestVersion: suggestVersion, packageName: packageName, variantList: variantList,
+    // uio-P-M03: the shared option rows, so the queue's preset editor draws the SAME controls as
+    // the export dialog rather than a second set over the same fields.
+    buildPresetOptionRows: buildPresetOptionRows };
 
   window.Editor.registerPipelineButton("Export SCORM", showExportModal, true);
 })();
