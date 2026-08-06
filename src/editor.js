@@ -2353,16 +2353,48 @@
         line.appendChild(head);
         var fn = publishRowFilename(SX && SX.packageName, opts);
         if (fn) line.appendChild(h("div", "publish-destrow__file", fn));
+        // uio-P-M02 (PUB-05): the named destinations, as a row of choices. A destination is a folder
+        // someone already named ("LMS drop · production"), so pointing an output at one is picking a
+        // name rather than re-recognising a path — and re-pointing everything that uses it is one
+        // edit in one place. Only offered once at least one exists; the library below mints them.
+        var known = PA.destinations(publishPaths());
+        if (known.length) {
+          var dsel = h("div", "publish-destrow__dests");
+          known.forEach(function (dd) {
+            var on = dest.kind === "named" && dest.destId === dd.id;
+            var b = h("button", "prop-btn" + (on ? " is-on" : ""), dd.name);
+            b.title = on ? "Publishing here. Click to stop using this destination." : "Publish this output to “" + dd.name + "” (" + (dd.label || "no folder chosen yet") + ")";
+            b.addEventListener("click", function () {
+              PA.setRowDestination(publishPaths(), dest.key, on ? null : dd.id);
+              // A named destination and a one-off folder answer the same question, so choosing one
+              // clears the other rather than leaving a hidden override that silently wins.
+              if (!on) PA.clearRowPath(publishPaths(), dest.key);
+              savePublishPaths(); closeChromePop(); renderPublishQueue();
+            });
+            dsel.appendChild(b);
+          });
+          line.appendChild(dsel);
+        }
         var acts = h("div", "publish-destrow__acts");
         var pickLabel = dest.kind === "row" ? "Change folder" : "Choose folder";
         var pick = U ? U.Button({ variant: "secondary", label: pickLabel, onClick: function () {
           pickPublishDir(PA.rowHandleKey(dest.key)).then(function (name) {
             if (!name) return;
-            PA.setRowPath(publishPaths(), dest.key, name); savePublishPaths();
+            PA.setRowPath(publishPaths(), dest.key, name);
+            PA.setRowDestination(publishPaths(), dest.key, null); // an explicit folder replaces a named one
+            savePublishPaths();
             closeChromePop(); renderPublishQueue();
           });
         } }) : h("button", null, pickLabel);
         acts.appendChild(pick);
+        if (dest.kind === "named") {
+          var unset = U ? U.Button({ variant: "secondary", label: "Reset", onClick: function () {
+            PA.setRowDestination(publishPaths(), dest.key, null); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          } }) : h("button", null, "Reset");
+          unset.title = rootLbl ? "Go back to inheriting the Product folder “" + rootLbl + "”." : "Go back to downloading this output.";
+          acts.appendChild(unset);
+        }
         if (dest.kind === "row") {
           var rst = U ? U.Button({ variant: "secondary", label: "Reset", onClick: function () {
             forgetPublishDir(PA.rowHandleKey(dest.key));
@@ -2388,8 +2420,83 @@
         }
       }) : null;
       if (sw) { sw.classList.add("publish-destrow__replace"); pop.appendChild(sw); }
+      // uio-P-M02: the route to where destinations are managed. The popover answers "where does
+      // THIS output go"; naming and re-pointing destinations is a wider job, so it escalates rather
+      // than growing a management UI inside a per-row popover.
+      var manage = h("button", "prop-btn", "Manage destinations…");
+      manage.addEventListener("click", function () { closeChromePop(); openPublishDestinations(); });
+      pop.appendChild(manage);
     }, { cls: "chrome-pop--publish-dest" });
   }
+  // uio-P-M02 (PUB-05): the destination library. A destination is a folder with a NAME, defined once
+  // and referenced by rows, so "LMS drop · production" is a thing you point at rather than a path you
+  // re-recognise. Re-pointing one moves every output that uses it, which is the whole reason it is a
+  // named thing and not a per-row path.
+  //
+  // It is a SHEET SECTION, not a modal. A library of named things that outlives any one document is
+  // exactly what Component Library, Custom fonts and Glossary already are, and they all live in the
+  // settings sheet; a modal is for a destructive confirm or a blocking run. The per-output popover
+  // on a queue row routes here rather than growing management controls of its own.
+  function buildPublishDestinationsBody(host) {
+    var PA = window.PublishPaths; if (!PA) return;
+    function paint() {
+      host.innerHTML = "";
+      host.appendChild(h("div", "insp-hint", "Named folders a publish row can point at. Re-point one here and every output using it moves with it."));
+      var list = PA.destinations(publishPaths());
+      if (!list.length) host.appendChild(h("div", "insp-hint", "None yet. Add one, give it a name your team would recognise, then point rows at it from their destination chip on Publish."));
+      list.forEach(function (d) {
+        var rowEl = h("div", "publish-destlib__row");
+        var main = h("div", "publish-destlib__main");
+        main.appendChild(h("div", "publish-destlib__name", d.name));
+        main.appendChild(h("div", "publish-destlib__path" + (d.label ? "" : " is-unset"), d.label || "No folder chosen yet — outputs pointed here will download."));
+        rowEl.appendChild(main);
+        var acts = h("div", "publish-destlib__acts");
+        var fld = h("button", "prop-btn", d.label ? "Change folder" : "Choose folder");
+        fld.addEventListener("click", function () {
+          pickPublishDir(PA.destHandleKey(d.id)).then(function (name) {
+            if (!name) return;
+            PA.setDestination(publishPaths(), d.id, d.name, name); savePublishPaths(); paint(); renderPublishQueue();
+          });
+        });
+        acts.appendChild(fld);
+        var ren = h("button", "prop-btn", "Rename");
+        ren.addEventListener("click", function () {
+          promptModal("Rename destination", "Name", d.name, function (v) {
+            if (v == null || !String(v).trim()) return;
+            PA.setDestination(publishPaths(), d.id, String(v).trim(), d.label); savePublishPaths(); paint(); renderPublishQueue();
+          });
+        });
+        acts.appendChild(ren);
+        var del = h("button", "prop-btn prop-btn--danger", "Delete");
+        del.addEventListener("click", function () {
+          confirmModal("Delete destination", "Delete “" + d.name + "”? Any output publishing there goes back to inheriting the Product folder.", function () {
+            forgetPublishDir(PA.destHandleKey(d.id));
+            PA.removeDestination(publishPaths(), d.id); savePublishPaths(); paint(); renderPublishQueue();
+          }, { okLabel: "Delete", danger: true });
+        });
+        acts.appendChild(del);
+        rowEl.appendChild(acts);
+        host.appendChild(rowEl);
+      });
+      var add = h("button", "prop-btn", "Add a destination…");
+      add.addEventListener("click", function () {
+        promptModal("New destination", "Name", "", function (v) {
+          if (v == null || !String(v).trim()) return;
+          var id = mintId();
+          PA.setDestination(publishPaths(), id, String(v).trim(), "");
+          savePublishPaths(); paint();
+          // Straight into the folder pick: a destination with no folder is a name that downloads.
+          pickPublishDir(PA.destHandleKey(id)).then(function (name) {
+            if (!name) return;
+            PA.setDestination(publishPaths(), id, String(v).trim(), name); savePublishPaths(); paint(); renderPublishQueue();
+          });
+        });
+      });
+      host.appendChild(add);
+    }
+    paint();
+  }
+  function openPublishDestinations() { openSettingsSection("system", "destinations"); }
   // The Product root folder, set once for the whole family (T3, Q1). It lives in the pane head rather
   // than on a row because it is a Product-scoped setting that every row inherits — putting it on a row
   // would imply it belonged to that row.
@@ -6749,6 +6856,7 @@
     buildFooterBody: buildFooterBody,
     buildHeaderBody: buildHeaderBody,
     buildLibraryBody: buildLibraryBody,
+    buildPublishDestinationsBody: buildPublishDestinationsBody,   // uio-P-M02
     setDevToolsEnabled: setDevToolsEnabled,
     devToolsOn: devToolsOn,
     setSpellcheckEnabled: setSpellcheckEnabled,
