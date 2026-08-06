@@ -34,6 +34,17 @@ The colour swatch paints the colour that applies, greyed with a small dot when i
 chequerboard swatch means genuinely no colour — an empty fill or stroke — and never appears on
 text.
 
+**Bold, italic and underline live where the text is.** Select some words on the canvas and a small
+bar appears just above them with **B / I / U**. That is the only place they are: they act on the
+words you have selected, so asking you to hold a selection while travelling to a panel never made
+sense. Keyboard shortcuts work as usual.
+
+What stays in the Inspector is what is not character formatting. **Link** is a row that says
+whether the selected text is linked and where to — click it to set or change the address, and a
+small unlink button appears beside it once there is a link to remove. **List** is a switch, because
+turning a block into a bulleted list changes the whole block rather than the words you highlighted;
+it only appears on blocks that can become one.
+
 > **Tip.** An unfilled image or interaction placeholder glows neon-pink on the canvas so you
 > never miss a slot. It's an authoring cue only — it never shows in preview or the export.
 
