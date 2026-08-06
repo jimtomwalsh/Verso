@@ -20287,19 +20287,28 @@ section("editor-rework source insert + two-way jump");
   ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*if \(window\.SourceOwnership\.isSourceDocument\(libComponents\(\)\[id\]\)\) \{ openSourceDoc\(id\); return; \}\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
 })();
 
-// ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
-section("editor-rework left-panel 3-way switcher");
+// ---- uio-E-M02 (EDIT-05): permanent outline + Insert/Source drawer ----
+// The outline never hides; Insert and Source share a collapsible drawer beneath it, so the
+// defining Edit workflow (aim a passage or palette block at a page) always has the page tree
+// beside it. "structure" persists as "drawer collapsed", so the old key needs no migration.
+section("uio-E-M02 left-panel permanent outline + drawer");
 (function () {
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var html = src("index.html");
-  ok("the panel has a switcher host + a Source pane", /id="lpane-switch"/.test(html) && /lpane lpane--source" id="lpane-source" data-lsec="source"/.test(html));
+  ok("the old 3-way switcher host is gone", html.indexOf('id="lpane-switch"') === -1);
+  ok("the panel has a drawer with a head + the Insert/Source panes inside it", /id="lpane-drawer"/.test(html) && /id="lpane-drawer-head"/.test(html) && html.indexOf('id="lpane-drawer"') < html.indexOf('id="lpane-blocks"') && html.indexOf('id="lpane-blocks"') < html.indexOf('id="lpane-source"'));
+  ok("the structure pane sits OUTSIDE the drawer (permanent outline)", html.indexOf('id="lpane-structure"') < html.indexOf('id="lpane-drawer"'));
   ok("every content pane is tagged with a section (data-lsec)", /id="lpane-structure" data-lsec="structure"/.test(html) && /id="lpane-blocks" data-lsec="blocks"/.test(html) && /id="lpane-source" data-lsec="source"/.test(html));
-  ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(ASSETS));
-  ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(ASSETS));
+  ok("the drawer offers Insert / Source", /options: \[\{ value: "blocks", label: "Insert" \}, \{ value: "source", label: "Source" \}\]/.test(ASSETS));
+  ok("applyLeftSection never hides the outline", /if \(s === "structure"\) \{ el\.hidden = false; return; \}/.test(ASSETS));
+  ok("collapsing the drawer is the structure section (no new state model)", /drawer\.classList\.toggle\("is-collapsed", !open\)/.test(ASSETS) && /var open = sec !== "structure";/.test(ASSETS));
+  ok("the last open tab survives a collapse/expand round-trip", /DRAWER_TAB_KEY = "authoring\.lpane\.drawerTab"/.test(ASSETS) && /localStorage\.getItem\(DRAWER_TAB_KEY\)/.test(ASSETS));
   ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(ASSETS) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(ASSETS));
-  ok("switching to Source renders the read-only source-doc viewer (source-link 02)", /if \(sec === "source"\) renderEditSourcePanel\(\);/.test(ASSETS));
-  ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(ASSETS) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
+  ok("opening the Source tab renders the read-only source-doc viewer (source-link 02)", /if \(sec === "source"\) renderEditSourcePanel\(\);/.test(ASSETS));
+  ok("setStage re-applies the drawer state in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(ASSETS) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
+  ok("the drawer chevrons are vendored", /"chevrons-down-up"/.test(src("src/icons.js")) && /"chevrons-up-down"/.test(src("src/icons.js")));
+  ok("drawer chrome lives in the editor CSS", /\.lpane-drawer\b/.test(EDITOR_CSS) && /\.lpane-drawer\.is-collapsed/.test(EDITOR_CSS));
 })();
 
 // ---- SPEC 8 source-link 02: Edit Source tab = read-only live source-doc viewer ----

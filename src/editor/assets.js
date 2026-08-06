@@ -332,38 +332,66 @@
       focusFrame(E.currentPage);
       reselectBlockNode(block, "block"); // select the new block so repeated inserts stack after it
     }
-    // SPEC 7 (decision 11): the left panel is a single 3-way switcher -- Structure . Blocks .
-    // Source -- with equal billing (Source insertion is a primary use now, not a bolt-on). Each
-    // .lpane carries data-lsec; the active section's pane(s) show and the rest drop out. Components
-    // folds INTO Blocks (James's call), so the Blocks section shows the Insert palette with the
-    // Reusable-components pane beneath it. The last-active section persists across reloads.
+    // uio-E-M02 (EDIT-05): the outline is permanent; Insert and Source share a collapsible DRAWER
+    // beneath it. The old 3-way switcher hid the page tree exactly when the defining workflow --
+    // aim a passage or a palette block at a page -- needed it. The section vocabulary survives:
+    // "structure" now means "drawer collapsed" (the outline alone), "blocks"/"source" mean "drawer
+    // open at that tab", so the persisted key, the stage re-apply and the source-link glue's
+    // "is Source visible" checks all keep their meaning without a migration. Components stays
+    // folded INTO Blocks (James's call): the Insert tab shows the palette + components panes.
     var LEFT_SECTIONS = ["structure", "blocks", "source"];
     var LEFT_SECTION_KEY = "authoring.lpane.active";
+    var DRAWER_TAB_KEY = "authoring.lpane.drawerTab"; // last OPEN tab, so collapse/expand round-trips
     var _activeLeftSection = "structure";
     // Which section the left panel is showing. Two other regions ask -- the stage switch re-applies
     // it, and the source-link glue repaints its panel only when Source is the visible one -- so it
     // crosses as a question rather than as a variable (arch-P3b-07h).
     function activeLeftSection() { return _activeLeftSection; }
+    // The tab the drawer shows when open (or would show, while collapsed).
+    function drawerTab() {
+      if (_activeLeftSection !== "structure") return _activeLeftSection;
+      try { var t = localStorage.getItem(DRAWER_TAB_KEY); if (t === "source" || t === "blocks") return t; } catch (e) {}
+      return "blocks";
+    }
     function applyLeftSection(sec) {
       if (LEFT_SECTIONS.indexOf(sec) === -1) sec = "structure";
       _activeLeftSection = sec;
       try { localStorage.setItem(LEFT_SECTION_KEY, sec); } catch (e) {}
+      if (sec !== "structure") { try { localStorage.setItem(DRAWER_TAB_KEY, sec); } catch (e) {} }
       var panel = document.querySelector(".panel--left"); if (!panel) return;
+      var open = sec !== "structure";
+      var drawer = document.getElementById("lpane-drawer");
+      if (drawer) drawer.classList.toggle("is-collapsed", !open);
       Array.prototype.forEach.call(panel.querySelectorAll(".lpane[data-lsec]"), function (el) {
-        el.hidden = el.getAttribute("data-lsec") !== sec;
+        var s = el.getAttribute("data-lsec");
+        if (s === "structure") { el.hidden = false; return; } // the outline never hides
+        el.hidden = !open || s !== sec;
       });
       mountLeftSwitcher(); // re-render so the active segment reflects the state (also on programmatic switches)
       if (sec === "source") renderEditSourcePanel();
     }
     function mountLeftSwitcher() {
-      var host = document.getElementById("lpane-switch"); if (!host) return;
+      var host = document.getElementById("lpane-drawer-head"); if (!host) return;
       var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
       host.innerHTML = "";
-      host.appendChild(U.SegmentedControl({
+      var open = _activeLeftSection !== "structure";
+      var seg = U.SegmentedControl({
         size: "sm",
-        options: [{ value: "structure", label: "Structure" }, { value: "blocks", label: "Blocks" }, { value: "source", label: "Source" }],
-        value: _activeLeftSection,
+        options: [{ value: "blocks", label: "Insert" }, { value: "source", label: "Source" }],
+        value: drawerTab(),
         onChange: function (v) { applyLeftSection(v); }
+      });
+      // A collapsed drawer keeps its tabs readable but dimmed; clicking the already-active tab
+      // re-opens (SegmentedControl only fires onChange on a CHANGE, so catch that click here).
+      if (!open) seg.addEventListener("click", function () {
+        if (_activeLeftSection === "structure") applyLeftSection(drawerTab());
+      });
+      var segWrap = h("div", "lpane-drawer__tabs"); segWrap.appendChild(seg); host.appendChild(segWrap);
+      if (U.IconButton) host.appendChild(U.IconButton({
+        icon: open ? "chevrons-down-up" : "chevrons-up-down",
+        label: open ? "Collapse drawer" : "Expand drawer",
+        size: "sm",
+        onClick: function () { applyLeftSection(open ? "structure" : drawerTab()); }
       }));
     }
 
