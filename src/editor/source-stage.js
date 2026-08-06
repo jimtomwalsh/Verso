@@ -253,7 +253,18 @@
     // now, one at a time. Outline is the default: it is how you move around a document, and Marks
     // is where you go when you have a review question. The tab is labelled with its live count, so
     // you can see there is something to answer without switching to find out.
-    var __sourceNavTab = "outline";  // outline | marks
+    // uio-S-A01 added the third: retiring the right panel left History homeless, and the rail is
+    // already the surface that answers document-scope questions ("what is in this document, and
+    // where"). "What happened to it" is the same species of question, so it lands here rather than
+    // growing a panel back to hold one section.
+    var __sourceNavTab = "outline";  // outline | marks | history
+    // One writer for the tab, so the gutter's "All marks" escalation and the switch itself cannot
+    // set it two different ways.
+    function setSourceNavTab(tab) {
+      if (["outline", "marks", "history"].indexOf(tab) === -1) tab = "outline";
+      __sourceNavTab = tab;
+      renderSourceTopicList();
+    }
     var __sourceActiveMarkId = null; // the mark whose row is highlighted (selected in the panel/article)
     // uio-S-M02: ONE card at a time, docked. These three used to be independent, so an alternate
     // card and a where-used card could sit in the margin together answering different questions
@@ -626,13 +637,18 @@
         sw.appendChild(U.SegmentedControl({
           size: "sm",
           options: [{ value: "outline", label: "Outline" },
-                    { value: "marks", label: "Marks " + (navCounts.all || 0) }],
+                    { value: "marks", label: "Marks " + (navCounts.all || 0) },
+                    { value: "history", label: "History" }],
           value: __sourceNavTab,
-          onChange: function (v) { __sourceNavTab = v; renderSourceTopicList(); }
+          onChange: function (v) { setSourceNavTab(v); }
         }));
         host.appendChild(sw);
       }
       if (__sourceNavTab === "marks") { renderSourceMarksSection(host, model); return; }
+      // uio-S-A01: History moved here with the right panel's retirement. S-C04 demoted it to a
+      // collapsed footer because it competed with the work; a tab of its own is the same judgement
+      // carried further — present, one click away, costing nothing while you are not asking.
+      if (__sourceNavTab === "history") { renderHistoryTimeline(host, master, { open: true }); return; }
       // uio-S-M04: what condition each section is in. Resolution lives on the topic's comment
       // threads, so the predicate comes from here rather than the pure model.
       var byHeading = SD.marksByHeading(model, function (mk) {
@@ -1235,53 +1251,42 @@
       // standalone Source "Linked in" block and the duplicate comments accordion are retired here --
       // each mark type now appears in exactly one place (source-right-panel-consolidation parts 2-3).
       var hasDoc = topicHasDoc(topic);
-      // uio-S-M02 (SRC-03, Moderate). The audit's through-line: "what is attached to THIS PASSAGE —
-      // one card, docked, never over the prose". There used to be three cards, each floating in the
-      // right margin, each pinned to its own span, each tracking scroll independently. They could
-      // stack, they covered the reading column at narrow widths, and three surfaces were answering
-      // the same question. One host, at the top of the panel that already answers "what is attached
-      // to this document", so the passage's card sits above the document's list.
-      var cardHost = h("div", "source-card-dock"); host.appendChild(cardHost);
-      // uio-S-M04 (SRC-10) MOVED the mark list to the nav rail, beside the outline it belongs
-      // next to. It is not duplicated here: "one place per question" is the rule the whole Source
-      // redesign runs on, and a list in two columns is the failure it names. This panel keeps what
-      // is about the PASSAGE you clicked (the docked card) and the document's history and
-      // provenance; the rail answers "what is in this document, and where".
-      // History
+      // uio-S-A01 (SRC-03/09): for a continuous source document the right panel IS RETIRED. Both of
+      // its occupants moved to surfaces that already own their question — the passage cards to the
+      // margin gutter beside the prose, History to the nav rail beside the outline. This function
+      // stays the one entry point so all eight callers keep working; for a document it now refreshes
+      // the margin instead of rebuilding a panel.
+      //
+      // A LEGACY section topic (no continuous doc, so no marks engine and no gutter) keeps the panel
+      // below: it is the only surface those topics have for their Linked-in list.
+      if (hasDoc) { renderSourceGutter(); applySourceInfoVisibility(); return; }
+      // A legacy section topic's History and its standalone Linked-in list. Comments are NOT
+      // re-rendered here: they already live in the Marks section's Comments tab, so a second
+      // standalone accordion just duplicated them (#163).
       renderHistoryTimeline(host, topic);
-      // Legacy section topics have no marks tabs -- keep their standalone Linked-in list. Comments are
-      // NOT re-rendered here: they already live in the Marks section's Comments tab, so a second
-      // standalone accordion just duplicated them (#163). The Comments tab is now their only home.
-      if (!hasDoc) {
-        var sourceBody = panelSection(host, "Source", { collapsible: true });
-        var used = libraryWhereUsedDetail(topic.id, getRegistry());
-        sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
-        if (!used.length) {
-          sourceBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
-        } else {
-          used.forEach(function (u) {
-            var row = h("button", "source-stage__linked-row", u.docTitle);
-            row.type = "button";
-            row.title = "Open " + u.docTitle + " and select the linked block";
-            row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
-            sourceBody.appendChild(row);
-          });
-        }
+      var sourceBody = panelSection(host, "Source", { collapsible: true });
+      var used = libraryWhereUsedDetail(topic.id, getRegistry());
+      sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
+      if (!used.length) {
+        sourceBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
+      } else {
+        used.forEach(function (u) {
+          var row = h("button", "source-stage__linked-row", u.docTitle);
+          row.type = "button";
+          row.title = "Open " + u.docTitle + " and select the linked block";
+          row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
+          sourceBody.appendChild(row);
+        });
       }
-      // uio-S-M02: this function REBUILDS the panel, which empties the dock with it. So whichever
-      // card is open re-renders into the fresh dock, the same way the pinned cards used to re-pin
-      // after an article re-render. Without this a card vanishes the moment anything touches the
-      // panel — which is most things, since revealing a mark re-renders it.
-      if (__sourceRestrictMarkId) renderSourceRestrictPanel(topic);
-      else if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic);
-      else if (__sourceAltPanelMarkId) renderSourceAltPanel(topic);
       applySourceInfoVisibility();
     }
-    // Show or hide the one consolidated panel (its single doc-bar toggle). Hidden -> the reading
-    // column reclaims the width; shown (default) -> the panel docks at the right as before.
+    // uio-S-A01: the panel only exists for legacy section topics now, so its visibility follows the
+    // TOPIC first and the toggle second. A continuous source document hides it outright — leaving an
+    // empty 288px aside standing beside the gutter would give the margin a rival for the same width.
     function applySourceInfoVisibility() {
       var el = document.getElementById("source-stage-info"); if (!el) return;
-      el.style.display = __sourceInfoOpen ? "" : "none";
+      var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+      el.style.display = (__sourceInfoOpen && !topicHasDoc(topic)) ? "" : "none";
     }
     // Structural History events (comment/alternate added, resolved, reopened) log to model.history,
     // but the info-panel History timeline must be RE-RENDERED to show them. Only the prose-commit
@@ -1516,6 +1521,16 @@
       }
       col.appendChild(art);
       layout.appendChild(col);
+      // uio-S-A01 (SRC-03/09): the margin. ALWAYS built for a source master, then hidden in Read by
+      // applySourceModeToArticle — a mode change deliberately does not rebuild the article, so a
+      // gutter that only existed outside Read could never come back when you left it.
+      // Populated later, once the marks engine has measured: a stub's whole job is to sit at its
+      // passage's height, and nothing knows that height until the article has laid out.
+      if (topic.sourceMaster) {
+        var gut = buildSourceGutter();
+        gut.hidden = __sourceMode === "read";
+        layout.appendChild(gut);
+      }
       host.appendChild(layout);
       // scroll-spy + alt-panel tracking: re-bound each render (host survives innerHTML clears).
       host.removeEventListener("scroll", onSourceArticleScroll);
@@ -1651,7 +1666,7 @@
       applySourceInfoVisibility(); // keep the one consolidated panel's shown/hidden state after a re-render
       if (__sourceAltPanelMarkId) renderSourceAltPanel(topic); // re-pin the alt panel after a re-render
       if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic); // re-pin the where-used panel after a re-render
-      renderSourceCommentPins(topic); // re-pin the comment margin pins after a re-render
+      renderSourceGutter(); // uio-S-A01: re-lay the margin (was: re-pin the comment pins)
       if (__sourceOpenCommentMarkId) renderSourceCommentThread(topic); // re-pin an open comment thread
     }
 
@@ -1683,6 +1698,15 @@
       // switching to Read left the banner shouting through a document you were only reading.
       var banner = col && col.querySelector("[data-source-classbanner]");
       if (banner) banner.classList.toggle("is-quiet", __sourceMode === "read");
+      // uio-S-A01: and the margin, for the same reason. Read hides marks, so a column of stubs
+      // pointing at highlights you cannot see would be annotation without the annotations. It is
+      // hidden rather than destroyed — leaving Read puts it back without a re-render.
+      var layout = col && col.parentNode;
+      var gutter = layout && layout.querySelector ? layout.querySelector(".source-doc__gutter") : null;
+      if (gutter) {
+        gutter.hidden = __sourceMode === "read";
+        if (!gutter.hidden) renderSourceGutter(); // the prose moved under it while it was away
+      }
     }
     // When LOCKED the blocks are contentEditable=false, so a real click can't place a caret in them
     // and a keystroke lands on <body>, never reaching the article's keydown guard -- so no "source
@@ -1705,6 +1729,10 @@
       // uio-S-C06: the figure badges ride the same repaint as every other mark treatment, so
       // "show marks" turns them all on and off together.
       renderSourceClassBadges();
+      // uio-S-A01: and so does the margin. A stub's position is derived from its mark's painted
+      // rectangle, so it has to be re-laid on the same pass that produced the rectangle — otherwise
+      // adding, breaking or resolving a mark leaves the margin describing the previous paint.
+      renderSourceGutter();
     }
 
     // --- History commit collapse (spec 5) --------------------------------------
@@ -1786,7 +1814,7 @@
         applySourceLockState();
         repaintSourceMarks();
         var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
-        if (topic) renderSourceCommentPins(topic);
+        if (topic) renderSourceGutter();
         refreshSourceSelBar(); updateSourceDocBar(); paintSourceMode();
         // A mode change announces itself: three modes that look similar at a glance need to say
         // which one you just entered, and the chip alone is easy to miss mid-scroll.
@@ -1934,7 +1962,11 @@
         tblBtn.classList.add("source-docbar__btn");
         bar.appendChild(imgBtn); bar.appendChild(tblBtn);
       }
-      bar.appendChild(panelBtn);
+      // uio-S-A01: the details-panel toggle goes with the panel. A continuous source document has
+      // no panel to show, so a control offering to show it would be a switch wired to nothing —
+      // the same defect S-M01 removed when it took the lock toggle and the marks eye off this bar.
+      // Legacy section topics still have the panel, so they still get the toggle.
+      if (!topicHasDoc(topic)) bar.appendChild(panelBtn);
       bar.setAttribute("data-source-docbar", "1");
       return bar;
     }
@@ -2004,19 +2036,157 @@
     function syncSourceAltPanel(topic, markId) {
       if (!markId) { closeSourceAltPanel(); return; }
       __sourceAltPanelMarkId = markId;
-      renderSourceAltPanel(topic);
+      // uio-S-A01: the card's host is a slot the GUTTER builds at this mark's own height, so the
+      // margin has to be re-laid before the renderer can find anywhere to mount. renderSourceGutter
+      // makes the slot and then calls the matching renderer itself -- calling the renderer directly
+      // here would find no dock and silently draw nothing.
+      renderSourceGutter();
     }
     // uio-S-M02: opening a card closes the other two. One question at a time about one passage.
+    // uio-S-A01 added the comment THREAD to this set. It used to be the one card that floated
+    // independently, pinned to its span in the lane S-C03 reserved — so a passage could show a
+    // thread and an alternate card at once, in two different chromes, answering about the same
+    // words. Four cards, one slot, one at a time.
     function claimSourceCard(which) {
       if (which !== "alt") { __sourceAltPanelMarkId = null; var a = document.querySelector("[data-source-altpanel]"); if (a) a.remove(); }
       if (which !== "where") { __sourceWhereUsedMarkId = null; var w = document.querySelector("[data-source-wherepanel]"); if (w) w.remove(); }
       if (which !== "restrict") { __sourceRestrictMarkId = null; var r = document.querySelector("[data-source-restrictpanel]"); if (r) r.remove(); }
+      if (which !== "comment") { __sourceOpenCommentMarkId = null; var c = document.querySelector("[data-source-commentthread]"); if (c) c.remove(); }
     }
-    // Where a card mounts: the dock at the top of the consolidated panel. Falls back to nothing
-    // rather than to the article — a card must never go back to floating over the prose.
+    // uio-S-A01: where a card mounts is now the GUTTER, in the slot standing where that mark's stub
+    // would be — so opening a card does not move the answer away from the passage that raised it.
+    // S-M02's dock at the top of the right panel is retired with the panel itself. Still falls back
+    // to nothing rather than to the article: a card must never go back to floating over the prose.
     function sourceCardDock() {
-      var info = document.getElementById("source-stage-info");
-      return info ? info.querySelector(".source-card-dock") : null;
+      var track = document.querySelector(".source-doc__gutter-track");
+      return track ? track.querySelector(".source-doc__gutter-card") : null;
+    }
+    // Which card, if any, is open. The three ids are mutually exclusive by claimSourceCard, so this
+    // reads them as the one value they actually are.
+    function openSourceCardMarkId() {
+      return __sourceRestrictMarkId || __sourceWhereUsedMarkId || __sourceAltPanelMarkId || __sourceOpenCommentMarkId || null;
+    }
+    // uio-S-A01: which card answers a given mark. The rail's rows and the margin's stubs both need
+    // this, and they are two lists of the same marks — so it is one function rather than the same
+    // four-way branch written twice and drifting. A comment opens its conversation; the other three
+    // open the card that states what is attached to the passage.
+    function openSourceCardFor(topic, m) {
+      if (!m) return;
+      if (m.type === "comment") toggleSourceCommentThread(topic, m.id);
+      else if (m.type === "link" && topic) syncSourceWherePanel(topic, m.id);
+      else if (m.type === "restricted") syncSourceRestrictPanel(topic, m.id);
+      else if (m.type === "alternate" && topic) syncSourceAltPanel(topic, m.id);
+    }
+    // The margin's frame. Built once per article render; its contents are re-laid whenever the
+    // marks change, because a stub's position is a fact about the prose, not about the frame.
+    function buildSourceGutter() {
+      var g = h("div", "source-doc__gutter");
+      var head = h("div", "source-doc__gutter-head");
+      head.appendChild(h("span", "source-doc__gutter-label", "Margin · marks in place"));
+      var all = h("button", "source-doc__gutter-all", "All marks"); all.type = "button";
+      all.title = "Every mark in this document, as one list in the rail";
+      // The escalation. The margin shows marks WHERE they are; the rail's Marks tab shows them as
+      // one filterable, counted list. Two views of one set, and neither is a second copy of the
+      // other's job -- which is why this routes to the rail rather than growing a list in here.
+      all.addEventListener("click", function () { setSourceNavTab("marks"); });
+      head.appendChild(all);
+      g.appendChild(head);
+      g.appendChild(h("div", "source-doc__gutter-track"));
+      return g;
+    }
+    // Lay the margin out. Order matters: build every child FIRST (so an open card is mounted and
+    // has measured its own height), then stack, then place. Measuring before the card exists puts
+    // every stub below it in the wrong place by exactly the card's height.
+    function renderSourceGutter() {
+      if (typeof document === "undefined") return;
+      var track = document.querySelector(".source-doc__gutter-track"); if (!track) return;
+      track.innerHTML = "";
+      var SD = window.SourceDoc, model = __sourceDocModel;
+      var host = document.getElementById("source-stage-article");
+      if (!SD || !model || !host || !__sourceMarksEngine) return;
+      var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+      var stubs = SD.markStubs(model, {
+        meta: function (m) { return sourceMarkRowState(topic, model, m).meta; },
+        resolved: function (m) {
+          var thread = sourceCommentsForMark(topic, m.id);
+          return !!thread.length && !thread.filter(function (c) { return !c.done; }).length;
+        }
+      });
+      if (!stubs.length) {
+        track.appendChild(h("div", "source-doc__gutter-empty", "Nothing marked yet. Select a passage to comment on it, link it or offer an alternate."));
+        track.style.minHeight = "";
+        return;
+      }
+      // A stub's wanted height is its mark's own, measured the way the pinned cards used to measure
+      // theirs, then rebased onto the track. Content-relative, so scrolling never re-runs this.
+      var hostTop = host.getBoundingClientRect().top - host.scrollTop;
+      var trackTop = track.getBoundingClientRect().top - hostTop;
+      var openId = openSourceCardMarkId();
+      var entries = [];
+      stubs.forEach(function (s) {
+        var m = SD.markById(model, s.id); if (!m) return;
+        var rect = __sourceMarksEngine.rectFor(m);
+        // A broken mark has no rectangle to sit beside. It still has to be reachable -- it is the
+        // one state a reviewer most needs to see -- so it goes to the top rather than being dropped.
+        entries.push({ stub: s, want: rect ? (rect.top - hostTop - trackTop) : 0 });
+      });
+      entries.sort(function (a, b) { return a.want - b.want; });
+      entries.forEach(function (e) {
+        if (openId && e.stub.id === openId) {
+          e.el = h("div", "source-doc__gutter-card");
+        } else {
+          e.el = buildSourceStub(e.stub);
+        }
+        track.appendChild(e.el);
+      });
+      // Fill the open card's slot now that it exists. These renderers find their host through
+      // sourceCardDock(), which is why the slot has to be in the DOM before they run.
+      if (openId) {
+        if (__sourceRestrictMarkId) renderSourceRestrictPanel(topic);
+        else if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic);
+        else if (__sourceAltPanelMarkId) renderSourceAltPanel(topic);
+        else if (__sourceOpenCommentMarkId) renderSourceCommentThread(topic);
+      }
+      var placed = SD.stackStubs(entries.map(function (e) {
+        return { id: e.stub.id, want: e.want, height: e.el.offsetHeight };
+      }), 8);
+      var bottom = 0;
+      placed.forEach(function (p, i) {
+        entries[i].el.style.top = p.top + "px";
+        bottom = Math.max(bottom, p.top + entries[i].el.offsetHeight);
+      });
+      // The track carries the stack's full height so a mark near the end of the document cannot
+      // hang past the layout and get clipped.
+      track.style.minHeight = bottom + "px";
+    }
+    // One stub. The dot is state, the title's ink is type, and the title says both in words -- so
+    // the two colours are a second channel rather than the only one (DS: colour never alone).
+    function buildSourceStub(s) {
+      var el = h("button", "source-stub" + (__sourceActiveMarkId === s.id ? " is-active" : ""));
+      el.type = "button";
+      el.setAttribute("data-mark-id", s.id);
+      el.appendChild(h("span", "source-stub__dot source-stub__dot--" + s.tone));
+      var body = h("div", "source-stub__body");
+      // Same head anatomy as the rail's mark row: a coloured type eyebrow, then the meta in
+      // tertiary ink. Two lists of the same marks read the same way, and colour never lands on a
+      // fact that is not about the mark's kind. The classes carry the ink so it stays in CSS.
+      var head = h("div", "source-stub__head");
+      head.appendChild(h("span", "source-stub__type " + s.cls, s.label));
+      if (s.meta) head.appendChild(h("span", "source-stub__meta", s.meta));
+      body.appendChild(head);
+      body.appendChild(h("span", "source-stub__sub", s.sub));
+      el.appendChild(body);
+      el.title = s.title + (s.sub ? " — " + s.sub : "");
+      el.addEventListener("click", function () {
+        var m = window.SourceDoc.markById(__sourceDocModel, s.id); if (!m) return;
+        var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+        // Highlight the passage AND open the card that answers it, the same pair the rail's rows
+        // do. A stub that only highlighted would leave you to find its card by clicking the span,
+        // which is the "three surfaces answering one question" problem S-M02 named.
+        if (m.type !== "comment") revealSourceMark(m);
+        openSourceCardFor(t, m);
+      });
+      return el;
     }
     // Pin the COMMENT THREAD to its mark's span: absolute within the scrolling article, so it
     // tracks the span on scroll for free. uio-S-M02 took the three mark cards off this — a comment
@@ -2084,7 +2254,11 @@
     function syncSourceRestrictPanel(topic, markId) {
       if (!markId) { closeSourceRestrictPanel(); return; }
       __sourceRestrictMarkId = markId;
-      renderSourceRestrictPanel(topic);
+      // uio-S-A01: the card's host is a slot the GUTTER builds at this mark's own height, so the
+      // margin has to be re-laid before the renderer can find anywhere to mount. renderSourceGutter
+      // makes the slot and then calls the matching renderer itself -- calling the renderer directly
+      // here would find no dock and silently draw nothing.
+      renderSourceGutter();
     }
     // The card. It states what applies and whose decision it was, then the rule set as rows, then
     // two actions. It reuses the alternate/where-used card shell wholesale, so a third card in this
@@ -2186,7 +2360,11 @@
     function syncSourceWherePanel(topic, markId) {
       if (!markId) { closeSourceWherePanel(); return; }
       __sourceWhereUsedMarkId = markId;
-      renderSourceWherePanel(topic);
+      // uio-S-A01: the card's host is a slot the GUTTER builds at this mark's own height, so the
+      // margin has to be re-laid before the renderer can find anywhere to mount. renderSourceGutter
+      // makes the slot and then calls the matching renderer itself -- calling the renderer directly
+      // here would find no dock and silently draw nothing.
+      renderSourceGutter();
     }
     function renderSourceWherePanel(topic) {
       var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
@@ -2346,79 +2524,45 @@
     }
     // Every comment MARK on the doc that still has a live thread, newest span first is not needed --
     // draw order follows model.marks. A comment mark with no thread (all deleted) draws no pin.
-    function renderSourceCommentPins(topic) {
-      var host = document.getElementById("source-stage-article"); if (!host) return;
-      Array.prototype.forEach.call(host.querySelectorAll(".source-commentpin"), function (n) { n.remove(); });
-      var model = __sourceDocModel; if (!model || !__sourceShowMarks) return;
-      (model.marks || []).forEach(function (m) {
-        if (m.type !== "comment") return;
-        var thread = sourceCommentsForMark(topic, m.id); if (!thread.length) return;
-        var open = thread.filter(function (c) { return !c.done; }).length;
-        var pin = h("button", "source-commentpin" + (open ? "" : " is-done") + (m.id === __sourceOpenCommentMarkId ? " is-open" : ""));
-        pin.type = "button"; pin.setAttribute("data-comment-mark", m.id);
-        pin.title = thread.length + " comment" + (thread.length === 1 ? "" : "s") + (open ? "" : " (resolved)");
-        pin.innerHTML = window.Icon ? window.Icon("message-square") : "";
-        var lead = thread[0];
-        if (lead && lead.colour) pin.style.setProperty("--pin-colour", lead.colour);
-        if (thread.length > 1) pin.appendChild(h("span", "source-commentpin__count", String(thread.length)));
-        pin.addEventListener("click", function () { toggleSourceCommentThread(topic, m.id); });
-        host.appendChild(pin);
-        pinCardToSpan(pin, m.id); // sets top (tracks the span vertically)
-        anchorPinToTextMargin(pin, host); // sets left just right of the reading column (pilot feedback)
-      });
-    }
-    // Anchor a comment pin just to the RIGHT of the text margin (the reading column's right edge),
-    // not out in the far gutter -- pilot feedback 2026-07-28. Clamped so it never leaves the host.
-    function anchorPinToTextMargin(pin, host) {
-      var col = host.querySelector(".source-doc__col") || host.querySelector(".source-doc");
-      if (!col) return;
-      var cr = col.getBoundingClientRect(), hr = host.getBoundingClientRect();
-      var left = cr.right - hr.left + host.scrollLeft + 6;
-      left = Math.min(left, host.clientWidth - 26); // keep it on-screen on a narrow viewport
-      pin.style.left = Math.max(8, left) + "px";
-      pin.style.right = "auto";
-    }
+    // uio-S-A01 RETIRED the comment pin, its anchor helper and the click-outside dismiss. The pin
+    // was a 20px speech bubble just right of the reading column at its span's height; the margin now
+    // puts a stub at that same height saying who commented and what about. Two controls, one
+    // question, an inch apart -- the divergence this epic exists to remove. The stub opens the
+    // thread. Dismissal went too: a card in a permanent margin is not an overlay, and closing it on
+    // a canvas click would make the prose unusable while a thread is open (the call F05 made for the
+    // sheet). Escape still closes it, through the handler below.
     function onSourceCommentThreadKey(ev) { if (ev.key === "Escape") closeSourceCommentThread(); }
     // Outside-click light-dismiss, matching the canvas comment popover ("first outside click closes
     // the open note", editor.js ~19632). A click on a pin is left to the pin's own toggle.
-    function onSourceCommentThreadOutside(ev) {
-      var card = document.querySelector("[data-source-commentthread]"); if (!card) return;
-      if (card.contains(ev.target)) return;
-      if (ev.target.closest && ev.target.closest(".source-commentpin")) return;
-      closeSourceCommentThread();
-      var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
-      renderSourceCommentPins(t);
-    }
     function closeSourceCommentThread() {
       __sourceOpenCommentMarkId = null;
       var ex = document.querySelector("[data-source-commentthread]"); if (ex) ex.remove();
       document.removeEventListener("keydown", onSourceCommentThreadKey);
-      document.removeEventListener("mousedown", onSourceCommentThreadOutside);
     }
     function toggleSourceCommentThread(topic, markId) {
-      if (__sourceOpenCommentMarkId === markId) { closeSourceCommentThread(); renderSourceCommentPins(topic); return; }
+      if (__sourceOpenCommentMarkId === markId) { closeSourceCommentThread(); renderSourceGutter(); return; }
       __sourceOpenCommentMarkId = markId;
-      renderSourceCommentThread(topic);
-      renderSourceCommentPins(topic); // repaint the is-open pin state
+      // Same rule as the other three cards: the gutter builds the slot and then renders into it.
+      renderSourceGutter();
     }
     // The in-place thread card for one comment mark: the shared canvas thread items + reply, plus a
     // fresh "Add a comment" field. Open/resolve activity is logged to History (spec 3.3).
     function renderSourceCommentThread(topic) {
       var ex = document.querySelector("[data-source-commentthread]"); if (ex) ex.remove();
       document.removeEventListener("keydown", onSourceCommentThreadKey);
-      document.removeEventListener("mousedown", onSourceCommentThreadOutside);
       var model = __sourceDocModel, SD = window.SourceDoc, UI = window.VersoUI;
       if (!model || !__sourceOpenCommentMarkId) return;
       var m = SD.markById(model, __sourceOpenCommentMarkId);
       if (!m || m.type !== "comment") { __sourceOpenCommentMarkId = null; return; }
-      var host = document.getElementById("source-stage-article"); if (!host) return;
+      claimSourceCard("comment");
+      var host = sourceCardDock(); if (!host) return;   // uio-S-A01: in the margin, never over the prose
       var card = h("aside", "source-commentthread comment-thread"); card.setAttribute("data-source-commentthread", "1");
       card.setAttribute("aria-label", "Comment thread");
       var head = h("div", "source-commentthread__head");
       head.appendChild(h("div", "source-commentthread__title", "Comments"));
       var close = h("button", "source-commentthread__close"); close.type = "button"; close.title = "Close";
       close.innerHTML = window.Icon ? window.Icon("x") : "close";
-      close.addEventListener("click", function () { closeSourceCommentThread(); renderSourceCommentPins(topic); });
+      close.addEventListener("click", function () { closeSourceCommentThread(); renderSourceGutter(); });
       head.appendChild(close);
       card.appendChild(head);
       var mid = m.id;
@@ -2428,9 +2572,9 @@
         // if every thread comment was deleted, drop the now-empty comment mark + close.
         if (!sourceCommentsForMark(topic, mid).length) {
           var i = model.marks.indexOf(m); if (i >= 0) { SD.pushUndo(model); model.marks.splice(i, 1); }
-          persistSourceDocModel(topic, model); closeSourceCommentThread(); repaintSourceMarks(); renderSourceCommentPins(topic); return;
+          persistSourceDocModel(topic, model); closeSourceCommentThread(); repaintSourceMarks(); renderSourceGutter(); return;
         }
-        repaintSourceMarks(); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+        repaintSourceMarks(); renderSourceCommentThread(topic); renderSourceGutter();
         refreshSourceHistory(topic); // surface comment resolve/reopen in the History timeline (#109)
       }
       sourceCommentsForMark(topic, mid).forEach(function (c) { card.appendChild(buildSourceCommentItem(topic, c, { onChange: afterThreadChange })); });
@@ -2443,15 +2587,17 @@
           var cm = makeComment({ markId: mid }, v);
           topic.comments.push(cm);
           SD.logHistory(model, { type: "comment-added", markId: mid, commentId: cm.id });
-          stampTopicUpdated(topic); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+          stampTopicUpdated(topic); renderSourceCommentThread(topic); renderSourceGutter();
           refreshSourceHistory(topic); // surface the new comment in the History timeline (#109)
         } });
         card.appendChild(newField); card.appendChild(addBtn);
       }
       host.appendChild(card);
-      pinCardToSpan(card, mid);
+      // uio-S-A01: no pinCardToSpan — the slot is already AT the span's height, placed by the
+      // gutter's own stack. And no click-outside dismiss: with the card in a permanent margin
+      // rather than floating over the prose, closing it on a canvas click would make the document
+      // unusable while a thread is open. F05 settled the same question the same way for the sheet.
       document.addEventListener("keydown", onSourceCommentThreadKey);
-      document.addEventListener("mousedown", onSourceCommentThreadOutside);
     }
 
     // Source v2 (consolidated-panel): the all-marks list is no longer a separate overlay drawer --
@@ -2487,8 +2633,10 @@
       var host = document.getElementById("source-stage-article");
       var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
       if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
-      var info = document.getElementById("source-stage-info");
-      var rowEl = info && info.querySelector('.source-drawer__row[data-mark-id="' + m.id + '"]');
+      // uio-S-A01: the mark's stub rides the same scroll as its passage, so scrolling the passage
+      // into view brings its stub with it — nothing to scroll separately. What DOES still need
+      // finding is a row in the rail's Marks list, which is a different column entirely.
+      var rowEl = document.querySelector('.source-drawer__row[data-mark-id="' + m.id + '"]');
       if (rowEl) rowEl.scrollIntoView({ block: "nearest" });
     }
     // uio-S-C01 (SRC-01): the count a mark row carries instead of one row per instance. A linked
@@ -2574,9 +2722,8 @@
             // already did; an alternate row used to reveal the mark and leave you to find its card
             // by clicking the span, which is the "three surfaces answering the same question"
             // problem in miniature.
-            if (m.type === "link" && topic) syncSourceWherePanel(topic, m.id);
-            else if (m.type === "restricted") syncSourceRestrictPanel(topic, m.id);
-            else if (m.type === "alternate" && topic) syncSourceAltPanel(topic, m.id);
+            // uio-S-A01: one owner for this, shared with the margin's stubs.
+            openSourceCardFor(topic, m);
           });
           listWrap.appendChild(row);
         });
@@ -2945,7 +3092,7 @@
             topic.comments.push(cm);
             SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id });
             persistSourceDocModel(topic, __sourceDocModel); stampTopicUpdated(topic); repaintSourceMarks();
-            renderSourceCommentPins(topic);
+            renderSourceGutter();
             refreshSourceHistory(topic); // surface the new comment in the History timeline (#109)
             toggleSourceCommentThread(topic, cmark.id);
           }
@@ -3007,7 +3154,7 @@
       openWherePanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceWherePanel(t, id); },
       wherePanelMarkId: function () { return __sourceWhereUsedMarkId; },
       editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
-      addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); refreshSourceHistory(t); return cmark.id; },
+      addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceGutter(); refreshSourceHistory(t); return cmark.id; },
       selectObject: function (nodeKey) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; selectSourceObject(t, nodeKey); },
       objectSelKey: function () { return __sourceObjectSelKey; },
       objectMarksOnNode: function (nodeKey) { return objectMarksOnNode(nodeKey); },
@@ -3040,10 +3187,13 @@
     //     opened/resolved). These carry an `at` stamp so both streams interleave by time.
     // A hand-created "New topic" with neither stream shows a single synthetic "Created" node. The
     // synthetic "Last edited" node only fills in for legacy topics that have no doc-commit history.
-    function renderHistoryTimeline(host, topic) {
+    function renderHistoryTimeline(host, topic, opts) {
       // uio-S-C04 (SRC-11): History is a collapsed FOOTER section (opens on demand) so it stops
       // competing with the marks above it at equal weight.
-      var body = panelSection(host, "History", { collapsible: true, defaultOpen: false });
+      // uio-S-A01: in the nav rail it is a TAB, and a tab you have deliberately switched to should
+      // not then ask you to open the one thing inside it. Choosing the tab is the disclosure.
+      var open = !!(opts && opts.open);
+      var body = panelSection(host, "History", { collapsible: true, defaultOpen: open });
       if (!window.VersoUI || !window.VersoUI.Timeline) return;
       var SD = window.SourceDoc;
 

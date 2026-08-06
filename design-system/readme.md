@@ -141,6 +141,18 @@ Non-modal surfaces keep the canvas live: the canvas is *squeezed*, never covered
 the only surface that takes a scrim, and only for a destructive confirm or a blocking run. Every
 narrow surface (popover, menu) carries a visible route to escalate into the sheet.
 
+**The annotation margin is not a seventh presentation.** A document surface may put a permanent
+margin beside its prose holding one stub per annotation, each at the height of the passage it is
+about, with the annotation's card opening in the stub's place. The six above are how you reach the
+**settings tree**; the margin holds facts about **the content in front of you**, which is why its
+position carries meaning and theirs does not. It follows every other spine rule: the canvas is
+squeezed by a real column rather than covered, one card is open at a time, cards use the shared row
+anatomy, the save contract applies, and a visible escalation hands the full set to a list. Two
+things it may not do: take a scrim, or grow a list of its own — the whole set of annotations lives
+in one list elsewhere, and the margin routes to it. Source is the first surface to have one
+(`uio-S-A01`); the arc that produced it — clamp a lane, then dock the cards, then place them —
+is the record of why placing them beside the passage was worth the column.
+
 **The sheet and the inspector share one right dock.** They are the same tree at two sizes — the
 inspector holds the sheet's Block scope — so they are never both on screen. Opening the sheet
 widens the dock to `--panel-sheet-width` and supersedes the inspector; closing it restores the
