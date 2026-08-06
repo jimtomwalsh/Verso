@@ -15,4 +15,29 @@ Build and export your first course in a few minutes.
 > **Reassurance.** You can't lose work by exploring — every edit autosaves, and ⌘Z undoes.
 > There's no "save" button for normal editing.
 
+**You don't start on a blank page.** A first run seeds a small sample workspace: three products, a
+course, a presentation, a facilitator guide and two source documents — one a chaptered manual with
+comments, links, alternates, a restricted passage and two declared variants, the other a shared
+glossary belonging to no product. It's invented material, there to be clicked, edited and deleted.
+
+**Already have work of your own?** Then the seed never ran — it only ever fills an empty workspace,
+so it can't arrive on top of what you've built. Load it deliberately instead: **Files → New →
+Sample workspace…**. It tells you what it will add before it adds anything, leaves everything you
+already have untouched, and skips any part of the sample that's already there — so running it twice
+adds nothing the second time.
+
 ---
+
+**Moving your work to another machine, or another Verso.** **Settings → System → Workspace →
+Export everything to a folder…** asks for a folder once and writes your whole workspace into it:
+one workspace file holding every document, every source document, your products and your settings,
+plus a **.verso for each document carrying that document's images**. You don't export documents one
+at a time. It needs Chrome or Edge — Safari and Firefox can't write to a folder, and Verso says so
+rather than quietly giving you less. **Import workspace…** brings a workspace file back. It offers **Replace** (your workspace
+becomes the file) or **Merge** (bring it in alongside), tells you exactly what will be added and
+what will be removed *by name* before it does anything, and downloads a backup of your current
+workspace first — so any import can be undone.
+
+If any document can't be packed, the others still are — and the summary names the ones that
+failed, so nothing goes missing quietly. The **Workspace file only** button is there when you want
+the structure without the images; it's labelled with what it leaves out.

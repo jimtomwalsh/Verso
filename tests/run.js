@@ -10800,7 +10800,9 @@ section("project auto-backup");
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(ebk) && /saveBackupHandle\(E\.activeDocId, h\)/.test(ebk));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(ebk) && /Backup OFF — this course is NOT being saved/.test(ebk) && /No backup folder — this course is NOT being saved anywhere/.test(ebk) && /\? "Reconnect folder" : "Choose folder"/.test(ebk));
   // arch-P3b-07d: the new-doc flow stayed here; only the banner it raises moved.
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(DOCS) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(DOCS) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
+  // GH #327 put a guard between the create and the prompt: a code clash returns null, and a
+  // document that was never made must not be followed by a folder picker for it.
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(DOCS) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*if \(!made\) return;\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(DOCS) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
   // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
   // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
   ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(DOCS));
@@ -12836,6 +12838,429 @@ section("HFDEF header-footer default");
   ok("the picker list is built from the shared document row, not a hand-rolled one",
     /list\.appendChild\(window\.VersoUI\.DocumentRow\(\{/.test(DOCS) && DOCS.indexOf('h("div", "modal-list__item")') === -1);
   ok("the delete button rides the row's trailing slot", /trailing: del,/.test(DOCS));
+})();
+
+// ---- GH #327: creating a document reads the form, and leaves you looking at it -----
+// The report was "Load sample copy does nothing". It did something: it wrote a document into the
+// registry with a random code, the sample's title, the sample's demo product and no type at all,
+// and then left the author on a Files list that does not re-render -- so the document existed and
+// nothing showed it. Both halves are covered here, because the invisible half is the one a
+// screenshot cannot tell you about, and it applies to Create blank and Import equally.
+section("GH327 new document");
+(function () {
+  var D;
+  try { D = require(path.join(ROOT, "src/editor/documents.js"))._pure; } catch (e) { ok("require documents.js", false); return; }
+  var DOCS = src("src/editor/documents.js");
+  var SAMPLE = { title: "Workplace Safety Essentials", code: "DEMO-WSE-101" };
+
+  // --- what the form's values mean (pure) ---
+  var typed = D.newDocIdentity(SAMPLE, { title: "Acme Field Guide", code: "ACME-FG-1" }, 7);
+  ok("a typed title and code WIN over the sample's own -- the whole of #327",
+    typed.title === "Acme Field Guide" && typed.code === "ACME-FG-1");
+  ok("whitespace is not a value", D.newDocIdentity(SAMPLE, { title: "  ", code: "  " }, 7).code === "DEMO-WSE-101-copy-7");
+  var blank = D.newDocIdentity(SAMPLE, {}, 42);
+  ok("a blank form still yields a sample in one click, named after the sample",
+    blank.title === "Workplace Safety Essentials (Copy)" && blank.code === "DEMO-WSE-101-copy-42");
+  ok("one field typed does not discard the other's fallback",
+    D.newDocIdentity(SAMPLE, { title: "Only a title" }, 3).code === "DEMO-WSE-101-copy-3");
+  ok("no sample and no form still produces a usable pair, never undefined",
+    D.newDocIdentity(null, null, 1).title === "Sample document (Copy)" && D.newDocIdentity(null, null, 1).code === "SAMPLE-copy-1");
+  ok("the suffix is supplied, not generated, so the resolver stays pure",
+    /function newDocIdentity\(sampleMeta, form, suffix\)/.test(DOCS) &&
+    !/function newDocIdentity[\s\S]{0,400}Math\.random/.test(DOCS));
+
+  // --- the sample button is wired to the form it sits in ---
+  var btn = (DOCS.match(/label: "Load sample copy"[\s\S]*?modal\.remove\(\);/) || [""])[0];
+  ok("the sample copy reads the title and code fields", /titleIn\.value/.test(btn) && /codeIn\.value/.test(btn));
+  ok("the sample copy takes the Product PICKED, which also clears the sample's demo product",
+    /tagDocProductStage\(freshSample, newDocProduct, null\)/.test(btn));
+  ok("the sample copy is stamped with the chosen preset -- the sample itself has no geo",
+    /DT\.presetToCell\(newDocPreset\)/.test(btn) && /tagDocCell\(freshSample, cell\.geo, cell\.interactive\)/.test(btn));
+  ok("nothing in the sample button invents a code any more", !/DEMO-WSE-101-copy-" \+ Math\.floor/.test(DOCS));
+
+  // --- and every route out of the dialog lands you in what you made ---
+  ok("Files is INVALIDATED, not re-rendered -- a destination is built once (uio-W03 §3.2)",
+    /function landInNewDoc\(\)[\s\S]{0,220}window\.__leftRail\.invalidate\("files"\);\s*window\.__leftRail\.setStage\("edit"\);/.test(DOCS));
+  ok("all three routes land: blank, sample and import", (DOCS.match(/landInNewDoc\b/g) || []).length === 4);
+  ok("import lands only once the document is actually committed, not before the replace confirm",
+    /function importDocToRegistry\(importedDoc, onDone\)/.test(DOCS) &&
+    /switchDoc\(targetId\);[\s\S]{0,200}if \(typeof onDone === "function"\) onDone\(targetId\);/.test(DOCS));
+  ok("a code clash lands you nowhere: createBlankDoc returns null and the dialog stays open",
+    /return null;/.test(DOCS) && /var made = createBlankDoc\(/.test(DOCS) && /if \(!made\) return;/.test(DOCS));
+})();
+
+// ---- loading the sample workspace on demand -------------------------------
+// Shipping the set seeded into empty stores made it invisible to the only people who needed it:
+// James hard-refreshed staging, saw none of it, and was right -- his workspace already had his own
+// products in it, so all three seeds skipped. A set nobody testing can reach is not a set.
+//
+// The load is ADDITIVE by construction. Overwriting would destroy real work to install a demo, and
+// renaming would leave two of everything after a second run, so an id already present is skipped.
+// That makes it idempotent, which is the property the tests below are really pinning down.
+section("load sample workspace");
+(function () {
+  var D;
+  try { D = require(path.join(ROOT, "src/editor/documents.js"))._pure; } catch (e) { ok("require documents.js", false); return; }
+  var DOCS = src("src/editor/documents.js"), FS = src("src/editor/files.js"), ED = src("src/editor.js");
+  var shipped = {
+    products: { p1: {}, p2: {} },
+    sourceDocs: { s1: {}, s2: {} },
+    designDocs: { d1: {}, d2: {}, d3: {} }
+  };
+
+  var all = D.sampleWorkspacePlan(shipped, { products: {}, components: {}, registry: {} });
+  ok("into an empty workspace, everything is added and nothing skipped",
+    all.total === 7 && all.skipped.length === 0);
+  // The case that started this: a workspace with the author's OWN products in it.
+  var theirs = D.sampleWorkspacePlan(shipped, {
+    products: { "prod-radar-a": {}, "prod-radar-b": {} }, components: {}, registry: { "THEIR-DOC": {} }
+  });
+  ok("someone else's products and documents do not block the load, and are not counted",
+    theirs.total === 7 && theirs.skipped.length === 0);
+  var partial = D.sampleWorkspacePlan(shipped, { products: { p1: {} }, components: { s2: {} }, registry: { d1: {}, d3: {} } });
+  ok("what is already here is SKIPPED, never overwritten and never duplicated",
+    partial.total === 3 && partial.skipped.length === 4 &&
+    partial.products.join() === "p2" && partial.sourceDocs.join() === "s1" && partial.designDocs.join() === "d2");
+  var none = D.sampleWorkspacePlan(shipped, { products: shipped.products, components: shipped.sourceDocs, registry: shipped.designDocs });
+  ok("loading it twice is a no-op -- the second run adds nothing", none.total === 0 && none.skipped.length === 7);
+  ok("a missing or empty shipped set plans nothing rather than throwing",
+    D.sampleWorkspacePlan(null, null).total === 0);
+
+  // What the confirm SAYS is built from the plan, so it cannot promise what the plan will not do.
+  ok("the confirm counts what will actually be added, in plain words",
+    D.sampleWorkspaceSummary(all) === "Adds 2 products, 2 source documents and 3 design documents alongside your own work. Nothing you already have is changed or replaced.");
+  ok("...and says what it is leaving alone when some of it is already here",
+    /^Adds 1 product, 1 source document and 1 design document alongside/.test(D.sampleWorkspaceSummary(partial)) &&
+    /4 items are already here and will be left alone\.$/.test(D.sampleWorkspaceSummary(partial)));
+  ok("singulars are singular", /Adds 1 product alongside/.test(
+    D.sampleWorkspaceSummary({ products: ["p"], sourceDocs: [], designDocs: [], skipped: [], total: 1 })));
+  ok("nothing to add says so rather than offering an action that would do nothing",
+    /already here\. Nothing would be added\./.test(D.sampleWorkspaceSummary(none)));
+
+  // --- and it is reachable, which was the whole problem ---
+  ok("Files' New menu offers it", /label: "Sample workspace…", onClick: function \(\) \{ E\.loadSampleWorkspace\(\); \}/.test(FS));
+  ok("it is stated BEFORE it is done, and the destructive-sounding word is not used",
+    /confirmModal\("Add the sample workspace\?", summary,/.test(DOCS) && /okLabel: "Add"/.test(DOCS));
+  ok("all three stores are written, because that is where a workspace lives",
+    /E\.saveProducts\(\); E\.saveLibrary\(\); saveRegistry\(registry\);/.test(DOCS));
+  ok("it lands FILES, not a document -- it brought in several", (function () {
+    var body = (DOCS.match(/function loadSampleWorkspace\(\)[\s\S]*?\n    \}/) || [""])[0];
+    return /setStage\("files"\)/.test(body) && /invalidate\("files"\)/.test(body);
+  })());
+  ok("the shipped data is CLONED in, so loading it never aliases the shipping literal",
+    /clone\(shipped\.products\[id\]\)/.test(DOCS) && /clone\(shipped\.sourceDocs\[id\]\)/.test(DOCS) &&
+    /clone\(shipped\.designDocs\[code\]\)/.test(DOCS));
+  ok("editor.js binds and provides the entry point", /VE\.bind\("loadSampleWorkspace"\)/.test(ED) &&
+    /loadSampleWorkspace: loadSampleWorkspace,/.test(ED));
+})();
+
+// ---- the shipped sample workspace -----------------------------------------
+// The set exists to make every surface testable against something real, so what it must CONTAIN is
+// the requirement, and these assertions are that requirement written down. An edit that quietly
+// drops the stale alternate, the untagged document or the second linked location takes a surface
+// back to being untestable, and would otherwise do it silently.
+//
+// Two of the claims are checked through the REAL model rather than by reading the literal: the
+// stale alternate and the broken mark are only worth shipping if SourceDoc reaches the same verdict
+// the data claims, and a hand-set flag would be erased the first time a mark was refreshed.
+// ---- moving a whole working environment --------------------------------------
+// Source documents and products had NO export at all, so nothing could move between the Mac app,
+// staging and the browser. This is the file that carries them -- and the planner that decides what
+// an import would do BEFORE it does it, because James's constraint on the whole ticket is
+// "be conscious of data loss": no silent overwrite, no unnamed drop, no global switch answering a
+// per-document question.
+section("workspace transfer");
+(function () {
+  var W;
+  try { W = require(path.join(ROOT, "src/workspace-transfer.js")); } catch (e) { ok("require workspace-transfer.js", false); return; }
+  var stores = {
+    registry: { "A-1": { meta: { title: "A", code: "A-1" }, pages: [{ blocks: [{ src: "asset:aaa111" }] }] },
+                "B-2": { meta: { title: "B", code: "B-2" }, pages: [] } },
+    library: { components: { "topic-x": { kind: "topic", name: "X" }, "comp-y": { name: "Y" } } },
+    products: { "prod-1": { id: "prod-1", name: "One" } },
+    classification: { levels: [{ id: "class_open", rank: 0 }], defaultLevelId: "class_open" }
+  };
+  var file = W.buildWorkspaceFile(stores, { now: 1785990000000, origin: "test" });
+
+  // --- the file ---
+  ok("the file carries every store, including the two that had no export at all",
+    !!file.stores.registry && !!file.stores.library && !!file.stores.products && !!file.stores.classification);
+  ok("it is a deep copy -- mutating the file cannot reach back into the live stores", (function () {
+    file.stores.registry["A-1"].meta.title = "mutated";
+    var still = stores.registry["A-1"].meta.title === "A";
+    file.stores.registry["A-1"].meta.title = "A";
+    return still;
+  })());
+  ok("no clock is read -- the same workspace produces the same file", file.exportedAt === 1785990000000 &&
+    !/Date\.now|Math\.random/.test(src("src/workspace-transfer.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+  // The measured decision: media is NAMED, not carried.
+  ok("media is named rather than carried, and the file says so about itself",
+    file.media.carried === false && file.media.assetRefs.join() === "aaa111" && /not carried/.test(file.media.note));
+  ok("asset refs are found wherever they sit, by reading the serialised stores",
+    W.assetRefsIn({ registry: { d: { deep: { nested: [{ logo: "asset:zz9" }] } } } }).join() === "zz9");
+
+  // --- reading one back, and refusing what it cannot vouch for ---
+  var read = W.readWorkspaceFile(JSON.parse(JSON.stringify(file)));
+  ok("a workspace file reads back", read.ok && !read.errors.length);
+  ok("a file that is not a workspace is REFUSED, not repaired", !W.readWorkspaceFile({ pages: [] }).ok);
+  ok("a workspace from a newer Verso is refused rather than half-understood",
+    !W.readWorkspaceFile({ format: "verso-workspace", formatVersion: 99, stores: { registry: {} } }).ok);
+  ok("an empty workspace file is refused -- importing nothing over something is not a no-op",
+    !W.readWorkspaceFile({ format: "verso-workspace", formatVersion: 1, stores: {} }).ok);
+
+  // --- the plan, which is the whole point ---
+  var empty = { registry: {}, library: { components: {} }, products: {} };
+  var intoEmpty = W.planImport(file, empty, "replace");
+  ok("replace into an empty destination brings everything and drops nothing",
+    intoEmpty.documents.arriving.length === 2 && intoEmpty.library.arriving.length === 2 &&
+    intoEmpty.products.arriving.length === 1 && W.droppedCount(intoEmpty) === 0);
+  var dest = { registry: { "A-1": {}, "KEEP-9": {} }, library: { components: { "comp-y": {}, "keep-lib": {} } }, products: { "prod-9": {} } };
+  var rep = W.planImport(file, dest, "replace");
+  ok("REPLACE names what it would destroy, by id -- a count is not enough to agree to losing work by",
+    rep.documents.dropped.join() === "KEEP-9" && rep.library.dropped.join() === "keep-lib" &&
+    rep.products.dropped.join() === "prod-9" && W.droppedCount(rep) === 3);
+  var mer = W.planImport(file, dest, "merge");
+  ok("MERGE drops nothing, which is the whole difference between the two", W.droppedCount(mer) === 0);
+  ok("a collision is REPORTED per id, not settled by one global switch",
+    mer.documents.collisions.length === 1 && mer.documents.collisions[0].id === "A-1" &&
+    mer.library.collisions.length === 1);
+  ok("an unknown mode is treated as replace, never as a silent merge", W.planImport(file, dest, "nonsense").mode === "replace");
+  // Identity is the W00 rule, injected rather than re-derived (GH #266).
+  ok("document identity uses the caller's findRegistryId, so it cannot drift from the app's",
+    W.planImport(file, { registry: { "a-1": {} } }, "merge", function (reg, code) {
+      return Object.keys(reg).filter(function (k) { return k.toLowerCase() === String(code).toLowerCase(); })[0] || null;
+    }).documents.collisions.length === 1);
+
+  // --- applying it ---
+  var applied = W.applyImport(file, empty, intoEmpty, {});
+  ok("a replace into empty is LOSSLESS", JSON.stringify(applied.registry) === JSON.stringify(stores.registry) &&
+    JSON.stringify(applied.library) === JSON.stringify(stores.library) &&
+    JSON.stringify(applied.products) === JSON.stringify(stores.products));
+  ok("applying never mutates what it was given -- the caller still holds their workspace",
+    Object.keys(dest.registry).length === 2 && Object.keys(W.applyImport(file, dest, mer, {}).registry).length === 3);
+  var keptByDefault = W.applyImport(file, dest, mer, {});
+  ok("an UNANSWERED collision defaults to keeping what is already there",
+    JSON.stringify(keptByDefault.registry["A-1"]) === "{}");
+  ok("...and everything that did not collide still arrives", !!keptByDefault.registry["B-2"] && !!keptByDefault.registry["KEEP-9"]);
+  ok("answering 'replace' takes the incoming onto the id already here",
+    W.applyImport(file, dest, mer, { "A-1": "replace" }).registry["A-1"].meta.title === "A");
+  ok("answering 'both' brings it in ALONGSIDE, under a new id, losing neither", (function () {
+    var r = W.applyImport(file, dest, mer, { "A-1": "both" }, function (id) { return id + "-2"; }).registry;
+    return JSON.stringify(r["A-1"]) === "{}" && r["A-1-2"].meta.title === "A";
+  })());
+  ok("a replace adopts the file's classification; a merge keeps the one already configured",
+    W.applyImport(file, { classification: { levels: [], defaultLevelId: "mine" } }, rep, {}).classification.defaultLevelId === "class_open" &&
+    W.applyImport(file, { classification: { levels: [], defaultLevelId: "mine" } }, mer, {}).classification.defaultLevelId === "mine");
+
+  // --- and it says which documents will render with holes ---
+  ok("media the destination cannot resolve is named, so a document that will look broken says so",
+    W.missingMedia(intoEmpty, function (id) { return id === "present"; }).join() === "aaa111" &&
+    W.missingMedia(intoEmpty, function () { return true; }).length === 0);
+
+  // --- the chrome: the order of the four acts IS the feature ---
+  var DOCS = src("src/editor/documents.js"), SS = src("src/editor/settings-sheet.js"), IDX = src("index.html");
+  var run = (DOCS.match(/function runImport\([\s\S]*?\n    \}/) || [""])[0];
+  ok("THE BACKUP RUNS FIRST, and a backup that cannot be written STOPS the import",
+    run.indexOf("BEFORE-IMPORT") !== -1 && run.indexOf("BEFORE-IMPORT") < run.indexOf("applyImport") &&
+    /if \(!backup\) \{[\s\S]{0,200}return;/.test(run));
+  ok("nothing is written until the plan has been confirmed -- applyImport is reached only from runImport",
+    (DOCS.match(/applyImport\(/g) || []).length === 1);
+  ok("the destructive path is the one marked danger, and merge is never the default",
+    /primaryLabel: "Replace…", danger: true/.test(DOCS) && /label: "Merge…"/.test(DOCS));
+  ok("the confirm LISTS the ids it would remove rather than only counting them",
+    /Removed from this machine \(" \+ dropped\.length \+ "\):/.test(DOCS) && /dropped\.slice\(0, 12\)/.test(DOCS));
+  ok("it warns when documents will render with gaps, before the import not after",
+    /referenced image\(s\) are not on this machine/.test(DOCS));
+  ok("the export says what it is NOT carrying, on the way out",
+    /but not the "\s*\+\s*n\s*\+\s*" image/.test(DOCS));
+  ok("a part-way failure tells you to restore the backup rather than reporting success",
+    /Import failed part-way/.test(DOCS) && /Restore the backup that just downloaded/.test(DOCS));
+  ok("it reloads rather than re-rendering -- every panel holds references into the replaced stores",
+    /location\.reload\(\)/.test(run));
+  ok("identity is the app's findRegistryId, passed through from the chrome",
+    /planImport\(ws, liveStores\(\), "replace", E\.findRegistryId\)/.test(DOCS));
+  // System, not Project: a workspace outlives any one document, so it must sit in the tab that
+  // holds the machine-level settings rather than beside that document's own header and backup.
+  ok("the workspace section is SYSTEM-level, beside the other things that outlive one document",
+    /\{ key: "workspace", title: "Workspace", build: buildWorkspaceBody \}/.test(SS) &&
+    SS.indexOf('key: "workspace"') < SS.indexOf('key: "docType"'));
+  // The library section holds its own Export Library (.json), and the workspace file already
+  // CARRIES the library -- so the narrower control must be met as a subset of the wider one, not
+  // a few pixels above it where it gets mistaken for it.
+  ok("the whole-workspace export reads BEFORE the library slice of it",
+    SS.indexOf('key: "workspace"') < SS.indexOf('key: "library"'));
+  // The complete export is the PRIMARY action: leaving the author to fetch each document's images
+  // by hand is what made the flow "far too much work", and a manual repetition is a document that
+  // can go missing without anyone noticing.
+  ok("the complete export is the primary action, and the structure-only one says what it omits",
+    /variant: "primary", label: "Export everything to a folder…"/.test(SS) &&
+    /label: "Workspace file only \(no images\)"/.test(SS));
+  ok("the settings section names the browsers that can do it, rather than failing at the picker",
+    /Safari and Firefox can't write to a folder/.test(SS));
+  ok("the pure core loads before editor.js", IDX.indexOf("src/workspace-transfer.js") !== -1 &&
+    IDX.indexOf("src/workspace-transfer.js") < IDX.indexOf("src/editor.js"));
+
+  // --- exporting EVERYTHING in one gesture ---
+  var AS = src("src/editor/assets.js");
+  ok("there is ONE packer -- the folder export takes bytes from the same builder the download uses",
+    /function buildVersoBytes\(targetDoc\)/.test(AS) && /var built = buildVersoBytes\(src\);/.test(AS) &&
+    (AS.match(/VersoFormat\.buildPackage\(/g) || []).length === 1);
+  // The bug the failure-path test found: an unpackable document silently packed as a copy of
+  // whatever was OPEN, under that document's name -- so the folder held two copies of one course,
+  // no copy of the broken one, and a summary calling it a success.
+  ok("the packer REFUSES an unpackable document instead of substituting the open one",
+    /throw new Error\("that document has no pages to pack/.test(AS));
+  ok("...while the toolbar button keeps its own fallback, which is where it was wanted",
+    /var src = \(targetDoc && targetDoc\.meta && targetDoc\.pages\) \? targetDoc : E\.doc;[\s\S]{0,200}buildVersoBytes\(src\)/.test(AS));
+  var folder = (DOCS.match(/function runFolderExport\([\s\S]*?\n    \}/) || [""])[0];
+  ok("the folder export writes the workspace file AND a .verso per document, from one pick",
+    /Object\.keys\(registry\)\.forEach/.test(folder) && /buildVersoBytes\(registry\[code\]\)/.test(folder) &&
+    /workspaceFilename\(stamp\)/.test(folder));
+  ok("documents pack one at a time, because each package is built whole in memory",
+    /chain = chain\.then\(/.test(folder));
+  ok("one document failing does not cost you the others -- it is recorded and the run continues",
+    /failed\.push\(\{ name: code \+ "\.verso"/.test(folder) && /return;/.test(folder));
+  ok("the summary NAMES failures rather than reporting a survivable-sounding count",
+    /FAILED \(" \+ failed\.length \+ "\) — these are NOT in the folder:/.test(DOCS) &&
+    /Fix these before you rely on the folder as a backup/.test(DOCS));
+  ok("a browser that cannot write a folder is TOLD, not quietly given the smaller export",
+    /can't write to a folder/.test(DOCS) && /okLabel: "Download workspace file"/.test(DOCS));
+  ok("cancelling the folder picker is not an error", /the author cancelled the picker/.test(DOCS));
+})();
+
+section("sample workspace");
+(function () {
+  var W, SD, C;
+  try {
+    W = require(path.join(ROOT, "src/sample-workspace.js"));
+    SD = require(path.join(ROOT, "src/source-doc.js"));
+    C = require(path.join(ROOT, "src/classification.js"));
+  } catch (e) { ok("require the sample workspace + its model", false); return; }
+  var SW = src("src/sample-workspace.js");
+  var manual = W.sourceDocs["topic-meridian-manual"];
+  var model = SD.fromJSON(manual.doc);
+  var markById = {};
+  model.marks.forEach(function (m) { SD.refreshMark(model, m); markById[m.id] = m; });
+
+  // --- breadth: several products, several document types ---
+  ok("several products, not one", Object.keys(W.products).length >= 2);
+  ok("a product declares variants, so the variant columns resolve without setup",
+    (W.products["prod-meridian"].variants || []).length === 2);
+  ok("a product names its primary source", W.products["prod-meridian"].groundTruthId === "topic-meridian-manual");
+  var geos = {};
+  Object.keys(W.designDocs).forEach(function (k) { geos[W.designDocs[k].meta.geo || "reflow"] = 1; });
+  ok("a presentation and a guide ship alongside the course -- three geometries, not one",
+    geos.frame && geos.paged && geos.reflow);
+  ok("a static document exists, so the static fallback has a subject",
+    Object.keys(W.designDocs).some(function (k) { return W.designDocs[k].meta.interactive === false; }));
+
+  // --- source documents with real chaptered prose ---
+  var chapters = SD._pure.chapters(model);
+  ok("the source document is chaptered, so the outline and scroll-spy have shape", chapters.length === 3);
+  ok("every chapter carries prose, not just a heading",
+    model.nodes.filter(function (n) { return n.type === "paragraph"; }).length >= 8);
+
+  // --- all four mark types, and the states that matter ---
+  var types = {};
+  model.marks.forEach(function (m) { types[m.type] = (types[m.type] || 0) + 1; });
+  ok("all four mark types are placed", types.link && types.alternate && types.comment && types.restricted);
+  var threads = manual.comments || [];
+  ok("comments cover BOTH states -- one open, one resolved",
+    threads.some(function (c) { return !c.done; }) && threads.some(function (c) { return c.done; }));
+  ok("every comment thread anchors to a comment mark that exists",
+    threads.every(function (c) { return markById[c.anchor.markId] && markById[c.anchor.markId].type === "comment"; }));
+
+  // --- the linked passage is used in MORE THAN ONE document, and really is ---
+  var used = SD._pure.whereUsedForMark(markById["mk-link-mount"]);
+  var codes = {}; used.forEach(function (u) { codes[u.docCode] = 1; });
+  ok("the linked passage is used in two DIFFERENT documents", Object.keys(codes).length === 2);
+  // The cross-check that catches drift: the mark's own locations and the blocks in the design
+  // documents are two halves of one fact, and either can be edited without the other.
+  ok("each location names a design document that really carries a block linked back to this mark",
+    used.every(function (u) {
+      var d = W.designDocs[u.docCode]; if (!d) return false;
+      return (d.pages || []).some(function (p) {
+        return (p.blocks || []).some(function (b) {
+          return b.id === u.blockId && b.sourceLink &&
+            b.sourceLink.masterId === "topic-meridian-manual" && b.sourceLink.markId === "mk-link-mount";
+        });
+      });
+    }));
+
+  // --- stale and broken are EARNED, not flagged ---
+  var alt = markById["mk-alt-cable"];
+  ok("the stale alternate is stale because its baseText really differs from the text it anchors",
+    alt.baseText && alt.baseText !== SD._pure.markText(model, alt));
+  ok("...and SourceDoc agrees after a refresh", alt.stale === true && alt.broken === false);
+  var broken = markById["mk-broken-figure"];
+  ok("the broken mark is broken because its node genuinely is not in the document",
+    !SD._pure.nodeByKey(model, broken.anchor.nodeKey) && broken.broken === true);
+  ok("nothing ELSE is accidentally broken or stale", model.marks.filter(function (m) {
+    return m.id !== "mk-broken-figure" && m.id !== "mk-alt-cable" && (m.broken || m.stale);
+  }).length === 0);
+  ok("every other mark anchors to a node that exists", model.marks.every(function (m) {
+    return m.id === "mk-broken-figure" || !!SD._pure.nodeByKey(model, m.anchor.nodeKey);
+  }));
+
+  // --- variants declared AND diverged ---
+  ok("a variant declared on the product actually diverges in the document",
+    SD._pure.variantsInDoc(model).indexOf("Extended") !== -1);
+  var diverged = model.nodes.filter(function (n) {
+    return n.variants && !n.baseAbsent && SD._pure.nodeForVariant(n, "Extended").diverged;
+  });
+  ok("at least one node has genuinely diverged wording, not just an override that matches", diverged.length >= 1);
+  ok("and one node is present for a variant ONLY, so absence is shown too",
+    model.nodes.some(function (n) { return n.baseAbsent === true && n.variants && n.variants.Extended; }));
+
+  // --- classification: a Product rung, and a document that tightens it ---
+  var levels = C.seedLevels();
+  var prodLevel = W.products["prod-meridian"].classificationId;
+  ok("classification is set at the Product rung", !!C.levelById(levels, prodLevel));
+  ok("a document OVERRIDES it, and only in the direction F07 permits (tighter)",
+    !!manual.classificationId && manual.classificationId !== prodLevel &&
+    C.isTightening(levels, prodLevel, manual.classificationId));
+  ok("the restricted mark carries its own level, which is what a mark-level override is for",
+    !!markById["mk-restricted-calib"].classificationId);
+
+  // --- the deliberate edges ---
+  ok("a design document is UNTAGGED -- no product at all",
+    Object.keys(W.designDocs).some(function (k) { return !W.designDocs[k].meta.productId; }));
+  ok("a source document belongs to no product and is linked from nowhere", (function () {
+    var g = W.sourceDocs["topic-shared-glossary"];
+    if (!g || g.productId) return false;
+    return !Object.keys(W.designDocs).some(function (k) {
+      return (W.designDocs[k].pages || []).some(function (p) {
+        return (p.blocks || []).some(function (b) { return b.sourceLink && b.sourceLink.masterId === g.id; });
+      });
+    });
+  })());
+  ok("a title is long enough to force a row, a tab and a card to truncate",
+    Object.keys(W.designDocs).some(function (k) { return (W.designDocs[k].meta.title || "").length > 80; }));
+  ok("nothing has been published -- a never-published document is the state Publish opens on",
+    Object.keys(W.designDocs).every(function (k) { return !W.designDocs[k].releases && !W.designDocs[k].releaseHistory; }));
+
+  // --- it is data, and it is deterministic ---
+  // Comments stripped first: the file's own header explains why it holds no clock, and a naive
+  // grep would fail on the explanation.
+  var SW_CODE = SW.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("no clock and no randomness -- this file is read by a suite that has neither",
+    !/Date\.now|Math\.random|new Date\(/.test(SW_CODE));
+  ok("it is a literal, not a builder: no function declarations construct the content",
+    !/function [a-z]/.test(SW_CODE));
+  ok("the invented material stays invented -- no product name shared with a real one",
+    /Meridian|Atlas/.test(SW));
+
+  // --- and it is actually seeded, through the seams that already existed ---
+  var IDX = src("index.html"), ED = src("src/editor.js"), LIB = src("src/editor/library.js");
+  ok("it loads before editor.js, which reads it at boot",
+    IDX.indexOf("src/sample-workspace.js") !== -1 &&
+    IDX.indexOf("src/sample-workspace.js") < IDX.indexOf("src/editor.js"));
+  ok("design documents seed the registry default", /seedSampleWorkspace\(defaultRegistry\)/.test(ED));
+  ok("products seed the products default", /W\.products\).forEach/.test(ED));
+  ok("source documents seed the LIBRARY, because that is the store they live in",
+    /W\.sourceDocs\).forEach/.test(LIB));
+  ok("the seed is CLONED, so an author editing their copy never writes into the shipping data",
+    /clone\(W\.designDocs\[code\]\)/.test(ED) && /JSON\.parse\(JSON\.stringify\(W\.sourceDocs\[id\]\)\)/.test(LIB));
 })();
 
 // ---- uio-W04: the Files destination ---------------------------------------

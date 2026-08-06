@@ -34,6 +34,9 @@
       "courseNavNests", "sectionGroup", "MOD_KEY", "wirePanelResizer", "togglePanels", "reapplyLayout",
       "backupMode", "backupHandleSet", "bindProjectFolder", "reconnectBackupFolder", "repeatedList", "confirmModal",
       "doc", "inspector", "canvasBg",
+      // Moving a whole working environment. The pure planner is src/workspace-transfer.js; these
+      // two are the disk-and-stores half, which lives beside the document import it generalises.
+      "exportWorkspaceFile", "importWorkspaceFile", "exportWorkspaceEverything",
       // The panel host is swapped while a section body builds, and a write crosses as a function.
       "setInspector"
     );
@@ -158,6 +161,30 @@
       applyBp();
       view.ready = false; mount(); // frames may have changed size -> refit (mirrors setBreakpoint)
     }
+    // uio / verso-workspace-export-import: the one place a whole working environment leaves and
+    // arrives. Stated plainly, because the two buttons do very different-sized things: export is
+    // safe and repeatable, import can replace everything you have.
+    function buildWorkspaceBody(host) {
+      var U = window.VersoUI;
+      host.appendChild(h("div", "insp-hint",
+        "A workspace file carries EVERY document, every source document, your products and your settings — the whole machine, not one document. It is how work moves between the app, staging and this browser."));
+      var row = h("div", "insp-row insp-row--actions");
+      // The PRIMARY export is the complete one. Exporting the structure and leaving the author to
+      // fetch each document's images by hand is what made the flow "far too much work", and every
+      // manual repetition is a document that can be missed without anyone noticing.
+      row.appendChild(U.Button({ variant: "primary", label: "Export everything to a folder…", onClick: function () { E.exportWorkspaceEverything(); } }));
+      row.appendChild(U.Button({ variant: "secondary", label: "Import workspace…", onClick: function () { E.importWorkspaceFile(); } }));
+      host.appendChild(row);
+      host.appendChild(h("div", "insp-hint",
+        "Pick a folder once and Verso writes the whole thing into it: the workspace file, plus a .verso for every document carrying that document's images. Chrome or Edge — Safari and Firefox can't write to a folder."));
+      // The structure-only download stays, quietly, for the case where the folder is not wanted --
+      // and it is labelled with what it leaves out rather than looking like the same act, smaller.
+      var row2 = h("div", "insp-row insp-row--actions");
+      row2.appendChild(U.Button({ variant: "secondary", label: "Workspace file only (no images)", onClick: function () { E.exportWorkspaceFile(); } }));
+      host.appendChild(row2);
+      host.appendChild(h("div", "insp-hint",
+        "Importing offers Replace or Merge, tells you exactly what it will add and remove first, and downloads a backup of your current workspace before it touches anything."));
+    }
     function buildPreviewSizesBody(host) {
       host.appendChild(h("div", "insp-hint", "The pixel dimensions behind the desktop / tablet / mobile preview buttons. These size the preview frame only — the course's own responsive layout (which keys off the device name) is unchanged. Saved on this machine."));
       [["desktop", "Desktop"], ["tablet", "Tablet"], ["mobile", "Mobile"]].forEach(function (pair) {
@@ -208,6 +235,17 @@
             ifBody.appendChild(h("div", "insp-hint", "Shows the live document model (JSON) below the inspector for debugging. Off by default; editor-only, never exported."));
           } },
         { key: "preview", title: "Preview sizes", build: buildPreviewSizesBody },
+        // A workspace is machine-level -- every document, the library and the products at once --
+        // so it belongs in System beside the other things that outlive one document, not in
+        // Project beside that document's own header and backup.
+        //
+        // ABOVE Component Library, deliberately. The library section carries its own "Transfer"
+        // sub-section with an Export Library (.json) button, and the two sat as near-identical
+        // export pairs a few pixels apart -- one of which is a SUBSET of the other, since the
+        // workspace file already carries the library. James went looking for the workspace export
+        // and found the library one. The bigger scope reads first, so the narrower control is met
+        // as a subset of something already understood rather than mistaken for it.
+        { key: "workspace", title: "Workspace", build: buildWorkspaceBody },
         { key: "library", title: "Component Library", build: buildLibraryBody }
       ];
       return [
