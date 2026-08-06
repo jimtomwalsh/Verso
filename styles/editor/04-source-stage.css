@@ -488,10 +488,22 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .lpane.is-collapsed .lpane__caret { transform: rotate(-90deg); }
 .lpane__body { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 .lpane-split { flex: 0 0 auto; height: 6px; cursor: row-resize; background: transparent; z-index: 2; }
-/* SPEC 7: 3-way left-panel switcher (Structure . Blocks . Source). One section shows at a
-   time; hidden panes drop out entirely. The switcher's segmented control sits at the top. */
-.lpane-switch { flex: 0 0 auto; padding: 8px; border-bottom: 1px solid var(--border-strong); }
-.lpane-switch .prop-toggle-row { margin: 0; }
+/* uio-E-M02 (EDIT-05): the outline is permanent; Insert / Source share a collapsible drawer
+   beneath it. The drawer head carries the segmented tab pair + the collapse control; a
+   collapsed drawer is just that strip, and the outline takes the whole panel. */
+.lpane--structure { flex: 1 1 0; min-height: 120px; }
+.lpane-drawer {
+  flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+  height: 46%; border-top: 1px solid var(--border-strong);
+}
+.lpane-drawer.is-collapsed { height: auto; }
+.lpane-drawer__head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.lpane-drawer.is-collapsed .lpane-drawer__head { border-bottom: none; }
+.lpane-drawer__tabs { flex: 1 1 auto; min-width: 0; }
+.lpane-drawer__tabs .prop-toggle-row { margin: 0; }
 .lpane[hidden] { display: none; }
 .lpane__head--sub { cursor: default; }
 .lpane__head--sub .lpane__title { font-size: var(--text-xs); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary); }

@@ -81,17 +81,19 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   items deliberately carry no counts or badges: what matters is in the work, not on the rail.
 
   Verso reopens the destination you left when you relaunch. A brand-new install starts on Files.
-- **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
-  panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
-  palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
-  components** beneath it: **My Components** (course-local), **Blocks** and **Pages** (the shared
-  cross-course library, §9). **Source** — a **read-only, live view of the open document's product
-  source**: the same source document you'd see in the Source stage, in a narrow reading column,
-  with a **search box** (type to find, Enter / Shift+Enter to cycle matches) and a **table of
-  contents** that jumps to a chapter and tracks where you're reading. It keys off the document you
-  have open (its product), so it always matches the course in front of you.
-  It's read-only — all source editing stays in the Source stage. The panel remembers which section
-  you last used.
+- **Left (the outline, with a drawer beneath it).** The **Pages** outline — chapters and pages as
+  a tree — is always visible; it never swaps away, so you can aim an insert or a drop at a page
+  while you work. Beneath it sits a collapsible **drawer** with two tabs. **Insert** — the palette
+  of built-in block types (Text, Media, Layout, Interactive…), with **Reusable components**
+  beneath it: **My Components** (course-local), **Blocks** and **Pages** (the shared cross-course
+  library, §9). **Source** — a **read-only, live view of the open document's product source**: the
+  same source document you'd see in the Source stage, in a narrow reading column, with a **search
+  box** (type to find, Enter / Shift+Enter to cycle matches) and a **table of contents** that
+  jumps to a chapter and tracks where you're reading. It keys off the document you have open (its
+  product), so it always matches the course in front of you.
+  It's read-only — all source editing stays in the Source stage. Collapse the drawer with the
+  chevron in its header to give the outline the whole panel; the drawer remembers which tab you
+  last used, and the panel remembers whether it was open.
   **Placing linked copy.** Select any passage in this panel (a phrase, or a heading through a
   paragraph in one sweep) and a small bar appears at the selection with a **drag handle** and a
   **Place** button. Two ways to place it: **drag** the handle onto the canvas — a ghost follows your

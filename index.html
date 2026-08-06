@@ -187,14 +187,14 @@
       <div class="publish-stage__queue" id="publish-queue" aria-label="Publish queue"></div>
     </div>
 
-    <!-- left: SPEC 7 (decision 11) — a single 3-way switcher: Structure . Blocks . Source
-         (Source gets equal billing now that source insertion is a primary use). Each .lpane
-         carries data-lsec; the switcher (mounted into #lpane-switch, wired in wireLeftSwitcher)
-         shows the panes for the active section and hides the rest, persisting the last-active.
-         Components folds INTO Blocks (James's call): the Blocks section shows the Insert palette
-         with the Reusable-components pane beneath it. -->
+    <!-- left: uio-E-M02 (EDIT-05) — the outline is PERMANENT; Insert and Source live in a
+         collapsible drawer beneath it (segmented Insert . Source head, wired in wireLeftSwitcher).
+         The old 3-way switcher hid the page tree exactly when you needed to aim a drop; now a
+         placement drag always has the outline beside it. Each drawer pane keeps data-lsec;
+         applyLeftSection("structure") = drawer collapsed. Components stays folded INTO Blocks
+         (James's call): the Insert tab shows the palette with the Reusable-components pane
+         beneath it. -->
     <aside class="panel panel--left">
-      <div class="lpane-switch" id="lpane-switch"></div>
       <div class="lpane lpane--structure" id="lpane-structure" data-lsec="structure">
         <div class="lpane__body" id="tab-structure">
           <div class="panel-section">
@@ -210,6 +210,8 @@
           </div>
         </div>
       </div>
+      <div class="lpane-drawer" id="lpane-drawer">
+      <div class="lpane-drawer__head" id="lpane-drawer-head"></div>
       <div class="lpane lpane--blocks" id="lpane-blocks" data-lsec="blocks">
         <div class="lpane__body" id="tab-assets">
           <div class="panel-section">
@@ -238,6 +240,7 @@
              source reading column below it is unchanged. -->
         <div class="lpane__body lpane__body--product" id="edit-product-panel"></div>
         <div class="lpane__body" id="tab-source"></div>
+      </div>
       </div>
       <div class="panel-resizer" id="resizer-left"></div>
     </aside>
