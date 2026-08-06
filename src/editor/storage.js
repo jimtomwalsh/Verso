@@ -52,15 +52,50 @@
   var classification = (typeof window !== "undefined" && window.VersoClassification) || null;
   function use(mod) { classification = mod || classification; return VersoStorage; }
 
+  // ---- 0. which ENVIRONMENT's data is this? (GH #331) -----------------------
+  // One Pages site serves production at `/` and staging at `/staging/`, and the branch model
+  // promised they were separate stores. THEY WERE NOT. localStorage is scoped per ORIGIN, not per
+  // path, every key below was a fixed string, and the only thing that read the path drew a banner.
+  // Proven in a browser before this was written: a value written at the root URL read straight back
+  // at /staging/. So every "verify it on staging first" was writing to the real course data.
+  //
+  // PRODUCTION KEEPS THE UNPREFIXED KEYS. That is the whole migration strategy: the environment
+  // with the real work in it reads exactly what it read yesterday, so this fix cannot itself be the
+  // data-loss event. Only staging moves, and it moves to an empty store -- which is what a
+  // disposable test environment should have been all along.
+  //
+  // PURE, and it takes the path rather than reading location, so the suite can ask it about any
+  // deployment without a browser.
+  function environmentPrefix(pathname) {
+    // The exact deployed staging path, and nothing else. NOT a local folder that merely has
+    // "staging" somewhere in it, and never a file:// open -- the same discipline the staging
+    // banner uses, because a local checkout silently reading a different store would be its own
+    // footgun.
+    return /\/staging\/(index\.html)?$/.test(String(pathname || "")) ? "staging." : "";
+  }
+  function currentEnvironmentPrefix() {
+    try {
+      if (typeof location === "undefined") return "";
+      if (String(location.protocol).indexOf("http") !== 0) return "";
+      return environmentPrefix(location.pathname);
+    } catch (e) { return ""; }
+  }
+  var ENV = currentEnvironmentPrefix();
+  // Namespacing ONE facet and not the rest is worse than namespacing none: a staging registry over
+  // a shared asset store lets a sweep in staging delete production's images, and a shared products
+  // store leaves documents pointing at products the other environment renamed. Every facet goes
+  // through here, and the suite fails if a key is added that does not.
+  function envKey(name) { return ENV + name; }
+
   // ---- 1. the keys ---------------------------------------------------------
   var KEYS = {
-    registry: "authoring.registry",       // the doc-of-record: every course, by code
-    activeDoc: "authoring.activeDocId",   // doc-session: which tab is in front
-    openDocs: "authoring.openDocIds",     // doc-session: which tabs are open
-    backend: "authoring.storageBackend",  // "browser" | "file" | "http" -- see commitBackend
-    library: "authoring.library",         // shared component library (#18)
-    products: "authoring.products",       // Product containers (Product Rail #1)
-    classification: "authoring.classification"  // classification levels + the default (uio-F07)
+    registry: envKey("authoring.registry"),       // the doc-of-record: every course, by code
+    activeDoc: envKey("authoring.activeDocId"),   // doc-session: which tab is in front
+    openDocs: envKey("authoring.openDocIds"),     // doc-session: which tabs are open
+    backend: envKey("authoring.storageBackend"),  // "browser" | "file" | "http" -- see commitBackend
+    library: envKey("authoring.library"),         // shared component library (#18)
+    products: envKey("authoring.products"),       // Product containers (Product Rail #1)
+    classification: envKey("authoring.classification")  // classification levels + the default (uio-F07)
   };
 
   // ---- 2. the durable-write core (pure) ------------------------------------
@@ -432,6 +467,11 @@
   var VersoStorage = {
     use: use,
     KEYS: KEYS,
+    // GH #331. Published so persist.js can namespace the ASSET database by the same rule -- a
+    // staging registry over a shared asset store lets a sweep in staging delete production's
+    // images, which would make the isolation worse than none.
+    environmentPrefix: environmentPrefix,
+    environment: function () { return ENV; },
     FACETS: FACETS,
     isQuotaExceeded: isQuotaExceeded,
     writeStore: writeStore,

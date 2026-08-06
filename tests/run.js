@@ -12969,6 +12969,52 @@ section("load sample workspace");
 // an import would do BEFORE it does it, because James's constraint on the whole ticket is
 // "be conscious of data loss": no silent overwrite, no unnamed drop, no global switch answering a
 // per-document question.
+// ---- GH #331: staging and production are two stores, at last ----------------
+// The branch model promised /staging/ was disposable. It was not: localStorage is scoped per
+// ORIGIN, not per path, every key was a fixed string, and the only thing reading the path drew a
+// banner. Proven in a browser before the fix -- a value written at the root URL read straight back
+// at /staging/ -- so every "verify on staging first" was writing to the real course data.
+//
+// PRODUCTION KEEPS THE UNPREFIXED KEYS. That is the entire migration strategy, and the first two
+// assertions are the ones that matter: the environment holding the real work must read exactly what
+// it read yesterday, or the fix is itself the data-loss event.
+section("GH331 environment isolation");
+(function () {
+  var S;
+  try { S = require(path.join(ROOT, "src/editor/storage.js")); } catch (e) { ok("require storage.js", false); return; }
+  var STOR = src("src/editor/storage.js"), PERS = src("src/persist.js");
+
+  ok("PRODUCTION IS UNPREFIXED -- it reads exactly what it read yesterday, so no migration is needed",
+    S.environmentPrefix("/Verso/index.html") === "" && S.environmentPrefix("/") === "" &&
+    S.environmentPrefix("/Verso/") === "");
+  ok("under node (no location) the environment is production, never a guess", S.environment() === "");
+  ok("the deployed staging path, and only it, gets its own store",
+    S.environmentPrefix("/Verso/staging/index.html") === "staging." &&
+    S.environmentPrefix("/Verso/staging/") === "staging.");
+  // The same discipline the staging banner uses: a local checkout that merely has the word in a
+  // folder name must not silently read a different store.
+  ok("a local folder that merely contains the word is NOT staging",
+    S.environmentPrefix("/Users/x/dev/staging-notes/index.html") === "" &&
+    S.environmentPrefix("/staging/deep/index.html") === "");
+
+  // EVERY facet, or none. Namespacing some and not others is worse than namespacing none.
+  var keyLines = (STOR.match(/^\s+\w+: envKey\("authoring\.[\w.]+"\)/gm) || []).length;
+  ok("every storage key goes through envKey -- a half-namespaced workspace corrupts rather than merges",
+    keyLines === 7 && !/: "authoring\.[\w.]+"/.test(STOR.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+  // The trap this fix would otherwise CREATE, and the reason the asset store moves too: a sweep
+  // walks its own registry and deletes every blob not referenced by it. A staging registry over a
+  // shared asset store would delete every image production owns.
+  ok("the ASSET database follows the same rule, or a sweep in staging deletes production's images",
+    /IDB_ENV/.test(PERS) && /VS\.environment\(\)/.test(PERS) &&
+    /IDB_ENV \? \("authoring-" \+ IDB_ENV\.replace/.test(PERS));
+  ok("...and it reads ONE rule rather than re-deriving the path test", !/staging/.test(
+    PERS.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+  ok("the rule is pure -- it takes a path rather than reading location, so it is testable",
+    /function environmentPrefix\(pathname\)/.test(STOR) && /function currentEnvironmentPrefix\(\)/.test(STOR));
+  ok("a file:// open is production, not a third store",
+    /String\(location\.protocol\)\.indexOf\("http"\) !== 0\) return "";/.test(STOR));
+})();
+
 section("workspace transfer");
 (function () {
   var W;
@@ -18507,7 +18553,9 @@ section("uio-F07 classification + export control");
 
   // --- the levels are DATA, through the same facet seam as everything else ---
   var STOR = src("src/editor/storage.js");
-  ok("classification is a storage FACET, not a constant", /classification: "authoring\.classification"/.test(STOR) &&
+  // GH #331 wrapped every key in envKey() so staging gets its own store. The claim is unchanged --
+  // classification is a facet with a key, not a constant somebody reads directly.
+  ok("classification is a storage FACET, not a constant", /classification: envKey\("authoring\.classification"\)/.test(STOR) &&
     /classification: \{ key: KEYS\.classification, read: "readClassification", write: "writeClassification" \}/.test(STOR));
   ok("a stored set is normalised on the way out, and a broken one keeps the seed",
     /var norm = C\.normalizeLevels\(raw\.levels, raw\.defaultLevelId\);/.test(STOR) &&
