@@ -38,8 +38,9 @@
   var INSPECTORS = [
     // kit.html owns #inspector as a static gallery; an internal re-render must not wipe it.
     { key: "kit", render: null, after: [], when: function (s) { return !!s.kitMode; } },
-    // §12: in comment mode the panel IS the comment list, whatever is selected.
-    { key: "comment", render: "renderCommentList", after: ["scrollEdges"], when: function (s) { return !!s.commentMode; } },
+    // uio-E-M06 (EDIT-16): the comment list is a peer TAB, not a mode eviction -- the panel shows
+    // it when the Comments tab is active, whatever is selected and whether or not comment mode is on.
+    { key: "comment", render: "renderCommentList", after: ["scrollEdges"], when: function (s) { return !!s.commentsTab; } },
     { key: "interact", render: "renderInteractInspector", after: ["scrollEdges"], when: function (s) { return !!s.interactMode; } },
     // Two or more selected shows the batch panel regardless of the single selection's type.
     { key: "multi", render: "renderMultiInspector", after: ["variantOverrides", "multiToolbar", "scrollEdges"],
@@ -57,7 +58,7 @@
     { key: "document", render: "renderDocumentInspector", after: FULL, when: function () { return true; } }
   ];
 
-  // state = { kitMode, commentMode, interactMode, multiSelCount, selectionType }
+  // state = { kitMode, commentsTab, interactMode, multiSelCount, selectionType }
   function pick(state) {
     var s = state || {};
     if (typeof s.multiSelCount !== "number") s.multiSelCount = 0;

@@ -34,7 +34,7 @@
       "ensureId", "switchRow", "setGoto", "reselectBlockNode", "getSelectionTypeForBlock", "canvasNodeForBlock",
       "blockLabel", "drawConnectors", "renderOnClickSection", "sectionGroup", "segmentedLive", "iconBtn",
       "buildTargetPicker", "selectRow", "panelSection", "renderModelView", "setInspector", "inspector",
-      "selection", "doc", "frameDescs"
+      "selection", "doc", "frameDescs", "renderInspector"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -75,15 +75,31 @@
     var showAllConnectors = false;
     var SHOW_ALL_CONNECTORS_KEY = "authoring.showAllConnectors";
     try { showAllConnectors = localStorage.getItem(SHOW_ALL_CONNECTORS_KEY) === "1"; } catch (e) {}
+    // uio-E-M06 (EDIT-16): the right panel has THREE peer tabs -- Design, Interact, Comments.
+    // Comment mode used to EVICT the inspector (the panel became the list, whatever was selected),
+    // so reviewing and fixing could not coexist. rightTab is now the panel's one selector;
+    // interactMode stays the canvas flag it always was (connectors + tint), true exactly when the
+    // Interact tab is active. The Comments tab is reachable with or without comment mode on.
+    var rightTab = "design"; // "design" | "interact" | "comments"
+    function rightTabNow() { return rightTab; }
     function syncRightTabs() {
       var tabs = document.querySelectorAll("#right-ptabs .ptab");
       Array.prototype.forEach.call(tabs, function (t) {
-        t.classList.toggle("is-active", t.getAttribute("data-ptab") === (interactMode ? "interact" : "design"));
+        t.classList.toggle("is-active", t.getAttribute("data-ptab") === rightTab);
       });
+      // The Comments tab carries the OPEN count, kept current by renderCommentPins (which every
+      // comment change already runs through).
+      var badge = document.getElementById("ptab-comments-count");
+      if (badge) {
+        var open = ((E.doc && E.doc.comments) || []).filter(function (c) { return !c.done; }).length;
+        badge.textContent = String(open);
+        badge.hidden = !open;
+      }
     }
     function setInteractMode(on) {
       on = !!on;
-      if (interactMode === on) return;
+      rightTab = on ? "interact" : (rightTab === "interact" ? "design" : rightTab);
+      if (interactMode === on) { syncRightTabs(); return; }
       interactMode = on;
       try { localStorage.setItem(INTERACT_MODE_KEY, on ? "1" : "0"); } catch (e) {} // HH
       endPick();                                   // never leave a pick session dangling across modes
@@ -91,10 +107,21 @@
       syncRightTabs();
       mount();                                     // rebuild world (connectors + tint) + repaint panel
     }
+    // The one way to change which panel the right side shows. Assign rightTab BEFORE dropping out
+    // of interact, so the mount setInteractMode(false) triggers repaints the panel already on the
+    // requested tab rather than flashing Design first.
+    function setRightTab(k) {
+      if (k !== "design" && k !== "interact" && k !== "comments") k = "design";
+      if (k === "interact") { setInteractMode(true); return; }
+      var wasInteract = interactMode;
+      rightTab = k;
+      if (wasInteract) setInteractMode(false);
+      else { syncRightTabs(); E.renderInspector(); }
+    }
     function wireRightTabs() {
       var tabs = document.querySelectorAll("#right-ptabs .ptab");
       Array.prototype.forEach.call(tabs, function (t) {
-        t.addEventListener("click", function () { setInteractMode(t.getAttribute("data-ptab") === "interact"); });
+        t.addEventListener("click", function () { setRightTab(t.getAttribute("data-ptab")); });
       });
       // #92c: Settings now lives on the left rail (rail-settings-btn, wired in mountLeftRail);
       // the right-panel cog was removed to end the duplication.
@@ -404,7 +431,8 @@
       interactReselect: interactReselect, addGotoInteraction: addGotoInteraction, decorateInteractHandle: decorateInteractHandle,
       interactBlock: interactBlock, renderInteractInspector: renderInteractInspector, renderGateSection: renderGateSection,
       blockById: blockById, restoreInteractMode: restoreInteractMode, interactModeOn: interactModeOn,
-      showAllConnectorsOn: showAllConnectorsOn, isPicking: isPicking
+      showAllConnectorsOn: showAllConnectorsOn, isPicking: isPicking,
+      setRightTab: setRightTab, rightTabNow: rightTabNow
     });
     // The mode itself, live, for the modules that already read it through the kernel.
     kernel.provideLive({

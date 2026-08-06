@@ -2773,6 +2773,8 @@
   var renderInteractInspector = VE.bind("renderInteractInspector");
   var restoreInteractMode = VE.bind("restoreInteractMode");
   var interactModeOn = VE.bind("interactModeOn");
+  var setRightTab = VE.bind("setRightTab");     // uio-E-M06: the right panel's one tab selector
+  var rightTabNow = VE.bind("rightTabNow");
   var showAllConnectorsOn = VE.bind("showAllConnectorsOn");
   var isPicking = VE.bind("isPicking");
   var renderGateSection = VE.bind("renderGateSection");
@@ -3561,7 +3563,7 @@
   };
   function renderInspector() {
     var rule = window.VersoInspector.pick({
-      kitMode: !!window.__KIT_MODE, commentMode: commentModeOn(), interactMode: interactModeOn(),
+      kitMode: !!window.__KIT_MODE, commentsTab: rightTabNow() === "comments", interactMode: interactModeOn(),
       multiSelCount: multiSel.length, selectionType: selection.type
     });
     if (!rule.render) return; // kit.html owns #inspector as a static gallery
@@ -6568,6 +6570,7 @@
     refreshCanvasSelection: refreshCanvasSelection,
     clearSelection: clearSelection,
     setInteractMode: setInteractMode,
+    setRightTab: setRightTab, rightTabNow: rightTabNow, syncRightTabs: syncRightTabs,
     demoDeviceEl: demoDeviceEl,
     blockIdByCid: blockIdByCid,
     commentIsOrphaned: commentIsOrphaned,

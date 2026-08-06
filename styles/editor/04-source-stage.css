@@ -421,6 +421,14 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 }
 .ptab:hover { color: var(--text-primary); }
 .ptab.is-active { color: var(--text-primary); font-weight: 600; }
+/* uio-E-M06 (EDIT-16): the Comments tab carries its OPEN count as a quiet accent pill. */
+.ptab__count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px;
+  border-radius: 999px; background: var(--accent-quiet); color: var(--accent);
+  font-size: var(--text-xs); font-weight: 600; line-height: 1;
+}
+.ptab__count[hidden] { display: none; }
 /* ⚙ settings cog: sits at the far right of the Design/Interact tab row */
 .ptab-cog {
   margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
