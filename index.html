@@ -79,6 +79,11 @@
     <span class="editor-window__sep editor-window__sep--doc" aria-hidden="true"></span>
     <!-- Zone 2 -- document settings + live switches (the "matrix" is the face-up controls) -->
     <div class="editor-window__zone editor-window__zone--doc">
+      <!-- uio-E-A01 (EDIT-05/16 in full): Edit's three named WORK MODES -- Assemble . Style .
+           Review. Each is an entry arrangement of the surfaces the Moderate tickets built (the
+           Source drawer, the three right-panel tabs, comment mode), not a lock: you can deviate
+           after entering one. Edit only; Source has its own mode switch beside it. -->
+      <div class="editor-window__editmode" id="edit-mode-switch"></div>
       <!-- opens the type-aware Document settings modal; wired by mountDocSettingsBtn(). -->
       <button class="tool editor-window__docsettings" id="doc-settings-btn" data-lucide="sliders-horizontal" title="Document settings"></button>
       <!-- Build/Read view toggle (SPEC 7 decision 14). A VersoUI.SegmentedControl mounts here. -->
@@ -267,6 +272,10 @@
 
     <!-- right: design / properties -->
     <aside class="panel panel--right">
+      <!-- uio-E-A01: in Assemble mode the inspector collapses to this 34px strip -- the mode
+           carries only the surfaces its job needs, and the strip is the one-click route back to
+           the full inspector (it switches to Style mode). -->
+      <button class="inspector-strip" id="inspector-strip" hidden title="Switch to Style mode for the full inspector"><span class="inspector-strip__label">Inspector</span></button>
       <div class="panel-tabs" id="right-ptabs">
         <button class="ptab is-active" data-ptab="design" title="Design — properties inspector">Design</button>
         <button class="ptab" data-ptab="interact" title="Interact — author click actions and locks">Interact</button>

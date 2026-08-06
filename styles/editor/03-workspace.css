@@ -50,7 +50,8 @@
 .toolbar.toolbar--source .editor-window__zone--doc { display: flex; }
 .toolbar.toolbar--source .editor-window__docsettings,
 .toolbar.toolbar--source .editor-window__view,
-.toolbar.toolbar--source .editor-window__axes { display: none; }
+.toolbar.toolbar--source .editor-window__axes,
+.toolbar.toolbar--source .editor-window__editmode { display: none; }
 .toolbar .editor-window__srcmode { display: none; }
 .toolbar.toolbar--source .editor-window__srcmode { display: flex; }
 .toolbar.toolbar--source .editor-window__sep--doc { display: block; }
@@ -81,6 +82,33 @@
    zone is hidden on the other stages by .toolbar--source. */
 .editor-window__srcmode { display: none; align-items: center; gap: var(--space-2, 4px); }
 .toolbar--source .editor-window__srcmode { display: flex; }
+/* uio-E-A01: Edit's work-mode switch. Same zone, same segmented pattern as Source's mode switch —
+   including its fix for the equal-width segments clipping the longest label ("Assemble"): a row
+   min-width, the same move .source-stage__article-head makes for "Digestible". */
+.editor-window__editmode { display: flex; align-items: center; gap: var(--space-2, 4px); flex: 0 0 auto; }
+.editor-window__editmode .prop-toggle-row { margin: 0; min-width: 210px; }
+.editor-window__editmode .vds-badge { flex: 0 0 auto; white-space: nowrap; }
+
+/* uio-E-A01: Assemble collapses the inspector to a 34px strip. The class rule wins the dock the
+   same way .has-sheet does -- by setting --dock-w, which the resizer's inline --right-w cannot
+   outrank (uio-F05-fb1's lesson). Scoped away from the stage overlays: --dock-w also positions
+   Source's info column, which must not inherit a 34px dock. */
+.workspace.workspace--edit-assemble:not(.workspace--stage-files):not(.workspace--stage-source):not(.workspace--stage-publish) { --dock-w: 34px; }
+.workspace--edit-assemble > .panel--right .panel-tabs,
+.workspace--edit-assemble > .panel--right .panel-resizer,
+.workspace--edit-assemble > .panel--right .scroll-frame,
+.workspace--edit-assemble > .panel--right #model-details { display: none; }
+.inspector-strip {
+  display: none; width: 100%; height: 100%; padding: 10px 0;
+  flex-direction: column; align-items: center; gap: 10px;
+  border: none; background: var(--surface-panel); color: var(--text-tertiary, var(--text-secondary));
+  cursor: pointer;
+}
+.workspace--edit-assemble > .panel--right .inspector-strip { display: flex; }
+.inspector-strip:hover { color: var(--text-primary); background: var(--surface-hover); }
+.inspector-strip__label {
+  writing-mode: vertical-rl; font-size: var(--text-xs); letter-spacing: 0.06em; text-transform: uppercase;
+}
 /* The chip is a read-only status fact, so it is the canonical quiet Badge — no bespoke chip. This
    only stops it wrapping in a bar that is 40px tall. */
 .editor-window__srcmode .vds-badge { flex: 0 0 auto; white-space: nowrap; }

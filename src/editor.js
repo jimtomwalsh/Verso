@@ -5646,6 +5646,61 @@
   var anchorToScreen = VE.bind("anchorToScreen");
   var resolvePinContext = VE.bind("resolvePinContext");
 
+  // ---- uio-E-A01 (EDIT-05/16 in full): Edit's three named WORK MODES --------------------------
+  // Assemble . Style . Review. Each is an ENTRY ARRANGEMENT of the surfaces the Moderate tickets
+  // built -- it sets the Source drawer, the right-panel tab and comment mode on the way in, and
+  // then stays out of the way: deviating afterwards (open a different tab, toggle the mode) is
+  // allowed and does not snap back. Assemble is the one mode that changes the LAYOUT itself: the
+  // inspector collapses to a 34px strip (the mode's job is placing content, not styling it), and
+  // the strip is the one-click route back to Style. The mode persists; on boot only the CHROME is
+  // re-applied (class + strip + switch) so the drawer and tabs keep their own persisted state
+  // rather than being re-arranged underneath the author.
+  var EDIT_MODE_KEY = "authoring.editMode";
+  var __editMode = "style";
+  try { var __em = localStorage.getItem(EDIT_MODE_KEY); if (__em === "assemble" || __em === "review") __editMode = __em; } catch (e) {}
+  function editModeNow() { return __editMode; }
+  function applyEditMode(m, opts) {
+    if (m !== "assemble" && m !== "style" && m !== "review") m = "style";
+    __editMode = m;
+    try { localStorage.setItem(EDIT_MODE_KEY, m); } catch (e) {}
+    var ws = document.getElementById("workspace");
+    if (ws) ws.classList.toggle("workspace--edit-assemble", m === "assemble");
+    var strip = document.getElementById("inspector-strip");
+    if (strip) strip.hidden = m !== "assemble";
+    if (!opts || !opts.chromeOnly) {
+      if (m === "assemble") { applyLeftSection("source"); if (commentModeOn()) setCommentMode(false); setRightTab("design"); }
+      else if (m === "style") { applyLeftSection("blocks"); if (commentModeOn()) setCommentMode(false); setRightTab("design"); }
+      else { applyLeftSection("structure"); setCommentMode(true); } // review: the mode lands the Comments tab (uio-E-M06)
+    }
+    mountEditModeSwitch();
+  }
+  // The mode's chip. Source's switch sits in this same zone and states what its mode does in a
+  // quiet Badge beside the control; two mode switches side by side must read the same way, so this
+  // names what each one arranged rather than hiding it in a tooltip. Same voice, same Badge.
+  var EDIT_MODE_META = {
+    assemble: { label: "Assemble", chip: "Source open · inspector aside" },
+    style:    { label: "Style",    chip: "Full inspector · palette" },
+    review:   { label: "Review",   chip: "Comment mode on" }
+  };
+  function mountEditModeSwitch() {
+    var host = document.getElementById("edit-mode-switch"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      options: ["assemble", "style", "review"].map(function (m) { return { value: m, label: EDIT_MODE_META[m].label }; }),
+      value: __editMode,
+      onChange: function (v) { applyEditMode(v); }
+    }));
+    var meta = EDIT_MODE_META[__editMode];
+    if (U.Badge) host.appendChild(U.Badge({ tone: "neutral", size: "sm", quiet: true, children: meta.chip }));
+  }
+  (function () {
+    var strip = document.getElementById("inspector-strip");
+    if (strip) strip.addEventListener("click", function () { applyEditMode("style"); });
+  })();
+  window.__editMode = { now: editModeNow, apply: applyEditMode }; // browser-verify hook
+
   // Outliner "collapse all to chapters" — one-click zoom-out of the tree. Toggles: if any
   // chapter is open, collapse every chapter (and tidy page twirls) to the chapter level;
   // if all already collapsed, expand every chapter back. Editor chrome only, no doc change.
@@ -7008,6 +7063,9 @@
   // HH: restore the right-panel Design/Interact mode before the boot mount so the
   // canvas + panel render in the saved mode (setInteractMode persists it on change).
   restoreInteractMode();   // arch-P3b-07s: the module owns the flag, the key and the tab sync
+  // uio-E-A01: re-apply the saved work mode's CHROME only (class + strip + switch) -- the drawer
+  // and the right tabs restore their own persisted state, so booting never re-arranges them.
+  applyEditMode(__editMode, { chromeOnly: true });
   window.addEventListener("keydown", function (e) { if (e.key === "Escape" && isPicking()) { endPick(); renderInspector(); } });
   document.addEventListener("selectionchange", onCanvasSelectionChange); // floating-format-bar: above-selection B/I/U on the Edit canvas
   window.addEventListener("scroll", hideCanvasFmtBar, true); // keep the fixed bar from lagging the selection on scroll
