@@ -2602,6 +2602,8 @@
   var pickCourseFile = VE.bind("pickCourseFile");
   var showNewDocDialog = VE.bind("showNewDocDialog");
   var loadSampleWorkspace = VE.bind("loadSampleWorkspace");
+  var exportWorkspaceFile = VE.bind("exportWorkspaceFile");
+  var importWorkspaceFile = VE.bind("importWorkspaceFile");
 
 
   // ---- history / undo-redo -> src/editor/history.js (arch-P3-02) -------------
@@ -6669,6 +6671,8 @@
     formatRelativeTime: formatRelativeTime,
     showNewDocDialog: showNewDocDialog,
     loadSampleWorkspace: loadSampleWorkspace,
+    exportWorkspaceFile: exportWorkspaceFile,
+    importWorkspaceFile: importWorkspaceFile,
     stampDocUpdatedAt: stampDocUpdatedAt,
     saveOpenDocIds: saveOpenDocIds,
     pushLayer: pushLayer,

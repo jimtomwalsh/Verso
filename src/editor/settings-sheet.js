@@ -34,6 +34,9 @@
       "courseNavNests", "sectionGroup", "MOD_KEY", "wirePanelResizer", "togglePanels", "reapplyLayout",
       "backupMode", "backupHandleSet", "bindProjectFolder", "reconnectBackupFolder", "repeatedList", "confirmModal",
       "doc", "inspector", "canvasBg",
+      // Moving a whole working environment. The pure planner is src/workspace-transfer.js; these
+      // two are the disk-and-stores half, which lives beside the document import it generalises.
+      "exportWorkspaceFile", "importWorkspaceFile",
       // The panel host is swapped while a section body builds, and a write crosses as a function.
       "setInspector"
     );
@@ -158,6 +161,25 @@
       applyBp();
       view.ready = false; mount(); // frames may have changed size -> refit (mirrors setBreakpoint)
     }
+    // uio / verso-workspace-export-import: the one place a whole working environment leaves and
+    // arrives. Stated plainly, because the two buttons do very different-sized things: export is
+    // safe and repeatable, import can replace everything you have.
+    function buildWorkspaceBody(host) {
+      var U = window.VersoUI;
+      host.appendChild(h("div", "insp-hint",
+        "A workspace file carries EVERY document, every source document, your products and your settings — the whole machine, not one document. It is how work moves between the app, staging and this browser."));
+      var row = h("div", "insp-row insp-row--actions");
+      row.appendChild(U.Button({ variant: "secondary", label: "Export workspace…", onClick: function () { E.exportWorkspaceFile(); } }));
+      row.appendChild(U.Button({ variant: "secondary", label: "Import workspace…", onClick: function () { E.importWorkspaceFile(); } }));
+      host.appendChild(row);
+      // Said here as well as on the way out, because this is where someone plans a move and the
+      // gap is the thing that will bite them. Media is orders of magnitude larger than everything
+      // else combined, so it travels per document or not at all.
+      host.appendChild(h("div", "insp-hint",
+        "Images are NOT carried — they are far larger than everything else put together. To move a document's images, also export that document as .verso from its row in Files."));
+      host.appendChild(h("div", "insp-hint",
+        "Importing offers Replace or Merge, tells you exactly what it will add and remove first, and downloads a backup of your current workspace before it touches anything."));
+    }
     function buildPreviewSizesBody(host) {
       host.appendChild(h("div", "insp-hint", "The pixel dimensions behind the desktop / tablet / mobile preview buttons. These size the preview frame only — the course's own responsive layout (which keys off the device name) is unchanged. Saved on this machine."));
       [["desktop", "Desktop"], ["tablet", "Tablet"], ["mobile", "Mobile"]].forEach(function (pair) {
@@ -208,7 +230,11 @@
             ifBody.appendChild(h("div", "insp-hint", "Shows the live document model (JSON) below the inspector for debugging. Off by default; editor-only, never exported."));
           } },
         { key: "preview", title: "Preview sizes", build: buildPreviewSizesBody },
-        { key: "library", title: "Component Library", build: buildLibraryBody }
+        { key: "library", title: "Component Library", build: buildLibraryBody },
+        // A workspace is machine-level -- every document, the library and the products at once --
+        // so it belongs in System beside the other things that outlive one document, not in
+        // Project beside that document's own header and backup.
+        { key: "workspace", title: "Workspace", build: buildWorkspaceBody }
       ];
       return [
         { key: "docType", title: "Document type", build: buildDocTypeBody },

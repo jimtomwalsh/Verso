@@ -27,3 +27,13 @@ already have untouched, and skips any part of the sample that's already there �
 adds nothing the second time.
 
 ---
+
+**Moving your work to another machine, or another Verso.** **Settings → System → Workspace →
+Export workspace…** writes one file holding every document, every source document, your products
+and your settings. **Import workspace…** brings one back. It offers **Replace** (your workspace
+becomes the file) or **Merge** (bring it in alongside), tells you exactly what will be added and
+what will be removed *by name* before it does anything, and downloads a backup of your current
+workspace first — so any import can be undone.
+
+Images are the one thing it doesn't carry; they're far larger than everything else put together.
+To move a document's images, also export that document as **.verso** from its row in Files.
