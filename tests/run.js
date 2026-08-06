@@ -12889,6 +12889,150 @@ section("GH327 new document");
     /return null;/.test(DOCS) && /var made = createBlankDoc\(/.test(DOCS) && /if \(!made\) return;/.test(DOCS));
 })();
 
+// ---- the shipped sample workspace -----------------------------------------
+// The set exists to make every surface testable against something real, so what it must CONTAIN is
+// the requirement, and these assertions are that requirement written down. An edit that quietly
+// drops the stale alternate, the untagged document or the second linked location takes a surface
+// back to being untestable, and would otherwise do it silently.
+//
+// Two of the claims are checked through the REAL model rather than by reading the literal: the
+// stale alternate and the broken mark are only worth shipping if SourceDoc reaches the same verdict
+// the data claims, and a hand-set flag would be erased the first time a mark was refreshed.
+section("sample workspace");
+(function () {
+  var W, SD, C;
+  try {
+    W = require(path.join(ROOT, "src/sample-workspace.js"));
+    SD = require(path.join(ROOT, "src/source-doc.js"));
+    C = require(path.join(ROOT, "src/classification.js"));
+  } catch (e) { ok("require the sample workspace + its model", false); return; }
+  var SW = src("src/sample-workspace.js");
+  var manual = W.sourceDocs["topic-meridian-manual"];
+  var model = SD.fromJSON(manual.doc);
+  var markById = {};
+  model.marks.forEach(function (m) { SD.refreshMark(model, m); markById[m.id] = m; });
+
+  // --- breadth: several products, several document types ---
+  ok("several products, not one", Object.keys(W.products).length >= 2);
+  ok("a product declares variants, so the variant columns resolve without setup",
+    (W.products["prod-meridian"].variants || []).length === 2);
+  ok("a product names its primary source", W.products["prod-meridian"].groundTruthId === "topic-meridian-manual");
+  var geos = {};
+  Object.keys(W.designDocs).forEach(function (k) { geos[W.designDocs[k].meta.geo || "reflow"] = 1; });
+  ok("a presentation and a guide ship alongside the course -- three geometries, not one",
+    geos.frame && geos.paged && geos.reflow);
+  ok("a static document exists, so the static fallback has a subject",
+    Object.keys(W.designDocs).some(function (k) { return W.designDocs[k].meta.interactive === false; }));
+
+  // --- source documents with real chaptered prose ---
+  var chapters = SD._pure.chapters(model);
+  ok("the source document is chaptered, so the outline and scroll-spy have shape", chapters.length === 3);
+  ok("every chapter carries prose, not just a heading",
+    model.nodes.filter(function (n) { return n.type === "paragraph"; }).length >= 8);
+
+  // --- all four mark types, and the states that matter ---
+  var types = {};
+  model.marks.forEach(function (m) { types[m.type] = (types[m.type] || 0) + 1; });
+  ok("all four mark types are placed", types.link && types.alternate && types.comment && types.restricted);
+  var threads = manual.comments || [];
+  ok("comments cover BOTH states -- one open, one resolved",
+    threads.some(function (c) { return !c.done; }) && threads.some(function (c) { return c.done; }));
+  ok("every comment thread anchors to a comment mark that exists",
+    threads.every(function (c) { return markById[c.anchor.markId] && markById[c.anchor.markId].type === "comment"; }));
+
+  // --- the linked passage is used in MORE THAN ONE document, and really is ---
+  var used = SD._pure.whereUsedForMark(markById["mk-link-mount"]);
+  var codes = {}; used.forEach(function (u) { codes[u.docCode] = 1; });
+  ok("the linked passage is used in two DIFFERENT documents", Object.keys(codes).length === 2);
+  // The cross-check that catches drift: the mark's own locations and the blocks in the design
+  // documents are two halves of one fact, and either can be edited without the other.
+  ok("each location names a design document that really carries a block linked back to this mark",
+    used.every(function (u) {
+      var d = W.designDocs[u.docCode]; if (!d) return false;
+      return (d.pages || []).some(function (p) {
+        return (p.blocks || []).some(function (b) {
+          return b.id === u.blockId && b.sourceLink &&
+            b.sourceLink.masterId === "topic-meridian-manual" && b.sourceLink.markId === "mk-link-mount";
+        });
+      });
+    }));
+
+  // --- stale and broken are EARNED, not flagged ---
+  var alt = markById["mk-alt-cable"];
+  ok("the stale alternate is stale because its baseText really differs from the text it anchors",
+    alt.baseText && alt.baseText !== SD._pure.markText(model, alt));
+  ok("...and SourceDoc agrees after a refresh", alt.stale === true && alt.broken === false);
+  var broken = markById["mk-broken-figure"];
+  ok("the broken mark is broken because its node genuinely is not in the document",
+    !SD._pure.nodeByKey(model, broken.anchor.nodeKey) && broken.broken === true);
+  ok("nothing ELSE is accidentally broken or stale", model.marks.filter(function (m) {
+    return m.id !== "mk-broken-figure" && m.id !== "mk-alt-cable" && (m.broken || m.stale);
+  }).length === 0);
+  ok("every other mark anchors to a node that exists", model.marks.every(function (m) {
+    return m.id === "mk-broken-figure" || !!SD._pure.nodeByKey(model, m.anchor.nodeKey);
+  }));
+
+  // --- variants declared AND diverged ---
+  ok("a variant declared on the product actually diverges in the document",
+    SD._pure.variantsInDoc(model).indexOf("Extended") !== -1);
+  var diverged = model.nodes.filter(function (n) {
+    return n.variants && !n.baseAbsent && SD._pure.nodeForVariant(n, "Extended").diverged;
+  });
+  ok("at least one node has genuinely diverged wording, not just an override that matches", diverged.length >= 1);
+  ok("and one node is present for a variant ONLY, so absence is shown too",
+    model.nodes.some(function (n) { return n.baseAbsent === true && n.variants && n.variants.Extended; }));
+
+  // --- classification: a Product rung, and a document that tightens it ---
+  var levels = C.seedLevels();
+  var prodLevel = W.products["prod-meridian"].classificationId;
+  ok("classification is set at the Product rung", !!C.levelById(levels, prodLevel));
+  ok("a document OVERRIDES it, and only in the direction F07 permits (tighter)",
+    !!manual.classificationId && manual.classificationId !== prodLevel &&
+    C.isTightening(levels, prodLevel, manual.classificationId));
+  ok("the restricted mark carries its own level, which is what a mark-level override is for",
+    !!markById["mk-restricted-calib"].classificationId);
+
+  // --- the deliberate edges ---
+  ok("a design document is UNTAGGED -- no product at all",
+    Object.keys(W.designDocs).some(function (k) { return !W.designDocs[k].meta.productId; }));
+  ok("a source document belongs to no product and is linked from nowhere", (function () {
+    var g = W.sourceDocs["topic-shared-glossary"];
+    if (!g || g.productId) return false;
+    return !Object.keys(W.designDocs).some(function (k) {
+      return (W.designDocs[k].pages || []).some(function (p) {
+        return (p.blocks || []).some(function (b) { return b.sourceLink && b.sourceLink.masterId === g.id; });
+      });
+    });
+  })());
+  ok("a title is long enough to force a row, a tab and a card to truncate",
+    Object.keys(W.designDocs).some(function (k) { return (W.designDocs[k].meta.title || "").length > 80; }));
+  ok("nothing has been published -- a never-published document is the state Publish opens on",
+    Object.keys(W.designDocs).every(function (k) { return !W.designDocs[k].releases && !W.designDocs[k].releaseHistory; }));
+
+  // --- it is data, and it is deterministic ---
+  // Comments stripped first: the file's own header explains why it holds no clock, and a naive
+  // grep would fail on the explanation.
+  var SW_CODE = SW.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("no clock and no randomness -- this file is read by a suite that has neither",
+    !/Date\.now|Math\.random|new Date\(/.test(SW_CODE));
+  ok("it is a literal, not a builder: no function declarations construct the content",
+    !/function [a-z]/.test(SW_CODE));
+  ok("the invented material stays invented -- no product name shared with a real one",
+    /Meridian|Atlas/.test(SW));
+
+  // --- and it is actually seeded, through the seams that already existed ---
+  var IDX = src("index.html"), ED = src("src/editor.js"), LIB = src("src/editor/library.js");
+  ok("it loads before editor.js, which reads it at boot",
+    IDX.indexOf("src/sample-workspace.js") !== -1 &&
+    IDX.indexOf("src/sample-workspace.js") < IDX.indexOf("src/editor.js"));
+  ok("design documents seed the registry default", /seedSampleWorkspace\(defaultRegistry\)/.test(ED));
+  ok("products seed the products default", /W\.products\).forEach/.test(ED));
+  ok("source documents seed the LIBRARY, because that is the store they live in",
+    /W\.sourceDocs\).forEach/.test(LIB));
+  ok("the seed is CLONED, so an author editing their copy never writes into the shipping data",
+    /clone\(W\.designDocs\[code\]\)/.test(ED) && /JSON\.parse\(JSON\.stringify\(W\.sourceDocs\[id\]\)\)/.test(LIB));
+})();
+
 // ---- uio-W04: the Files destination ---------------------------------------
 // Verso kept its documents in TWO stores that had never met on screen: design documents in the
 // registry, source documents in LibraryStore. "What do I have?" had no answer -- the file browser

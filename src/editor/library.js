@@ -95,6 +95,13 @@
           }
         }
       };
+      // The shipped SOURCE DOCUMENTS ride the same seed, because they live in this store: a source
+      // document is a kind:"topic" master here, not a registry entry. Source was empty on a fresh
+      // install until this, which is why every test session began by pasting placeholder prose in.
+      var W = window.SAMPLE_WORKSPACE;
+      if (W && W.sourceDocs) Object.keys(W.sourceDocs).forEach(function (id) {
+        lib.components[id] = JSON.parse(JSON.stringify(W.sourceDocs[id]));
+      });
     }
     function loadLibrary() { return Store.loadLibrary(seedDemoLibrary); }
     window.LibraryStore = loadLibrary();

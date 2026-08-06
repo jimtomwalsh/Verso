@@ -351,6 +351,9 @@
   <script src="src/runtime.js"></script>
   <script src="src/quiz-runtime.js"></script>
   <script src="src/model.js"></script>
+  <!-- The shipped sample workspace (products, source documents, design documents). Pure data, read
+       by the SAME store seeds that already seeded SAMPLE_DOC, so it must precede editor.js. -->
+  <script src="src/sample-workspace.js"></script>
   <!-- Icon accessor (Lucide, bundled offline) — chrome only; must precede editor.js -->
   <script src="src/icons.js"></script>
   <!-- DS canonical control set (issue #10) — chrome only; must precede editor.js so switchEl can drop in onto VersoUI.Switch -->
