@@ -176,7 +176,20 @@
   // documented non-destructive), the media still renders, and durability becomes
   // the registry write's problem -- which already classifies quota and drives the
   // save-state indicator. The old key is drained once by Migration, not read here.
-  var IDB_NAME = "authoring", IDB_STORE = "assets";
+  // GH #331: the asset database follows the SAME environment rule the storage keys do, read from
+  // VersoStorage (loaded first) so there is one rule and not two that can disagree. This is the
+  // half that matters most: namespacing the registry while sharing the blobs would let a sweep in
+  // staging -- which walks its own registry and deletes everything not referenced by it -- delete
+  // every image production owns. A local fallback keeps this file loadable on its own; under
+  // `require` there is no shared window, which is the footgun dnd.js documents.
+  var IDB_ENV = (function () {
+    try {
+      var VS = (typeof window !== "undefined") && window.VersoStorage;
+      if (VS && typeof VS.environment === "function") return VS.environment();
+    } catch (e) {}
+    return "";
+  })();
+  var IDB_NAME = IDB_ENV ? ("authoring-" + IDB_ENV.replace(/\.$/, "")) : "authoring", IDB_STORE = "assets";
   var idb = null, idbReady = false;
 
   function openDB(cb) {
