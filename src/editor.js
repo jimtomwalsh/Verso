@@ -2602,7 +2602,9 @@
   var pickCourseFile = VE.bind("pickCourseFile");
   var showNewDocDialog = VE.bind("showNewDocDialog");
   var loadSampleWorkspace = VE.bind("loadSampleWorkspace");
+  var buildVersoBytes = VE.bind("buildVersoBytes");
   var exportWorkspaceFile = VE.bind("exportWorkspaceFile");
+  var exportWorkspaceEverything = VE.bind("exportWorkspaceEverything");
   var importWorkspaceFile = VE.bind("importWorkspaceFile");
 
 
@@ -6671,7 +6673,9 @@
     formatRelativeTime: formatRelativeTime,
     showNewDocDialog: showNewDocDialog,
     loadSampleWorkspace: loadSampleWorkspace,
+    buildVersoBytes: buildVersoBytes,
     exportWorkspaceFile: exportWorkspaceFile,
+    exportWorkspaceEverything: exportWorkspaceEverything,
     importWorkspaceFile: importWorkspaceFile,
     stampDocUpdatedAt: stampDocUpdatedAt,
     saveOpenDocIds: saveOpenDocIds,

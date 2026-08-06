@@ -397,19 +397,44 @@
     // targetDoc lets the file browser (#74) export a specific course; the pipeline
     // button passes no doc (its onClick may hand us an event), so only honour an arg
     // that actually looks like a doc — otherwise fall back to the active `doc`.
+    // ONE packer. The whole-workspace folder export needs the BYTES of a .verso rather than a
+    // download, and building a second packer beside this one is how the two drift apart -- so the
+    // packing is here and `exportVersoPackage` below is this plus a click. Throws on failure; the
+    // caller decides whether that is a modal or a line in a summary.
+    function buildVersoBytes(targetDoc) {
+      // STRICT, unlike exportVersoPackage below. That one falls back to the active document when
+      // handed no argument, which its toolbar button relies on -- but as a fallback for a doc that
+      // is merely UNPACKABLE it is dangerous: found by testing the folder export's failure path, a
+      // document with no pages packed as a byte-identical copy of whatever was open, under that
+      // document's name. The folder then held two copies of one course, no copy of the broken one,
+      // and a summary that called it a success. A document that cannot be packed must SAY so.
+      var src = targetDoc;
+      if (!src || !src.meta || !src.pages) {
+        throw new Error("that document has no pages to pack (it may be corrupt)");
+      }
+      if (!window.VersoFormat) throw new Error("The .verso packer isn't loaded.");
+      var d = JSON.parse(JSON.stringify(src)); // keep asset:<id> refs (not inlined)
+      var assets = collectDocAssetRefs(d);
+      var bytes = window.VersoFormat.buildPackage(d, assets, {});
+      return {
+        bytes: bytes,
+        name: String((src.meta && src.meta.code) || "course").replace(/[^\w.-]+/g, "_") + ".verso",
+        assetCount: Object.keys(assets).length
+      };
+    }
     function exportVersoPackage(targetDoc) {
+      // The fallback stays HERE, where it is wanted: the toolbar button's onClick may hand us an
+      // event rather than a doc, so a missing/insufficient argument means "the open document".
       var src = (targetDoc && targetDoc.meta && targetDoc.pages) ? targetDoc : E.doc;
       try {
-        if (!window.VersoFormat) throw new Error("The .verso packer isn't loaded.");
-        var d = JSON.parse(JSON.stringify(src)); // keep asset:<id> refs (not inlined)
-        var assets = collectDocAssetRefs(d);
-        var bytes = window.VersoFormat.buildPackage(d, assets, {});
+        var built = buildVersoBytes(src);
+        var bytes = built.bytes, assets = { length: built.assetCount };
         var blob = new Blob([bytes], { type: "application/zip" });
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = String((src.meta && src.meta.code) || "course").replace(/[^\w.-]+/g, "_") + ".verso";
+        a.download = built.name;
         document.body.appendChild(a); a.click(); a.remove();
-        if (window.console && console.log) console.log("[export] .verso built (" + Object.keys(assets).length + " assets, " + bytes.length + " bytes)");
+        if (window.console && console.log) console.log("[export] .verso built (" + built.assetCount + " assets, " + bytes.length + " bytes)");
       } catch (e) {
         if (window.console && console.error) console.error("[export] .verso failed:", e);
         confirmModal("Export failed", "Could not build the .verso package: " + (e && e.message || e), function () {});
@@ -626,7 +651,7 @@
     kernel.expose({
       assetRef: assetRef, editorAssetResolve: editorAssetResolve, srcForInspect: srcForInspect,
       embedColorVarsCached: embedColorVarsCached, sweepAllAssets: sweepAllAssets, migrateAllAssets: migrateAllAssets,
-      migrateToFileBackendPrompt: migrateToFileBackendPrompt, exportVersoPackage: exportVersoPackage, renderAssets: renderAssets,
+      migrateToFileBackendPrompt: migrateToFileBackendPrompt, exportVersoPackage: exportVersoPackage, buildVersoBytes: buildVersoBytes, renderAssets: renderAssets,
       renderComponentsPalette: renderComponentsPalette, insertBlock: insertBlock, insertLoc: insertLoc,
       applyLeftSection: applyLeftSection, activeLeftSection: activeLeftSection, wireLeftSwitcher: wireLeftSwitcher,
       // #69: the sanctioned, backup-gated browser->file cutover. The integration seam offers it to

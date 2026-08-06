@@ -13084,10 +13084,48 @@ section("workspace transfer");
   ok("the workspace section is SYSTEM-level, beside the other things that outlive one document",
     /\{ key: "workspace", title: "Workspace", build: buildWorkspaceBody \}/.test(SS) &&
     SS.indexOf('key: "workspace"') < SS.indexOf('key: "docType"'));
-  ok("the settings section states the media gap where a move is planned",
-    /Images are NOT carried/.test(SS) && /also export that document as \.verso/.test(SS));
+  // The library section holds its own Export Library (.json), and the workspace file already
+  // CARRIES the library -- so the narrower control must be met as a subset of the wider one, not
+  // a few pixels above it where it gets mistaken for it.
+  ok("the whole-workspace export reads BEFORE the library slice of it",
+    SS.indexOf('key: "workspace"') < SS.indexOf('key: "library"'));
+  // The complete export is the PRIMARY action: leaving the author to fetch each document's images
+  // by hand is what made the flow "far too much work", and a manual repetition is a document that
+  // can go missing without anyone noticing.
+  ok("the complete export is the primary action, and the structure-only one says what it omits",
+    /variant: "primary", label: "Export everything to a folder…"/.test(SS) &&
+    /label: "Workspace file only \(no images\)"/.test(SS));
+  ok("the settings section names the browsers that can do it, rather than failing at the picker",
+    /Safari and Firefox can't write to a folder/.test(SS));
   ok("the pure core loads before editor.js", IDX.indexOf("src/workspace-transfer.js") !== -1 &&
     IDX.indexOf("src/workspace-transfer.js") < IDX.indexOf("src/editor.js"));
+
+  // --- exporting EVERYTHING in one gesture ---
+  var AS = src("src/editor/assets.js");
+  ok("there is ONE packer -- the folder export takes bytes from the same builder the download uses",
+    /function buildVersoBytes\(targetDoc\)/.test(AS) && /var built = buildVersoBytes\(src\);/.test(AS) &&
+    (AS.match(/VersoFormat\.buildPackage\(/g) || []).length === 1);
+  // The bug the failure-path test found: an unpackable document silently packed as a copy of
+  // whatever was OPEN, under that document's name -- so the folder held two copies of one course,
+  // no copy of the broken one, and a summary calling it a success.
+  ok("the packer REFUSES an unpackable document instead of substituting the open one",
+    /throw new Error\("that document has no pages to pack/.test(AS));
+  ok("...while the toolbar button keeps its own fallback, which is where it was wanted",
+    /var src = \(targetDoc && targetDoc\.meta && targetDoc\.pages\) \? targetDoc : E\.doc;[\s\S]{0,200}buildVersoBytes\(src\)/.test(AS));
+  var folder = (DOCS.match(/function runFolderExport\([\s\S]*?\n    \}/) || [""])[0];
+  ok("the folder export writes the workspace file AND a .verso per document, from one pick",
+    /Object\.keys\(registry\)\.forEach/.test(folder) && /buildVersoBytes\(registry\[code\]\)/.test(folder) &&
+    /workspaceFilename\(stamp\)/.test(folder));
+  ok("documents pack one at a time, because each package is built whole in memory",
+    /chain = chain\.then\(/.test(folder));
+  ok("one document failing does not cost you the others -- it is recorded and the run continues",
+    /failed\.push\(\{ name: code \+ "\.verso"/.test(folder) && /return;/.test(folder));
+  ok("the summary NAMES failures rather than reporting a survivable-sounding count",
+    /FAILED \(" \+ failed\.length \+ "\) — these are NOT in the folder:/.test(DOCS) &&
+    /Fix these before you rely on the folder as a backup/.test(DOCS));
+  ok("a browser that cannot write a folder is TOLD, not quietly given the smaller export",
+    /can't write to a folder/.test(DOCS) && /okLabel: "Download workspace file"/.test(DOCS));
+  ok("cancelling the folder picker is not an error", /the author cancelled the picker/.test(DOCS));
 })();
 
 section("sample workspace");

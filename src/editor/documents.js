@@ -102,7 +102,7 @@
       "promptModal", "createProduct",
       // Loading the sample workspace on demand writes to all THREE stores, because that is where a
       // workspace lives: products, source documents (LibraryStore) and design documents (registry).
-      "libComponents", "saveLibrary", "saveProducts", "Store"
+      "libComponents", "saveLibrary", "saveProducts", "Store", "buildVersoBytes"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -229,6 +229,78 @@
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
       return file;
     }
+    // EXPORT EVERYTHING, IN ONE GESTURE. James, going through the flow for real: exporting five
+    // documents one .verso at a time is "far too much work", and every manual repetition is a
+    // chance to miss one and not notice. So the export picks a folder ONCE and writes the whole
+    // thing into it -- the workspace file, plus a .verso per design document, which is what
+    // carries the media the workspace file cannot.
+    //
+    // Why a folder and not one file: a .verso is built as a single in-memory byte array, so one
+    // package holding 1.2 GB of media is not constructible in a tab. A folder of bounded per-course
+    // packages is, and it is also what an author can hand to someone else or drop in OneDrive.
+    //
+    // FSA only, and it SAYS so rather than quietly doing something smaller. The Mac app's native
+    // bridge writes UTF-8 text and cannot carry a binary ZIP, and Safari/Firefox have no directory
+    // picker at all -- so those fall back to the one-file download and are told that is what
+    // happened, because an export that silently leaves the media behind is the exact failure this
+    // whole feature exists to prevent.
+    function canWriteFolder() { return typeof window.showDirectoryPicker === "function"; }
+    function exportWorkspaceEverything() {
+      if (!canWriteFolder()) {
+        confirmModal("Export everything",
+          "This browser can't write to a folder, so only the workspace file can be saved here — and it does not carry your images. " +
+          "Use a Chromium browser (Chrome or Edge) to export everything in one go, or export each document as .verso yourself from its row in Files.\n\n" +
+          "Download the workspace file on its own now?",
+          function () { exportWorkspaceFile(); }, { okLabel: "Download workspace file" });
+        return;
+      }
+      window.showDirectoryPicker({ mode: "readwrite" }).then(function (dir) {
+        runFolderExport(dir);
+      }, function () { /* the author cancelled the picker -- not an error, and not worth a modal */ });
+    }
+    function runFolderExport(dir) {
+      var WT = window.VersoWorkspaceTransfer;
+      var now = Date.now(), stamp = stampNow(now);
+      var wrote = [], failed = [];
+      function write(name, data) {
+        return dir.getFileHandle(name, { create: true })
+          .then(function (fh) { return fh.createWritable(); })
+          .then(function (w) { return w.write(data).then(function () { return w.close(); }); })
+          .then(function () { wrote.push(name); })
+          .catch(function (e) { failed.push({ name: name, why: (e && e.message) || String(e) }); });
+      }
+      var file = WT.buildWorkspaceFile(liveStores(), {
+        now: now, generator: "Verso", origin: (typeof location !== "undefined" && location.href) || ""
+      });
+      var chain = write(workspaceFilename(stamp), JSON.stringify(file));
+      // One document at a time, sequentially: each package is built whole in memory, and building
+      // five at once is how a media-heavy workspace runs the tab out of it. A document that fails
+      // to pack is RECORDED and the rest continue -- one bad course must not cost you the other four.
+      Object.keys(registry).forEach(function (code) {
+        chain = chain.then(function () {
+          var built;
+          try { built = E.buildVersoBytes(registry[code]); }
+          catch (e) { failed.push({ name: code + ".verso", why: (e && e.message) || String(e) }); return; }
+          return write(built.name, built.bytes);
+        });
+      });
+      chain.then(function () { reportFolderExport(wrote, failed); });
+    }
+    // The summary NAMES what failed. "4 of 5 exported" is the sentence that gets read as success
+    // and leaves one course behind; the whole point of automating this was to stop a document going
+    // missing quietly.
+    function reportFolderExport(wrote, failed) {
+      var lines = ["Wrote " + wrote.length + " file" + (wrote.length === 1 ? "" : "s") + ":", wrote.join(", ")];
+      if (failed.length) {
+        lines.push("\nFAILED (" + failed.length + ") — these are NOT in the folder:");
+        failed.forEach(function (f) { lines.push("  " + f.name + " — " + f.why); });
+        lines.push("\nFix these before you rely on the folder as a backup.");
+      } else {
+        lines.push("\nThat is your whole workspace: every document, source document, product and setting, with each document's images in its own .verso.");
+      }
+      confirmModal(failed.length ? "Exported, with failures" : "Workspace exported", lines.join("\n"), function () {}, failed.length ? { danger: true } : null);
+    }
+
     function exportWorkspaceFile() {
       var file = downloadWorkspace(null);
       if (!file) return;
@@ -683,7 +755,8 @@
       saveHeaderFooterDefault: saveHeaderFooterDefault, clearHeaderFooterDefault: clearHeaderFooterDefault, createBlankDoc: createBlankDoc,
       importDocToRegistry: importDocToRegistry, readCourseFile: readCourseFile, pickCourseFile: pickCourseFile,
       showNewDocDialog: showNewDocDialog, loadSampleWorkspace: loadSampleWorkspace,
-      exportWorkspaceFile: exportWorkspaceFile, importWorkspaceFile: importWorkspaceFile
+      exportWorkspaceFile: exportWorkspaceFile, importWorkspaceFile: importWorkspaceFile,
+      exportWorkspaceEverything: exportWorkspaceEverything, canWriteFolder: canWriteFolder
     });
   }
 
