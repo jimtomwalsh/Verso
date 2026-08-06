@@ -1,0 +1,203 @@
+/*
+ * Course component styles. Reads ONLY theme tokens (var(--color-*), var(--font-*),
+ * var(--space-*), var(--size-*)) set on .course-root by applyTheme() — never
+ * hardcoded values. Ships INSIDE the SCORM package unchanged, so the course looks
+ * identical in the editor and in the exported output.
+ *
+ * Dark theme matching the real Captivate course. The chapter-card style-swap
+ * (.is-complete vs .is-incomplete) recolours the accent purely through tokens —
+ * this is the M3 per-instance style override made visible.
+ */
+
+.course-root {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-bg);
+}
+
+/* Light/dark crossfade (§1 P3). The learner mode toggle flips data-mode and swaps
+   the --color-* tokens instantly; the interactive accents (nav pill/buttons, cards)
+   already ease via their own transitions, but the big reading surfaces (root bg +
+   text) hard-cut. Ease those. Scoped to [data-mode] PRESENT so the no-JS default
+   does not animate on first paint -- only a real toggle fades. Tokens/CSS only,
+   ships in the SCORM package.
+   NB: data-mode lands on DIFFERENT elements per surface -- on .course-root in the
+   editor canvas, but on <html>/<body> in preview + export (render.js apply()) -- so
+   we match BOTH self ([data-mode] on the root) AND ancestor ([data-mode] .page). */
+.course-root[data-mode],
+[data-mode] .course-root,
+[data-mode] .page,
+[data-mode] .page-title,
+[data-mode] .body-copy,
+[data-mode] .body-note,
+[data-mode] .body-list {
+  /* global-motion: author duration via --motion-mode-fade (doc.motion.modeMs), default 300ms.
+     Scoped to [data-mode] present so the no-JS first paint / initial stamp does not animate. */
+  transition: background-color var(--motion-mode-fade, 300ms) ease, color var(--motion-mode-fade, 300ms) ease, border-color var(--motion-mode-fade, 300ms) ease;
+}
+/* Recoloured inline SVGs (glossary / image block / hotspot base / logo) paint via
+   fill/stroke = var(--color-*); those props are NOT on the text elements above and svg
+   nodes aren't in that selector list, so they snap while the page bg eases. Transition
+   fill/stroke on svg content under a themed root off the SAME --motion-mode-fade var so
+   vector art fades in lock-step with the background. Only var-driven fills actually
+   change on a toggle, so a fixed brand colour never animates. */
+.course-root[data-mode] svg, [data-mode] svg,
+.course-root[data-mode] svg *, [data-mode] svg * {
+  transition: fill var(--motion-mode-fade, 300ms) ease, stroke var(--motion-mode-fade, 300ms) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .course-root[data-mode] svg, [data-mode] svg,
+  .course-root[data-mode] svg *, [data-mode] svg * { transition: none; }
+  .course-root[data-mode],
+  [data-mode] .course-root,
+  [data-mode] .page,
+  [data-mode] .page-title,
+  [data-mode] .body-copy,
+  [data-mode] .body-note,
+  [data-mode] .body-list { transition: none; }
+}
+
+/* Per-mode author TEXT colour (colorField "Per-mode" tab, via applyTextStyle). The node
+   carries --tc-light / --tc-dark; --tc-c resolves to the current mode's value (light default,
+   dark override) so it switches live with the learner's toggle. Ships in SCORM. */
+[style*="--tc-light"] { --tc-c: var(--tc-light); }
+.course-root[data-mode="dark"] [style*="--tc-light"] { --tc-c: var(--tc-dark); }
+
+.page {
+  width: 100%;
+  /* optional master content-width cap (doc.contentMaxWidth -> --page-max-width);
+     none = full width. margin auto centres the capped column. */
+  max-width: var(--page-max-width, none);
+  margin: 0 auto;
+  box-sizing: border-box;
+  /* master page padding — side % gives the 80%-centred content the project uses;
+     driven per breakpoint by the editor's layout config (applyLayoutVars). */
+  padding: var(--page-pad-y, 56px) var(--page-pad-x, 10%);
+}
+
+.page-title {
+  margin: 0 0 var(--space-lg);
+  font-family: var(--font-heading);
+  font-size: var(--size-page-title);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-ink);
+}
+
+.body-copy {
+  /* RRRR: no silent max-width cap -- paragraphs fill the page content box and
+     share the same left/right edge as headings, notes, lists, images and embeds
+     (which are all full-width). A readability line-length limit becomes an opt-in
+     per-block control (typography workstream), not a default that misaligns text. */
+  margin: 0 0 var(--space-md);
+  font-size: 17px;
+  line-height: 1.6;
+  /* Primary body text = full ink, matching .body-list + headings (was ink-soft, which
+     made paragraphs render a shade lighter than lists = the body-text colour mismatch).
+     A text style's own colour still overrides this (inline node colour beats the class). */
+  color: var(--color-ink);
+}
+
+/* Inline hyperlinks authored in text (external URL, new tab). Theme-token colour so
+   it reads in BOTH light + dark; excludes the .nav-button/.course-nav__btn links which
+   carry their own button styling. Ships in the SCORM package. */
+.page a:not(.nav-button):not(.course-nav__btn) {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.page a:not(.nav-button):not(.course-nav__btn):hover { text-decoration-thickness: 2px; }
+
+.body-note {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-left: 2px solid var(--color-accent);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-muted);
+}
+/* Callout is a DIV (see render.js note block): the accent spans the full height even when
+   the note holds several paragraphs / a list. Collapse the outer margins of nested blocks
+   so the copy sits flush inside the padding instead of double-spacing. */
+.body-note > :first-child { margin-top: 0; }
+.body-note > :last-child { margin-bottom: 0; }
+
+/* branded header — global header/footer, full-bleed (course-root child); its own side
+   padding matches the page content padding */
+.course-header {
+  display: flex; align-items: center; gap: 22px;
+  /* III: header/footer uses its OWN --headerfooter-pad-x (not --page-pad-x), so squeezing a
+     page's content width no longer narrows the header/footer. Same 10% default,
+     but decoupled; set --headerfooter-pad-x (or the header/footer padX override) for full-bleed. */
+  padding: 16px var(--headerfooter-pad-x, 10%);
+  border-bottom: 2px solid var(--color-rule);
+}
+/* JJJ: opt-in pinned header (position:sticky). Keeps the header + any learner mode
+   toggle reachable on scroll. Background so scrolling content can't show through.
+   In the editor canvas (no scroll container) sticky degrades to normal flow. */
+.course-header--pinned {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--color-bg);
+  transition: transform 0.25s ease;
+}
+/* JJJ: runtime.js toggles .is-hidden on scroll-down (reveals on scroll-up/hover). */
+.course-header--pinned.is-hidden { transform: translateY(-100%); }
+@media (prefers-reduced-motion: reduce) {
+  .course-header--pinned { transition: none; }
+  .course-header--pinned.is-hidden { transform: none; } /* never hide when reduced motion */
+}
+.course-header__brand { display: flex; align-items: center; gap: 9px; color: var(--color-ink); }
+.course-header__logo { width: 24px; height: 24px; color: var(--color-accent); }
+.course-header__img { height: 30px; width: auto; max-width: 260px; display: block; }
+/* auto-tint: force a mono logo to a CONTRASTING silhouette per mode — dark in
+   light mode, white in dark mode. brightness(0) collapses any source colour to a
+   solid black shape (keeping transparency), which the dark rule then inverts to
+   white. Works for a black OR a white source SVG (invert alone only fixed a dark
+   one); "Original" opts out to keep brand colour. */
+.course-header__img--auto { filter: brightness(0); }
+.course-root[data-mode="dark"] .course-header__img--auto { filter: brightness(0) invert(1); }
+@media (prefers-color-scheme: dark) {
+  .course-root:not([data-mode]) .course-header__img--auto { filter: brightness(0) invert(1); }
+}
+.course-header__word { font-family: var(--font-heading); font-size: 15px; font-weight: 600; letter-spacing: 0.14em; }
+.course-header__word b { font-weight: 800; }
+.course-header__crumb {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-heading); font-weight: 700; font-size: 14px; color: var(--color-ink-soft);
+}
+.course-header__sep { color: var(--color-muted); font-weight: 400; }
+/* Item X — trailing region of author-added header/footer children (e.g. the mode toggle).
+   margin-left:auto parks it at the far end of the header row; inert when empty. */
+.course-header__extra { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.course-footer__extra { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+
+/* Item X — learner light/dark toggle control. Token-driven so it tracks the theme
+   in both modes; ships inside the SCORM package. */
+.mode-toggle {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--color-ink-soft); background: transparent;
+  border: 1px solid var(--color-hair); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; line-height: 1; white-space: nowrap;
+}
+.mode-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
+/* Icon variant: a single glyph = the mode you'd switch TO (moon in light, sun in
+   dark). Both glyphs render; only the opposing one shows per .course-root[data-mode]. */
+.mode-toggle--icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+}
+.mode-toggle__glyph { align-items: center; justify-content: center; }
+.mode-toggle__glyph svg { width: 19px; height: 19px; display: block; }  /* §1 P2: +~20% (was 16px); tap target stays 34x30 */
+/* DEFAULT (light, and any context) = show the moon (switch-to-dark). No ancestor
+   requirement, so a glyph always renders even if the toggle isn't under a
+   themed .course-root (e.g. some preview wrappers). */
+.mode-toggle__to-dark { display: inline-flex; }
+.mode-toggle__to-light { display: none; }
+/* dark mode: swap to the sun (switch-to-light) */
+.course-root[data-mode="dark"] .mode-toggle__to-dark { display: none; }
+.course-root[data-mode="dark"] .mode-toggle__to-light { display: inline-flex; }
+/* no-JS export fallback: follow OS preference until the runtime stamps data-mode */
+@media (prefers-color-scheme: dark) {
+  .course-root:not([data-mode]) .mode-toggle__to-dark { display: none; }
+  .course-root:not([data-mode]) .mode-toggle__to-light { display: inline-flex; }
+}

@@ -11,6 +11,16 @@
  * Classic script — exposes window.SAMPLE_DOC.
  */
 (function () {
+  // arch-P2 (the test seam): in the browser this binds to the REAL window, so every
+  // `window.X = ...` below publishes globally exactly as it did before -- no behaviour change.
+  // Under `require` in node there is no window, so it binds to a local stand-in and the footer
+  // hands that same namespace to module.exports. The file's interface becomes the test surface,
+  // instead of the suite string-slicing its source text back into life.
+  // The node stand-in inherits its no-op listeners from a prototype, so `module.exports` carries
+  // this file's OWN published names and nothing else.
+  var window = (typeof globalThis !== "undefined" && globalThis.window)
+    || Object.create({ addEventListener: function () {}, removeEventListener: function () {} });
+
   "use strict";
 
   var CHART_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 260'>" +
@@ -374,4 +384,9 @@
       }
     ]
   };
+
+  // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --
+  // exactly what it publishes and nothing else. In the browser `module` is undefined, so this
+  // line does nothing at all.
+  if (typeof module !== "undefined" && module.exports) module.exports = window;
 })();

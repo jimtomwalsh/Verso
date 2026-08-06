@@ -1,0 +1,185 @@
+/* ==================== demo mode (fullscreen learner simulation) ==================== */
+.demo {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; flex-direction: column;
+  background: #0e0e0f;
+}
+.demo[hidden] { display: none; }
+
+.demo__bar {
+  flex: 0 0 auto; height: 52px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 14px; background: #1a1a1b; border-bottom: 1px solid #2c2c2c;
+}
+.demo__nav { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.demo__navbtn {
+  width: 32px; height: 32px; font-size: 20px; line-height: 1;
+  color: #e6e6e6; background: #2c2c2c; border: none; border-radius: 8px; cursor: pointer;
+}
+.demo__navbtn:hover { background: #383838; }
+.demo__title {
+  font: 500 13px "Inter", system-ui, sans-serif; color: #b3b3b3;
+  min-width: 220px; text-align: center;
+}
+.demo__exit {
+  font: 600 12px "Inter", system-ui, sans-serif; color: #e6e6e6;
+  background: #2c2c2c; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+.demo__exit:hover { background: #3a2020; color: #ff8a8a; }
+
+.demo__stage { flex: 1 1 auto; position: relative; overflow: hidden; }
+.demo__scaler { position: absolute; inset: 0; display: flex; justify-content: flex-start; align-items: flex-start; overflow: auto; }
+/* device = the breakpoint's EXACT pixel size (set inline), a window floating in the
+   black stage. `margin: auto` centres it on BOTH axes when it fits, and collapses to 0
+   when it overflows the stage, so a device wider/taller than the stage still scrolls
+   from the top-left (no flex-center clipping). Content scrolls INSIDE the device. */
+.demo__device { overflow-y: auto; overflow-x: hidden; margin: auto; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); transform-origin: center; }
+/* Forced-device preview is a fixed-size, internally-scrolling window: the runtime's
+   position:fixed nav pin can't be contained inside it (fixed escapes to the app viewport
+   = a ghost pill floating outside the device). Previously we dropped prev/next back to
+   INLINE here, but inline lands them in the page's side gutters, NOT the corners — so the
+   framed preview no longer matched the export's corner-pinned buttons (the divergence #190-adjacent
+   report). Instead PIN them with position:absolute to the device corners, mirroring the on-canvas
+   pin (editor.css #canvas-viewport rule): absolute is contained by the device (no ghost, no escape)
+   and reuses the same 24px / 12px-mobile / 16px-bottom insets as the runtime fixed pin, so the framed
+   preview reads WYSIWYG with the shipped corners. course-root gets position:relative (the anchor) +
+   min-height:100% so a short page still fills the fold and the buttons sit at the visible device
+   bottom. Preview chrome only; the export uses course.css alone and is unaffected. */
+.demo__device--framed .course-root[data-env="runtime"] { position: relative; min-height: 100%; }
+.demo__device--framed .course-root[data-env="runtime"] .course-nav__progress { position: relative; left: auto; bottom: auto; transform: none; z-index: auto; }
+.demo__device--framed .course-root[data-env="runtime"] .course-nav--pin { position: static; }
+.demo__device--framed .course-root[data-env="runtime"] .course-nav--pin .course-nav__prev,
+.demo__device--framed .course-root[data-env="runtime"] .course-nav--pin .course-nav__next { position: absolute; bottom: 16px; left: auto; right: auto; z-index: 6; }
+.demo__device--framed .course-root[data-env="runtime"] .course-nav--pin .course-nav__prev { left: 24px; }
+.demo__device--framed .course-root[data-env="runtime"] .course-nav--pin .course-nav__next { right: 24px; }
+.demo__device--framed .course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__prev { left: 12px; }
+.demo__device--framed .course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__next { right: 12px; }
+/* Same remap for the interaction-gate reminder: course.css pins it position:fixed above the
+   Next button, which would escape the (un-zoomed) framed device to the app viewport as a ghost
+   pill. Re-anchor it absolute inside the device, above the absolute Next button (16px inset +
+   ~34px button + 10px gap), so the framed preview stays WYSIWYG with the export. */
+.demo__device--framed .course-root[data-env="runtime"] .course-nav--pin .course-nav__gate-hint {
+  position: absolute; bottom: calc(16px + 34px + 10px); right: 24px; left: auto; top: auto; z-index: 7;
+}
+.demo__device--framed .course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__gate-hint { right: 12px; }
+/* forced device modes get a subtle side edge; Auto fills edge-to-edge */
+.demo__device--framed { box-shadow: 0 0 0 1px #2c2c2c; }
+.demo__device::-webkit-scrollbar { width: 8px; }
+.demo__device::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 6px; }
+
+/* ==================== copy editor (#116 — fullscreen alternate copy-editing view) =============   Same enter/exit shell pattern as .demo: a fixed inset:0 overlay above the layout canvas.
+   Dark chrome bar (parity with .demo__bar) over a light document stage — the copy renders as a
+   Word-doc-style page in slices 2-4. Verso UI only; never ships in the SCORM export. */
+.copyedit {
+  /* chrome invariant: contained to the workspace region -- below the global top bar (.toolbar,
+     44px) and right of the left rail (--rail-w) -- so the product picker + stage rail stay live.
+     (Demo/Preview stays inset:0; it is the sanctioned full-screen exception.) */
+  position: fixed; top: var(--toolbar-height, 40px); left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 100;
+  display: flex; flex-direction: column;
+  background: #0e0e0f;
+}
+.copyedit[hidden] { display: none; }
+
+.copyedit__bar {
+  flex: 0 0 auto; height: 52px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 14px; background: #1a1a1b; border-bottom: 1px solid #2c2c2c;
+}
+.copyedit__title { font: 600 13px "Inter", system-ui, sans-serif; color: #e6e6e6; }
+.copyedit__tools { flex: 1 1 auto; display: flex; align-items: center; gap: 12px; }
+/* #175: inline rich-format toolbar (B/I/U + weight) — canonical prop-toggle cluster +
+   the shared weight select, sat next to the title. Chrome only (copy editor is Verso UI). */
+.copyedit__format { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.copyedit__format .prop-toggle-row { margin: 0; }
+.copyedit__format .vds-select { min-width: 104px; }
+/* #119: view-header tools — word count + Find & replace */
+.copyedit-wordcount { font: 500 12px "Inter", system-ui, sans-serif; color: #9a9a9a; }
+.copyedit-tool {
+  font: 600 12px "Inter", system-ui, sans-serif; color: #e6e6e6;
+  background: #2c2c2c; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+.copyedit-tool:hover { background: #383838; }
+.copyedit__exit {
+  font: 600 12px "Inter", system-ui, sans-serif; color: #e6e6e6;
+  background: #2c2c2c; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+.copyedit__exit:hover { background: #3a2020; color: #ff8a8a; }
+
+.copyedit__stage { flex: 1 1 auto; position: relative; overflow: auto; }
+/* #117: the copy renders as a Word-doc-style page (light paper floating in the dark stage);
+   read-only in v1 (two-way editing = slice 3). Verso UI only — never the SCORM export. */
+.copyedit__doc {
+  max-width: 820px; margin: 32px auto; min-height: 200px;
+  background: #fff; color: #1a1a1a; border-radius: 8px; padding: 40px 56px;
+  font: 15px/1.6 "Inter", system-ui, sans-serif; box-shadow: 0 2px 24px rgba(0, 0, 0, 0.4);
+}
+.copyedit-empty { color: #8a8a8a; font-style: italic; }
+/* read-only chapter/page location signpost */
+.copyedit-loc {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e6e6e6;
+}
+.copyedit-loc:first-child { margin-top: 0; }
+.copyedit-loc__chapter {
+  font-weight: 700; font-size: var(--text-sm); letter-spacing: 0.04em;
+  text-transform: uppercase; color: #6a6a6a;
+}
+.copyedit-loc__page { font-weight: 600; font-size: 13px; color: #3a3a3a; }
+/* one row per copy field: dim role tag + the field content */
+.copyedit-row { display: flex; gap: 14px; align-items: baseline; padding: 5px 0; }
+.copyedit-row__role {
+  flex: 0 0 92px; text-align: right; padding-top: 2px;
+  font-size: var(--text-xs); letter-spacing: 0.02em; text-transform: uppercase;
+  color: #b0b0b0; user-select: none;
+}
+.copyedit-row__text { flex: 1 1 auto; min-width: 0; border-radius: 4px; padding: 2px 6px; margin: -2px -6px; }
+.copyedit-row__text > * { margin: 0; }
+/* #118: editable rows — subtle hover, clear focus ring (two-way write-back to the doc) */
+.copyedit-row__text.is-editable:hover { background: #f2f4f7; }
+.copyedit-row__text.is-editable:focus { outline: none; background: #eef2ff; box-shadow: 0 0 0 2px #9db4ff; }
+
+/* #104 Side-by-side variant columns: flagship copy + one cell per variant, so an author
+   can read/repair each variant's copy against the flagship. Editor chrome ONLY (the copy
+   editor never reaches render()/course.css/SCORM). The doc widens to fit the columns. */
+.copyedit__doc--sbs { max-width: min(1440px, 95vw); }
+.copyedit-modeseg { margin: 0; }
+/* one column-header row (Flagship + variant names), aligned to the row grid template */
+.copyedit-colhead {
+  display: grid; gap: 14px; align-items: baseline;
+  margin: 6px 0 2px; padding-bottom: 6px; border-bottom: 1px solid #ececec;
+}
+.copyedit-colhead__cell {
+  font-size: var(--text-xs); letter-spacing: 0.03em; text-transform: uppercase;
+  font-weight: 600; color: #8a8a8a; user-select: none; padding: 0 6px;
+}
+/* side-by-side row: grid (overrides the Single flex row), columns aligned across rows */
+.copyedit-row--sbs { display: grid; gap: 14px; align-items: start; }
+.copyedit-row--sbs .copyedit-row__role { flex: none; padding-top: 4px; }
+.copyedit-cell { min-width: 0; display: flex; align-items: flex-start; gap: 4px; }
+.copyedit-cell .copyedit-row__text { flex: 1 1 auto; }
+/* a held-but-locked variant cell: muted, no editable-hover/focus affordance until unlocked */
+.copyedit-cell--locked { color: #6a6a6a; }
+/* a non-overridable target (table/quiz): truly nothing beside — the eye tracks only rows
+   that can hold a variant */
+.copyedit-cell--na { border: 0; background: none; }
+/* small, quiet per-cell buttons (lock / unlock / create-from-flagship) */
+.copyedit-cellbtn {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px;
+  background: none; color: #b0b0b0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.copyedit-cellbtn:hover { background: #eef2ff; color: #4a5a8a; }
+.copyedit-cellbtn svg { width: 14px; height: 14px; }
+.copyedit-create { opacity: 0.5; }
+.copyedit-cell--empty:hover .copyedit-create, .copyedit-create:focus { opacity: 1; }
+
+
+/* P0 spellcheck: the CSS Custom Highlight painted over likely typos (editor.js
+   runSpellcheck). Editor chrome ONLY — the highlight lives in CSS.highlights, never in the
+   DOM or the document, so nothing reaches render() or a SCORM export. A red wavy underline
+   + faint wash so a typo is obvious in every text box, selected or not, in light + dark UI. */
+::highlight(verso-spelling) {
+  text-decoration: underline wavy #f24822;
+  text-decoration-skip-ink: none;
+  background-color: rgba(242, 72, 34, 0.15);
+}

@@ -13,6 +13,16 @@
  * Do NOT edit editor.js / render.js / index.html.
  */
 (function () {
+  // arch-P2 (the test seam): in the browser this binds to the REAL window, so every
+  // `window.X = ...` below publishes globally exactly as it did before -- no behaviour change.
+  // Under `require` in node there is no window, so it binds to a local stand-in and the footer
+  // hands that same namespace to module.exports. The file's interface becomes the test surface,
+  // instead of the suite string-slicing its source text back into life.
+  // The node stand-in inherits its no-op listeners from a prototype, so `module.exports` carries
+  // this file's OWN published names and nothing else.
+  var window = (typeof globalThis !== "undefined" && globalThis.window)
+    || Object.create({ addEventListener: function () {}, removeEventListener: function () {} });
+
   "use strict";
 
   var AUTOSAVE_MS = 4000;
@@ -107,18 +117,14 @@
 
   // --- asset blob store (YY / SPEC-production-hardening §4) ------------------
   // Media moves OUT of the doc into an id-keyed store; the doc carries lean
-  // "asset:<id>" refs. Backend for THIS slice is a separate localStorage key
-  // (base64), swappable for IndexedDB (ZZ) behind the same seam. Ids are a
-  // content hash of the data URL, so identical uploads (the many identical menu
-  // SVGs) dedupe to one record. Metadata lives here, NOT in the doc ref.
+  // "asset:<id>" refs. Ids are a content hash of the data URL, so identical
+  // uploads (the many identical menu SVGs) dedupe to one record. Metadata lives
+  // here, NOT in the doc ref.
   //
   // NOTE (deviation from the frozen §4 signature, flagged for James): the seam
   // is SYNC and dataURL-based (putAsset(dataUrl, meta) -> id) rather than the
-  // async blob signature, because the backend is still localStorage and a sync
-  // seam keeps boot / migration / mount sync (no async refactor of the boot
-  // path in this large slice). assetUrl/getAsset stay sync so they survive the
-  // ZZ move to IndexedDB (only the persistence WRITE becomes async there).
-  var ASSET_KEY = "authoring.assets";
+  // async blob signature, because a sync seam keeps boot / migration / mount
+  // sync (no async refactor of the boot path in this large slice).
   var PLACEHOLDER = "data:image/svg+xml;utf8," + encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='80'>" +
     "<rect width='120' height='80' fill='#cccccc'/>" +
@@ -159,6 +165,17 @@
   // blobs to IndexedDB (GB-scale). The in-memory `assets` map stays the SYNC
   // source of truth (render/upload read it synchronously); IndexedDB is the async
   // durable backer, written per-record (not one giant key).
+  //
+  // ONE MEDIA STORE, ONE FAILURE SURFACE (platform-pivot 07). There used to be a
+  // second one underneath: with IndexedDB unavailable, the whole asset map was
+  // written back as a single base64 localStorage blob. That is the per-origin
+  // blob path the pivot retires, and it bought little -- it shared the same ~5MB
+  // cap as the registry it was trying to relieve, and failed on its own instead
+  // of through the registry's quota reporting. Without IndexedDB, putAsset now
+  // declines: migrateDocMedia leaves the field as its inline data: URL (it is
+  // documented non-destructive), the media still renders, and durability becomes
+  // the registry write's problem -- which already classifies quota and drives the
+  // save-state indicator. The old key is drained once by Migration, not read here.
   var IDB_NAME = "authoring", IDB_STORE = "assets";
   var idb = null, idbReady = false;
 
@@ -187,23 +204,9 @@
     if (!idb) return;
     try { idb.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE).delete(id); } catch (e) {}
   }
-  // Fallback whole-map localStorage write, ONLY when IndexedDB is unavailable
-  // (old browser / private mode). Quota failure surfaces the loud warning.
-  function persistFallback() {
-    if (idbReady) return { ok: true }; // IDB owns persistence; localStorage unused
-    var json;
-    try { json = JSON.stringify(assets); } catch (e) { return { ok: false }; }
-    try { localStorage.setItem(ASSET_KEY, json); return { ok: true }; }
-    catch (e) {
-      if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure("Storage full while saving media. Export JSON now to avoid losing work.");
-      if (window.console && console.error) console.error("[assets] localStorage persist failed:", e);
-      return { ok: false };
-    }
-  }
-
-  // Async: open IDB, load every stored record into the sync map, then migrate any
-  // OLD localStorage asset key into IDB and DELETE it (frees the space James hit).
-  // Calls done() when the map is ready so the editor can re-mount + resolve media.
+  // Async: open IDB, load every stored record into the sync map, then hand the
+  // retired localStorage asset key to Migration to drain once. Calls done() when
+  // the map is ready so the editor can re-mount + resolve media.
   function hydrateAssets(done) {
     openDB(function () {
       function loadIDB(next) {
@@ -214,15 +217,21 @@
           req.onerror = function () { next(); };
         } catch (e) { next(); }
       }
-      function migrateLS(next) {
-        var raw = null; try { raw = localStorage.getItem(ASSET_KEY); } catch (e) {}
-        if (!raw) return next();
-        var old = {}; try { old = JSON.parse(raw) || {}; } catch (e) {}
-        Object.keys(old).forEach(function (id) { if (!assets[id]) { assets[id] = old[id]; idbPut(id, old[id]); } });
-        if (idbReady) { try { localStorage.removeItem(ASSET_KEY); } catch (e) {} }
+      // The one-way drain of the pre-platform-pivot-07 blob. Only runs where there is
+      // somewhere to drain TO: with no IndexedDB the old key is still the only copy of
+      // that media, so it is left alone rather than deleted out from under the author.
+      function drainLegacy(next) {
+        if (!idbReady || !window.Migration || !window.Migration.drainLegacyAssetBlob) return next();
+        var KEY = window.Migration.LEGACY_ASSET_KEY;
+        window.Migration.drainLegacyAssetBlob({
+          read: function () { try { return localStorage.getItem(KEY); } catch (e) { return null; } },
+          remove: function () { try { localStorage.removeItem(KEY); } catch (e) {} },
+          has: function (id) { return !!assets[id]; },
+          put: function (id, rec) { assets[id] = rec; idbPut(id, rec); }
+        });
         next();
       }
-      loadIDB(function () { migrateLS(function () { done && done(); }); });
+      loadIDB(function () { drainLegacy(function () { done && done(); }); });
     });
   }
 
@@ -230,10 +239,13 @@
     if (typeof dataUrl !== "string" || dataUrl.slice(0, 5) !== "data:") return null;
     var id = cyrb53(dataUrl);
     if (!assets[id]) {
+      // No IndexedDB means no durable media store. Decline rather than accept a ref
+      // this store cannot honour after a reload -- the caller keeps the inline data:
+      // URL, which the registry write persists and reports on.
+      if (!idbReady) return null;
       var rec = { data: dataUrl, mime: (meta && meta.mime) || mimeOf(dataUrl), name: (meta && meta.name) || null, w: null, h: null };
       assets[id] = rec;
-      if (idbReady) { idbPut(id, rec); }                          // async durable write, no cap
-      else if (!persistFallback().ok) { delete assets[id]; return null; } // no IDB -> localStorage (may hit cap)
+      idbPut(id, rec);                                            // async durable write, no cap
     }
     return id;
   }
@@ -260,22 +272,23 @@
   // union of refs across ALL open docs (the store is shared by the registry).
   function sweepAssets(refIds) {
     var keep = {}; (refIds || []).forEach(function (id) { keep[id] = true; });
-    var changed = false;
     Object.keys(assets).forEach(function (id) {
       if (keep[id]) return;
       delete assets[id];
-      idbDelete(id);
+      idbDelete(id);   // per-record; there is no whole-map write left to follow it
       if (objectUrls[id]) { try { URL.revokeObjectURL(objectUrls[id]); } catch (e) {} delete objectUrls[id]; }
-      changed = true;
     });
-    if (changed && !idbReady) persistFallback(); // IDB deletes are per-record above
   }
 
   // Store methods are SYNC (they read/write the in-memory map); hydrateAssets()
   // runs async at the end of this module and re-mounts once the map is loaded.
   window.AssetStore = {
     put: putAsset, url: assetUrl, get: getAsset, sweep: sweepAssets,
-    has: function (id) { return !!assets[id]; }, placeholder: PLACEHOLDER
+    has: function (id) { return !!assets[id]; }, placeholder: PLACEHOLDER,
+    // The boot block below calls this; it is published so the suite can drive the REAL
+    // hydrate -> drain -> put path against a fake IndexedDB rather than assert on source text.
+    hydrate: hydrateAssets,
+    idbReady: function () { return idbReady; }
   };
 
   // GGG: storage-environment advisory. IndexedDB + localStorage are per-ORIGIN, so
@@ -324,41 +337,57 @@
     // saveActiveDoc() does the durable write and drives the save-state indicator.
     window.Editor.saveActiveDoc(d);
   }
+  // Reset used to clear the three doc-of-record keys out of localStorage by hand. That was
+  // the last call site bypassing the storage seam, and on the "file" or "http" backend it
+  // reset nothing at all: the registry lives on disk or on the server, so the reload put
+  // every course straight back and the author was told their workspace had been cleared.
+  // The editor owns it now, and it goes through the same StorageBackend every other write
+  // does, so it means the same thing in all three postures (platform-pivot 07).
   function resetWorkspace() {
     if (!confirm("Are you sure you want to reset the workspace?\nThis will clear all course tabs and restore the default sample.")) return;
-    try {
-      localStorage.removeItem("authoring.registry");
-      localStorage.removeItem("authoring.activeDocId");
-      localStorage.removeItem("authoring.openDocIds");
-    } catch (e) {}
+    var res = window.Editor && window.Editor.resetWorkspace ? window.Editor.resetWorkspace() : { ok: false, error: "unavailable" };
+    if (!res || !res.ok) {
+      alert("The workspace could not be reset" + (res && res.error ? " (" + res.error + ")" : "") + ".\nNothing was changed.");
+      return;
+    }
     location.reload();
   }
 
-  // --- register pipeline buttons ---------------------------------------------
-  window.Editor.registerPipelineButton("Export JSON", save);
-  window.Editor.registerPipelineButton("Reset Workspace", resetWorkspace);
+  // --- boot: pipeline buttons, the autosave poll, asset hydration --------------
+  // All of this needs a live editor and a real browser, so it is skipped when the file is
+  // loaded on its own (arch-P2's node test seam) -- otherwise the autosave interval would
+  // keep a bare `require` alive forever. The pure persistence logic above is unaffected.
+  if (window.Editor && window.Editor.registerPipelineButton) {
+    window.Editor.registerPipelineButton("Export JSON", save);
+    window.Editor.registerPipelineButton("Reset Workspace", resetWorkspace);
 
-  // Power (#179): the 4s autosave poll fires forever, even when the window is occluded /
-  // minimised -- a constant CPU wake that helps defeat macOS App Nap. Expose a governor so
-  // the editor's visibilitychange handler can PAUSE it while hidden (flushing first, so a
-  // hidden-then-killed app never loses the latest edit) and RESUME on return.
-  var _autosaveTimer = setInterval(autosave, AUTOSAVE_MS);
-  window.__autosaveGov = {
-    pause: function () { if (_autosaveTimer) { autosave(); clearInterval(_autosaveTimer); _autosaveTimer = 0; } },
-    resume: function () { if (!_autosaveTimer) _autosaveTimer = setInterval(autosave, AUTOSAVE_MS); },
-    running: function () { return !!_autosaveTimer; }
-  };
-  window.addEventListener("beforeunload", autosave);
+    // Power (#179): the 4s autosave poll fires forever, even when the window is occluded /
+    // minimised -- a constant CPU wake that helps defeat macOS App Nap. Expose a governor so
+    // the editor's visibilitychange handler can PAUSE it while hidden (flushing first, so a
+    // hidden-then-killed app never loses the latest edit) and RESUME on return.
+    var _autosaveTimer = setInterval(autosave, AUTOSAVE_MS);
+    window.__autosaveGov = {
+      pause: function () { if (_autosaveTimer) { autosave(); clearInterval(_autosaveTimer); _autosaveTimer = 0; } },
+      resume: function () { if (!_autosaveTimer) _autosaveTimer = setInterval(autosave, AUTOSAVE_MS); },
+      running: function () { return !!_autosaveTimer; }
+    };
+    window.addEventListener("beforeunload", autosave);
 
-  // Hydrate the asset store from IndexedDB (async), THEN hoist any legacy inline
-  // base64 media in the registry into it and re-mount so media resolves. Done in
-  // the callback because IndexedDB open/load is async -- migrating/mounting before
-  // the map is populated would render assets blank.
-  hydrateAssets(function () {
-    if (window.Editor.migrateAssets) window.Editor.migrateAssets();
-  });
-  // Mark-sweep orphaned blobs on the way out (union of all open docs' refs).
-  window.addEventListener("beforeunload", function () {
-    if (window.Editor.sweepAssets) window.Editor.sweepAssets();
-  });
+    // Hydrate the asset store from IndexedDB (async), THEN hoist any legacy inline
+    // base64 media in the registry into it and re-mount so media resolves. Done in
+    // the callback because IndexedDB open/load is async -- migrating/mounting before
+    // the map is populated would render assets blank.
+    hydrateAssets(function () {
+      if (window.Editor.migrateAssets) window.Editor.migrateAssets();
+    });
+    // Mark-sweep orphaned blobs on the way out (union of all open docs' refs).
+    window.addEventListener("beforeunload", function () {
+      if (window.Editor.sweepAssets) window.Editor.sweepAssets();
+    });
+  }
+
+  // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --
+  // exactly what it publishes and nothing else. In the browser `module` is undefined, so this
+  // line does nothing at all.
+  if (typeof module !== "undefined" && module.exports) module.exports = window;
 })();

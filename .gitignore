@@ -36,6 +36,9 @@ export/build/
 # should stay out of the repo. For a demo, add a scrubbed sample, not real content.
 # =====================================================================
 *.versopub.json
+# Explicit: the Viewer is a dev harness and must never carry a real course payload.
+viewer/*.versopub.json
+viewer/*.json
 *.scorm
 *_SCORM.zip
 *.zip
@@ -56,8 +59,10 @@ references/
 review-*.json
 verso-comments*.json
 
-# --- UI overhaul working material (specs, audits, prototypes) — local only ---
-_ui-overhaul/
+# --- Working material — local only ---
+# Non-shipping scratch: prototypes, spikes, design specs, audits, restructure notes.
+# See the repository-boundary table in README.md: workbench/ is the one gitignored role.
+workbench/
 
-# --- Codebase design working material (survey + restructure report) — local only ---
-_codebase-design/
+# local server-mode dev data (scripts/serve-server.js) -- never committed
+_server-data/

@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verso — how the code is arranged</title>
+<style>
+/* Verso's own tokens. Same values as design-system/tokens/colors.css, inlined so this file
+   opens from file:// with nothing installed — the rule the whole app obeys. */
+:root {
+  --g1000:#171717; --g950:#1e1e1e; --g900:#262626; --g850:#2c2c2c; --g800:#363636;
+  --g750:#444; --g700:#525252; --g500:#8a8a8a; --g300:#c4c4c4; --g100:#e6e6e6;
+  --azure:#0d99ff; --azure-quiet:rgba(13,153,255,.14);
+  --green:#14ae5c; --green-quiet:rgba(20,174,92,.16);
+  --red:#f24822;  --red-quiet:rgba(242,72,34,.14);
+  --amber:#d98d00; --amber-quiet:rgba(217,141,0,.15);
+
+  --ground:var(--g1000); --panel:var(--g950); --raised:var(--g900); --input:var(--g850);
+  --line:var(--g750); --line-soft:#2f2f2f;
+  --ink:var(--g100); --ink-2:var(--g300); --ink-3:var(--g500);
+
+  --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --measure:66ch;
+  --r:6px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground:#f4f5f7; --panel:#fff; --raised:#fff; --input:#f0f1f4;
+    --line:#d7dae0; --line-soft:#e6e8ec;
+    --ink:#16191d; --ink-2:#464c55; --ink-3:#6b727d;
+    --azure:#0a72c4; --azure-quiet:rgba(10,114,196,.10);
+    --green:#0f8347; --red:#c8371a; --amber:#9a6600;
+  }
+}
+:root[data-theme="light"] {
+  --ground:#f4f5f7; --panel:#fff; --raised:#fff; --input:#f0f1f4;
+  --line:#d7dae0; --line-soft:#e6e8ec;
+  --ink:#16191d; --ink-2:#464c55; --ink-3:#6b727d;
+  --azure:#0a72c4; --azure-quiet:rgba(10,114,196,.10);
+  --green:#0f8347; --red:#c8371a; --amber:#9a6600;
+}
+:root[data-theme="dark"] {
+  --ground:#171717; --panel:#1e1e1e; --raised:#262626; --input:#2c2c2c;
+  --line:#444; --line-soft:#2f2f2f;
+  --ink:#e6e6e6; --ink-2:#c4c4c4; --ink-3:#8a8a8a;
+  --azure:#0d99ff; --azure-quiet:rgba(13,153,255,.14);
+  --green:#14ae5c; --red:#f24822; --amber:#d98d00;
+}
+
+@font-face{font-family:"Inter";src:url("../fonts/Inter-400.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"Inter";src:url("../fonts/Inter-500.woff2") format("woff2");font-weight:500;font-display:swap}
+@font-face{font-family:"Inter";src:url("../fonts/Inter-600.woff2") format("woff2");font-weight:600;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../fonts/JetBrainsMono-400.woff2") format("woff2");font-weight:400;font-display:swap}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font:400 15px/1.6 var(--sans); font-feature-settings:"cv05" 1;
+}
+.wrap{max-width:1120px; margin:0 auto; padding:0 28px 96px}
+
+/* ---- masthead: states the one law, because that is the most characteristic thing here ---- */
+header.top{border-bottom:1px solid var(--line-soft); margin-bottom:44px}
+.top-in{max-width:1120px; margin:0 auto; padding:40px 28px 32px;
+  display:flex; gap:28px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap}
+h1{font-size:26px; font-weight:600; letter-spacing:-.02em; margin:0 0 6px; text-wrap:balance}
+.sub{color:var(--ink-3); font-size:14px; margin:0; max-width:52ch}
+.stamp{font:400 11.5px/1.7 var(--mono); color:var(--ink-3); text-align:right; white-space:nowrap}
+.stamp b{color:var(--ink-2); font-weight:400}
+button.theme{
+  font:400 11.5px var(--mono); color:var(--ink-3); background:var(--input);
+  border:1px solid var(--line); border-radius:var(--r); padding:5px 10px; cursor:pointer; margin-top:8px;
+}
+button.theme:hover{color:var(--ink); border-color:var(--ink-3)}
+button.theme:focus-visible{outline:2px solid var(--azure); outline-offset:2px}
+
+h2{font-size:12px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+   color:var(--ink-3); margin:0 0 18px; padding-bottom:9px; border-bottom:1px solid var(--line-soft)}
+section{margin-bottom:56px}
+p{max-width:var(--measure)}
+p.lede{color:var(--ink-2); margin-top:0}
+code{font:400 .875em var(--mono); background:var(--input); padding:1px 5px; border-radius:4px;
+  border:1px solid var(--line-soft); white-space:nowrap}
+a{color:var(--azure)}
+
+/* ---- the law: one function, two consumers. Drawn, because it is the spine of the codebase ---- */
+.law{background:var(--panel); border:1px solid var(--line-soft); border-radius:10px; padding:26px 26px 22px}
+.law-rail{display:flex; gap:0; align-items:stretch; flex-wrap:wrap; margin:0 0 20px}
+.consumer{flex:1 1 190px; background:var(--input); border:1px solid var(--line);
+  border-radius:var(--r); padding:13px 15px; min-width:0}
+.consumer .who{font:400 12px var(--mono); color:var(--azure); margin-bottom:3px}
+.consumer .what{font-size:13px; color:var(--ink-2)}
+.arrows{flex:0 0 92px; display:flex; flex-direction:column; justify-content:center;
+  align-items:center; gap:5px; color:var(--ink-3); font:400 11px var(--mono); padding:0 6px}
+.arrows span{white-space:nowrap}
+.pure{flex:1 1 240px; background:var(--azure-quiet); border:1px solid var(--azure);
+  border-radius:var(--r); padding:13px 15px; min-width:0}
+.pure .who{font:400 12px var(--mono); color:var(--azure); margin-bottom:3px}
+.pure .what{font-size:13px; color:var(--ink-2)}
+.law-note{font-size:13.5px; color:var(--ink-2); max-width:var(--measure); margin:0}
+.law-note strong{color:var(--ink); font-weight:600}
+.seam{margin-top:16px; padding-top:15px; border-top:1px dashed var(--line);
+  font-size:13px; color:var(--ink-3); max-width:var(--measure)}
+
+/* ---- task router ---- */
+.tasks{display:grid; grid-template-columns:repeat(auto-fit,minmax(272px,1fr)); gap:12px}
+.task{background:var(--panel); border:1px solid var(--line-soft); border-left:2px solid var(--azure);
+  border-radius:var(--r); padding:15px 17px}
+.task h3{font-size:14px; font-weight:600; margin:0 0 9px}
+.task ol{margin:0; padding-left:17px; font-size:13.3px; color:var(--ink-2); line-height:1.75}
+.task li::marker{color:var(--ink-3); font-family:var(--mono); font-size:11px}
+.task code{font-size:12px}
+
+/* ---- layer stack ---- */
+.layer{background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--r);
+  padding:16px 18px; margin-bottom:10px; display:grid; grid-template-columns:150px 1fr; gap:20px}
+.layer .name{font:500 13px var(--mono); color:var(--ink)}
+.layer .name em{display:block; font:400 11.5px var(--sans); font-style:normal;
+  color:var(--ink-3); margin-top:3px}
+.layer .body{font-size:13.5px; color:var(--ink-2); min-width:0}
+.layer .body p{margin:0 0 8px; max-width:none}
+.layer .body p:last-child{margin-bottom:0}
+
+/* ---- registries ---- */
+.tbl-scroll{overflow-x:auto; border:1px solid var(--line-soft); border-radius:var(--r); background:var(--panel)}
+table{border-collapse:collapse; width:100%; font-size:13.4px; min-width:560px}
+th{text-align:left; font:500 11px var(--mono); letter-spacing:.05em; text-transform:uppercase;
+  color:var(--ink-3); padding:11px 15px; border-bottom:1px solid var(--line); white-space:nowrap}
+td{padding:11px 15px; border-bottom:1px solid var(--line-soft); vertical-align:top; color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td.k{font:400 12.5px var(--mono); color:var(--ink); white-space:nowrap}
+td.n{font-variant-numeric:tabular-nums; text-align:right; color:var(--ink-3); white-space:nowrap}
+
+/* ---- module index ---- */
+.filter{display:flex; gap:10px; align-items:center; margin:0 0 14px; flex-wrap:wrap}
+.filter input{flex:1 1 240px; min-width:0; background:var(--input); border:1px solid var(--line);
+  border-radius:var(--r); color:var(--ink); font:400 13px var(--mono); padding:8px 11px}
+.filter input:focus{outline:2px solid var(--azure); outline-offset:1px; border-color:var(--azure)}
+.filter .count{font:400 12px var(--mono); color:var(--ink-3); white-space:nowrap}
+.grp{margin-bottom:22px}
+.grp h3{font:500 12px var(--mono); color:var(--azure); margin:0 0 9px; letter-spacing:.02em}
+.mods{display:grid; grid-template-columns:repeat(auto-fill,minmax(268px,1fr)); gap:7px}
+/* The filename is the key you came for — it never truncates. The description wraps under it. */
+.mod{background:var(--panel); border:1px solid var(--line-soft); border-radius:5px;
+  padding:9px 12px; display:grid; grid-template-columns:1fr auto; gap:1px 10px; min-width:0}
+.mod .f{font:400 12.3px var(--mono); color:var(--ink); word-break:break-word}
+.mod .l{font:400 11px var(--mono); color:var(--ink-3); font-variant-numeric:tabular-nums;
+  text-align:right; align-self:start}
+.mod .d{grid-column:1 / -1; font-size:12.3px; color:var(--ink-3); line-height:1.5}
+.mod.owns{border-left:2px solid var(--amber)}
+.mod[hidden]{display:none}
+
+/* ---- gates ---- */
+.gates{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px}
+.gate{background:var(--panel); border:1px solid var(--line-soft); border-left:2px solid var(--green);
+  border-radius:var(--r); padding:13px 16px}
+.gate .g{font:500 13px var(--sans); margin-bottom:4px}
+.gate .w{font-size:12.8px; color:var(--ink-3)}
+
+.warn{background:var(--red-quiet); border:1px solid var(--red); border-radius:var(--r);
+  padding:15px 18px; max-width:var(--measure)}
+.warn h3{margin:0 0 7px; font-size:13.5px; font-weight:600; color:var(--ink)}
+.warn ul{margin:0; padding-left:18px; font-size:13.2px; color:var(--ink-2); line-height:1.7}
+
+footer{border-top:1px solid var(--line-soft); margin-top:20px; padding-top:20px;
+  font-size:12.5px; color:var(--ink-3); max-width:var(--measure)}
+
+@media (max-width:640px){
+  .layer{grid-template-columns:1fr; gap:9px}
+  /* stacked, the left/right arrows would point the wrong way — keep the label, drop the glyphs */
+  .arrows{flex-basis:100%; flex-direction:row; padding:7px 0}
+  .arrows span:first-child,.arrows span:last-child{display:none}
+  .arrows span{opacity:.8}
+  .top-in{padding:28px 20px 24px}
+  .wrap{padding:0 20px 64px}
+  .stamp{text-align:left}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div>
+      <h1>Verso — how the code is arranged</h1>
+      <p class="sub">Orientation for someone about to change something. The authoritative
+        per-module detail lives in <code>src/editor/README.md</code>, which the test suite gates.</p>
+    </div>
+    <div class="stamp">
+      <b>vanilla JS</b> · no build step<br>
+      <b>0</b> runtime dependencies<br>
+      opens from <b>file://</b><br>
+      <b>61</b> editor modules<br>
+      <button class="theme" id="tt" type="button">theme</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>The one law</h2>
+  <div class="law">
+    <div class="law-rail">
+      <div class="consumer">
+        <div class="who">the editor</div>
+        <div class="what">mounts the output onto the canvas and makes it typeable</div>
+      </div>
+      <div class="arrows"><span>&rarr;</span><span>ctx</span><span>&rarr;</span></div>
+      <div class="pure">
+        <div class="who">render(doc, theme, ctx)</div>
+        <div class="what">a pure function of the document. <code>src/render.js</code></div>
+      </div>
+      <div class="arrows"><span>&larr;</span><span>ctx</span><span>&larr;</span></div>
+      <div class="consumer">
+        <div class="who">the SCORM export</div>
+        <div class="what">serialises the same output into a package</div>
+      </div>
+    </div>
+    <p class="law-note"><strong>What you see in the editor is what ships.</strong> Both consumers
+      call one render, so they cannot disagree. Nothing in the editor or its stylesheets may leak
+      into <code>render()</code>; new per-document state is data on the <code>doc</code>, never
+      editor state. If a change would make the editor and the export diverge, it is wrong.</p>
+    <p class="seam">The context is the seam. It used to be ten <code>window.__*</code> globals
+      assigned by hand in two files, with no test crossing between them — so a divergence was an
+      omission nobody could see. <code>src/render-context.js</code> builds it once; the editor and
+      the exporter are its two adapters, and a test asserts the two contexts are deep-equal.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Start here, by what you are doing</h2>
+  <div class="tasks">
+    <div class="task">
+      <h3>Add a block type</h3>
+      <ol>
+        <li>Add its row to <code>src/blocks/manifest.js</code> <em>first</em></li>
+        <li>Run <code>node tests/run.js</code> — it names the pieces you have not written</li>
+        <li>Write each: render, CSS, runtime, inspector</li>
+      </ol>
+    </div>
+    <div class="task">
+      <h3>Change an inspector panel</h3>
+      <ol>
+        <li><code>src/editor/inspector/blocks.js</code> — the block-type table</li>
+        <li>Controls come from <code>inspector/primitives.js</code>; a hand-rolled row is a defect</li>
+        <li>Not a block? <code>parts.js</code> (field, grid instance) or <code>scopes.js</code> (document, page, multi)</li>
+      </ol>
+    </div>
+    <div class="task">
+      <h3>Change how the canvas behaves</h3>
+      <ol>
+        <li><code>world.js</code> builds and paints it</li>
+        <li><code>editing.js</code> makes it typeable — the pure-render invariant is really about this file</li>
+        <li><code>selection.js</code>, <code>drill.js</code>, <code>dnd.js</code> for what a click does</li>
+      </ol>
+    </div>
+    <div class="task">
+      <h3>Change chrome styling</h3>
+      <ol>
+        <li><code>styles/editor/</code> — 14 files, joined in <code>order.json</code> order</li>
+        <li>Adding a file means adding its row; the suite gates both directions</li>
+        <li>Course output is <code>styles/course/</code> and never the same file</li>
+      </ol>
+    </div>
+    <div class="task">
+      <h3>Move code out of editor.js</h3>
+      <ol>
+        <li>Read <code>src/editor/kernel.js</code>'s header — five rules, each a shipped bug</li>
+        <li><code>need()</code> resolves against <code>provide()</code>, never another module's <code>expose()</code></li>
+        <li>Route writes to a live binding through its setter <em>before</em> rewriting reads</li>
+      </ol>
+    </div>
+    <div class="task">
+      <h3>Work out where something lives</h3>
+      <ol>
+        <li><code>src/editor/README.md</code> — one row per module, gated so it cannot rot</li>
+        <li>Then this page's module index below</li>
+        <li>Grep last</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>The layers</h2>
+
+  <div class="layer">
+    <div class="name">src/render.js<em>3,784 lines</em></div>
+    <div class="body"><p>The pure core, and the one genuine seam that predates everything else:
+      <code>BLOCKS</code>, a table from block type to DOM. Loads before anything that uses it.
+      It knows nothing about the editor.</p></div>
+  </div>
+
+  <div class="layer">
+    <div class="name">src/*.js<em>~40 files</em></div>
+    <div class="body"><p>The shared engine both the editor and the exported course use:
+      <code>runtime.js</code> and <code>quiz-runtime.js</code> (learner behaviour),
+      <code>export.js</code> (the SCORM package), <code>persist.js</code>, <code>schema.js</code>,
+      <code>model.js</code>, <code>source-doc.js</code>, <code>theme.js</code>. Classic scripts,
+      most with a dual-mode footer so tests can <code>require</code> the real thing.</p></div>
+  </div>
+
+  <div class="layer">
+    <div class="name">src/editor.js<em>6,657 lines</em></div>
+    <div class="body"><p>The host. Almost entirely wiring now: the bind table, the
+      <code>provide</code> / <code>provideLive</code> surfaces, the <code>install()</code> calls
+      and the init block — plus the canvas mount, input handling, and the substrate that three or
+      more surfaces read (<code>selection</code>, <code>world</code>, <code>doc</code>). It was
+      26,176 lines.</p></div>
+  </div>
+
+  <div class="layer">
+    <div class="name">src/editor/<em>61 modules</em></div>
+    <div class="body"><p>Everything else, reached through <code>kernel.js</code>
+      (<code>window.VersoEditor</code>). A module declares what it needs and exposes its entry
+      points; the host provides. Most are <code>install(kernel)</code>; two
+      (<code>product-rail.js</code>, <code>dnd.js</code>) are pure models with no install.</p></div>
+  </div>
+
+  <div class="layer">
+    <div class="name">styles/ · docs/guide/<em>45 files</em></div>
+    <div class="body"><p>Three directories of split files, each joined in the order its
+      <code>order.json</code> declares — the browser concatenates the chrome CSS via
+      <code>&lt;link&gt;</code>, the exporter inlines the course CSS into the one
+      <code>course.css</code> that ships, and one loader joins the guide.
+      <strong>Order is part of the source</strong>, because CSS cascades.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>A block is four registries and a manifest</h2>
+  <p class="lede">Adding a block used to mean four edits in four files in four different idioms with
+    nothing checking you did all four. Each concern is a table keyed by block type now, and
+    <code>src/blocks/manifest.js</code> declares which of them a given type has.</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Registry</th><th>Lives in</th><th class="n">Types</th></tr></thead>
+      <tbody>
+        <tr><td>Renders to DOM</td><td class="k">BLOCKS</td><td class="k">src/render.js</td><td class="n">27</td></tr>
+        <tr><td>Course styling (ships in SCORM)</td><td class="k">—</td><td class="k">styles/course/</td><td class="n">25</td></tr>
+        <tr><td>Learner behaviour</td><td class="k">RUNTIME</td><td class="k">src/runtime.js</td><td class="n">7</td></tr>
+        <tr><td>Inspector panel</td><td class="k">INSPECTORS</td><td class="k">src/editor/inspector/blocks.js</td><td class="n">18</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px; font-size:13.4px; color:var(--ink-3)">Not every block has all four,
+    and the manifest says so explicitly. A heading renders and is finished. Course chrome that binds
+    to the page rather than to a block goes in <code>CHROME_RUNTIME</code>, kept separate so
+    &ldquo;this block has no runtime&rdquo; and &ldquo;this runtime has no block&rdquo; stay
+    distinguishable. The suite checks every claim in both directions.</p>
+</section>
+
+<section>
+  <h2>Module index</h2>
+  <div class="filter">
+    <input id="q" type="search" placeholder="filter modules — try 'canvas', 'inspector', 'source'" aria-label="Filter modules">
+    <span class="count" id="cnt"></span>
+  </div>
+  <p style="font-size:12.8px; color:var(--ink-3); margin:-4px 0 18px">
+    An amber edge marks a module that <strong>owns state</strong> — it holds the value rather than
+    borrowing it from the host.</p>
+
+  <div class="grp"><h3>the canvas, and what you do on it</h3><div class="mods">
+    <div class="mod"><span class="f">world.js</span><span class="l">579</span><span class="d">builds and paints the canvas</span></div>
+    <div class="mod"><span class="f">canvas-view.js</span><span class="l">543</span><span class="d">where the canvas is looking</span></div>
+    <div class="mod"><span class="f">editing.js</span><span class="l">353</span><span class="d">makes the canvas typeable</span></div>
+    <div class="mod"><span class="f">selection.js</span><span class="l">125</span><span class="d">what is selected, and how a click gets there</span></div>
+    <div class="mod"><span class="f">drill.js</span><span class="l">248</span><span class="d">selecting your way into something</span></div>
+    <div class="mod owns"><span class="f">interact.js</span><span class="l">424</span><span class="d">the second thing the canvas can be</span></div>
+    <div class="mod"><span class="f">dnd.js</span><span class="l">320</span><span class="d">where a dropped block lands</span></div>
+    <div class="mod owns"><span class="f">dnd-ui.js</span><span class="l">410</span><span class="d">what a drag looks like</span></div>
+    <div class="mod"><span class="f">text-format.js</span><span class="l">214</span><span class="d">inline formatting, and both bars that render it</span></div>
+    <div class="mod owns"><span class="f">block-actions.js</span><span class="l">291</span><span class="d">what you can do to a selected block</span></div>
+    <div class="mod"><span class="f">context-menu.js</span><span class="l">367</span><span class="d">right-click, everywhere</span></div>
+    <div class="mod owns"><span class="f">clipboard.js</span><span class="l">314</span><span class="d">the verbs that act on a selection</span></div>
+    <div class="mod"><span class="f">structure-ops.js</span><span class="l">479</span><span class="d">the verbs that change a course's shape</span></div>
+    <div class="mod"><span class="f">shortcuts.js</span><span class="l">191</span><span class="d">one place that says what every key does</span></div>
+  </div></div>
+
+  <div class="grp"><h3>the inspector</h3><div class="mods">
+    <div class="mod"><span class="f">inspector/dispatch.js</span><span class="l">84</span><span class="d">which panel shows, and what runs after — pure</span></div>
+    <div class="mod"><span class="f">inspector/primitives.js</span><span class="l">1102</span><span class="d">the canonical control set</span></div>
+    <div class="mod"><span class="f">inspector/sections.js</span><span class="l">324</span><span class="d">the section, and the author's ordering of them</span></div>
+    <div class="mod"><span class="f">inspector/blocks.js</span><span class="l">947</span><span class="d">block type &rarr; panel, and the big panels</span></div>
+    <div class="mod"><span class="f">inspector/parts.js</span><span class="l">397</span><span class="d">a field, and one card of a grid</span></div>
+    <div class="mod"><span class="f">inspector/scopes.js</span><span class="l">359</span><span class="d">document, page, multi-selection</span></div>
+  </div></div>
+
+  <div class="grp"><h3>documents, pages, and the shape of a course</h3><div class="mods">
+    <div class="mod"><span class="f">documents.js</span><span class="l">335</span><span class="d">bringing a course into existence</span></div>
+    <div class="mod"><span class="f">tabs.js</span><span class="l">185</span><span class="d">the open documents</span></div>
+    <div class="mod"><span class="f">pages.js</span><span class="l">154</span><span class="d">chapters, and which one a page belongs to</span></div>
+    <div class="mod"><span class="f">outliner.js</span><span class="l">923</span><span class="d">the document seen as a list</span></div>
+    <div class="mod"><span class="f">history.js</span><span class="l">138</span><span class="d">undo, redo, and the doc-swap rule</span></div>
+    <div class="mod"><span class="f">storage.js</span><span class="l">315</span><span class="d">every durable read and write</span></div>
+    <div class="mod"><span class="f">backup.js</span><span class="l">215</span><span class="d">the durable copy on disk</span></div>
+    <div class="mod"><span class="f">home.js</span><span class="l">380</span><span class="d">the course browser</span></div>
+    <div class="mod"><span class="f">files.js</span><span class="l">361</span><span class="d">every document you have, from both stores</span></div>
+    <div class="mod"><span class="f">account-menu.js</span><span class="l">145</span><span class="d">which account am I signed in as</span></div>
+    <div class="mod"><span class="f">admin-users.js</span><span class="l">300</span><span class="d">people and roles</span></div>
+    <div class="mod"><span class="f">cutover.js</span><span class="l">215</span><span class="d">moving this machine's work to the server</span></div>
+    <div class="mod"><span class="f">product-panel.js</span><span class="l">279</span><span class="d">what the open document belongs to</span></div>
+    <div class="mod"><span class="f">library.js</span><span class="l">434</span><span class="d">one component, many courses</span></div>
+    <div class="mod"><span class="f">variants.js</span><span class="l">560</span><span class="d">the two axes a course varies along</span></div>
+  </div></div>
+
+  <div class="grp"><h3>look and feel</h3><div class="mods">
+    <div class="mod owns"><span class="f">theme.js</span><span class="l">682</span><span class="d">the palette, the mode, the named styles</span></div>
+    <div class="mod"><span class="f">color.js</span><span class="l">341</span><span class="d">every way an author picks a colour</span></div>
+    <div class="mod"><span class="f">fonts.js</span><span class="l">246</span><span class="d">type that survives being taken offline</span></div>
+    <div class="mod"><span class="f">header-footer.js</span><span class="l">555</span><span class="d">course chrome configured once</span></div>
+    <div class="mod"><span class="f">settings-sheet.js</span><span class="l">657</span><span class="d">everything not on a page; the Escape contract</span></div>
+    <div class="mod"><span class="f">modals.js</span><span class="l">146</span><span class="d">the canonical dialog</span></div>
+    <div class="mod owns"><span class="f">shell.js</span><span class="l">390</span><span class="d">stage, Product, matrix cell, top bar, rail</span></div>
+    <div class="mod"><span class="f">palette.js</span><span class="l">310</span><span class="d">one index, one palette</span></div>
+    <div class="mod"><span class="f">help.js</span><span class="l">310</span><span class="d">the user guide, read inside the app</span></div>
+    <div class="mod owns"><span class="f">diagnostics.js</span><span class="l">80</span><span class="d">what the app tells you about itself</span></div>
+  </div></div>
+
+  <div class="grp"><h3>interactive content</h3><div class="mods">
+    <div class="mod"><span class="f">hotspots.js</span><span class="l">83</span><span class="d">reading the screen-graph</span></div>
+    <div class="mod owns"><span class="f">hotspots-editor.js</span><span class="l">857</span><span class="d">editing a hotspot tour on the canvas</span></div>
+    <div class="mod"><span class="f">board/builder.js</span><span class="l">1963</span><span class="d">the tour builder you actually touch</span></div>
+    <div class="mod"><span class="f">board/layout.js</span><span class="l">176</span><span class="d">where things sit on that board</span></div>
+    <div class="mod"><span class="f">board/harvest.js</span><span class="l">132</span><span class="d">the source-video segment model</span></div>
+    <div class="mod"><span class="f">actions.js</span><span class="l">275</span><span class="d">what a learner's click does</span></div>
+    <div class="mod owns"><span class="f">assets.js</span><span class="l">646</span><span class="d">everything insertable, and the store</span></div>
+  </div></div>
+
+  <div class="grp"><h3>source, review and output</h3><div class="mods">
+    <div class="mod"><span class="f">source-stage.js</span><span class="l">3306</span><span class="d">the Source stage: one document per Product</span></div>
+    <div class="mod owns"><span class="f">source-link.js</span><span class="l">764</span><span class="d">copy that stays joined to where it came from</span></div>
+    <div class="mod"><span class="f">copy-editor.js</span><span class="l">800</span><span class="d">the Read view, and find &amp; replace</span></div>
+    <div class="mod owns"><span class="f">comments.js</span><span class="l">1180</span><span class="d">review without a server; the comment model</span></div>
+    <div class="mod"><span class="f">review-exchange.js</span><span class="l">224</span><span class="d">the round trip out to a reviewer and back</span></div>
+    <div class="mod"><span class="f">demo.js</span><span class="l">387</span><span class="d">the course as the learner will meet it</span></div>
+    <div class="mod"><span class="f">publish.js</span><span class="l">380</span><span class="d">what gets built, where it lands, what it records</span></div>
+    <div class="mod"><span class="f">product-rail.js</span><span class="l">426</span><span class="d">facts that follow a document across stages</span></div>
+  </div></div>
+
+  <div class="grp"><h3>the wiring itself</h3><div class="mods">
+    <div class="mod"><span class="f">kernel.js</span><span class="l">183</span><span class="d">how a module and the host reach each other</span></div>
+  </div></div>
+</section>
+
+<section>
+  <h2>What the tests enforce</h2>
+  <p class="lede">Three tiers, in order of preference: <code>require</code> the file &rarr;
+    <code>tests/_load.js</code> (a <code>node:vm</code> context, for files a require cannot reach)
+    &rarr; <code>tests/_editor.js</code> (boots the whole editor). Reading source text and slicing a
+    core back into life is below all three — it is what once made the harness forbid restructuring.</p>
+  <div class="gates">
+    <div class="gate"><div class="g">Every block has what it declares</div><div class="w">and no orphan pieces exist — checked both ways</div></div>
+    <div class="gate"><div class="g">Every module has a README row</div><div class="w">and every row a module</div></div>
+    <div class="gate"><div class="g">Split files keep their declared order</div><div class="w">directory, order.json, both pages, the exporter</div></div>
+    <div class="gate"><div class="g">The namespace has no loose ends</div><div class="w">no unmet need, no unbound call site, after a full boot</div></div>
+    <div class="gate"><div class="g">No orphaned call sites</div><div class="w">editor.js may not name what only a module declares</div></div>
+    <div class="gate"><div class="g">Every top-level entry has a role</div><div class="w">ships / optional / dev / meta / gitignored</div></div>
+    <div class="gate"><div class="g">Chrome tokens stay inside the DS</div><div class="w">ratcheted — the count may fall, not rise</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>Three things a green suite cannot see</h2>
+  <div class="warn">
+    <h3>Each of these shipped past 5,000+ passing assertions</h3>
+    <ul>
+      <li><strong>A relative URL that stops resolving when a file moves.</strong> A test that reads
+        CSS text cannot see a 404. Load the page in a browser and watch the network.</li>
+      <li><strong>A free identifier that only throws on one path.</strong> A moved region's functions
+        live inside <code>install()</code>, so a call site nobody rewired is invisible until that
+        path runs. The orphan gate exists for this.</li>
+      <li><strong>A <code>window.Verso*</code> global that is already taken.</strong> Nothing checks
+        globals. Grep for the name before you publish a new one.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  Written 2026-08-04, after the eight-phase restructure. Line counts drift; the shape does not. For per-module detail read
+  <code>src/editor/README.md</code>, for the rules read <code>CONTRIBUTING.md</code>, and for the
+  kernel's five rules read the header of <code>src/editor/kernel.js</code>. Every one of those is
+  closer to the code than this page is.
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById("tt");
+  btn.addEventListener("click", function () {
+    var dark = getComputedStyle(root).getPropertyValue("--ground").trim().indexOf("#17") === 0
+            || root.getAttribute("data-theme") === "dark";
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  var q = document.getElementById("q"), cnt = document.getElementById("cnt");
+  var mods = [].slice.call(document.querySelectorAll(".mod"));
+  var grps = [].slice.call(document.querySelectorAll(".grp"));
+  function apply() {
+    var t = q.value.trim().toLowerCase(), shown = 0;
+    mods.forEach(function (m) {
+      var hit = !t || m.textContent.toLowerCase().indexOf(t) !== -1;
+      m.hidden = !hit; if (hit) shown++;
+    });
+    grps.forEach(function (g) {
+      g.hidden = !g.querySelector(".mod:not([hidden])");
+    });
+    cnt.textContent = shown + " of " + mods.length + " modules";
+  }
+  q.addEventListener("input", apply);
+  apply();
+})();
+</script>
+</body>
+</html>

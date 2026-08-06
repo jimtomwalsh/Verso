@@ -1,0 +1,235 @@
+/* ---- Accordion / Tabs block (data-accordion) -------------------------------
+   render.js emits the AUTHOR view (all panels visible); runtime.js bindAccordion
+   collapses + wires it in demo + export. Panels stay visible by default so the
+   editor canvas (which does not run runtime.js) shows content open for editing,
+   and a JS-off shipped course degrades to all-content-shown. Tokens only.
+   Styled to the Card-Reveal visual standard: same per-mode solid fill (dark #2a2a2a
+   / light #fff), a faint selectable surface pattern (grid / dots / none) whose colour
+   the author can override, hover-lift + shadow, and a hairline rule between header and
+   panel (echoing the card title rule). All token-driven so it ships in SCORM and
+   tracks light/dark. */
+.acc { display: flex; flex-direction: column; gap: 10px; margin: var(--space-sm) 0; }
+/* per-mode fill, mirroring the card-reveal cards: switches on the learner light/dark
+   toggle so text stays readable in both themes. Defaults dark #2a2a2a / light #fff;
+   the --acc-fill-* layer is reserved for a future author fill control (like cards). */
+.course-root[data-mode="dark"] .acc { --acc-fill: var(--acc-fill-dark, #2a2a2a); }
+.course-root[data-mode="light"] .acc { --acc-fill: var(--acc-fill-light, #ffffff); }
+.acc__item {
+  position: relative; isolation: isolate; overflow: hidden;
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  background: var(--acc-fill, #2a2a2a);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+/* faint surface texture (card-reveal signature); behind header/panel. The pattern is
+   author-selected via data-pattern on the .acc root (default = grid) and its colour
+   via --tex-color (default = the theme hairline). Dots / none variants are below. */
+.acc__item::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+/* hover only (no focus-within — accordion panels hold editable text, and a lift
+   on focus would shift the canvas under the author's cursor while typing) */
+.acc__item:hover {
+  transform: translateY(-2px); border-color: var(--color-ink-soft);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
+}
+.acc__header {
+  position: relative; z-index: 1;
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 16px 18px; cursor: pointer; text-align: left; border: none;
+  font-family: var(--font-heading); font-weight: 700; font-size: 16px;
+  color: var(--color-ink); background: transparent;
+}
+.acc__title { flex: 1; }
+.acc__chev { flex: none; width: 16px; height: 16px; color: var(--color-accent); transition: transform 0.18s ease; }
+.acc__header[aria-expanded="true"] .acc__chev { transform: rotate(180deg); }
+/* rule-divider between header and open panel (echoes the card's title rule) */
+.acc__panel {
+  position: relative; z-index: 1; padding: 14px 18px 18px; font-family: var(--font-body);
+  border-top: 1px solid var(--color-hair);
+}
+.acc__panel[hidden], .acc__item[hidden] { display: none; }
+
+/* tabs variant — single card treatment (no grid): the whole block is one gradient
+   card with the tab strip on top and the panel body inside. */
+.acc--tabs {
+  gap: 0; position: relative; isolation: isolate; overflow: hidden;
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  background: var(--acc-fill, #2a2a2a);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+.acc--tabs::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.acc--tabs:hover {
+  transform: translateY(-2px); border-color: var(--color-ink-soft);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
+}
+.acc__tabs {
+  position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px;
+  padding: 0 10px; border-bottom: 1px solid var(--color-hair);
+}
+.acc__tab {
+  padding: 12px 16px; cursor: pointer; border: none; background: none; margin-bottom: -1px;
+  font-family: var(--font-heading); font-weight: 700; font-size: 15px;
+  color: var(--color-ink-soft); border-bottom: 2px solid transparent;
+}
+.acc__tab:hover { color: var(--color-ink); }
+.acc__tab.is-active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+.acc__body { position: relative; z-index: 1; }
+.acc--tabs .acc__panel { padding: 16px 18px; border-top: none; }
+@media (prefers-reduced-motion: reduce) {
+  .acc__chev { transition: none; }
+  .acc__item, .acc--tabs { transition: none; }
+}
+/* surface pattern variants (shared shape with card-reveal): dots swaps the grid for a
+   fine dotted field; none clears it. data-pattern is stamped on the .acc root by render. */
+.acc[data-pattern="dots"] .acc__item::before,
+.acc--tabs[data-pattern="dots"]::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.acc[data-pattern="none"] .acc__item::before,
+.acc--tabs[data-pattern="none"]::before { display: none; }
+
+/* FLAGSHIP "Sequence" block — process / timeline in one. Slice 1: Numbered · Vertical ·
+   Static. Token-driven (no bespoke colour): connector = hairline, node surface = card fill,
+   marker text = accent. Orientation/reveal/appearance land in later slices; the layout here
+   is the vertical spine + numbered nodes + rich per-step body (item.children). */
+.seq {
+  --seq-marker: 34px; --seq-gap: 22px;
+  display: flex; flex-direction: column; gap: var(--seq-gap);
+  margin: var(--space-sm) 0; position: relative; isolation: isolate; font-family: var(--font-body);
+}
+/* Surface texture (slice 4) — shared signature with accordion / card-reveal. Author-selected
+   via data-pattern (default grid) + --tex-color; sits behind the steps, which are lifted above.
+   Applies over any author fill from the universal appearance panel (applyBlockAppearance). */
+.seq::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  border-radius: inherit;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.seq[data-pattern="dots"]::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.seq[data-pattern="none"]::before { display: none; }
+.seq > .seq__step, .seq > .seq__wizard { position: relative; z-index: 1; }
+.course-root[data-mode="dark"] .seq { --seq-node: var(--seq-node-dark, #2a2a2a); }
+.course-root[data-mode="light"] .seq { --seq-node: var(--seq-node-light, #ffffff); }
+.seq__step {
+  position: relative; display: grid;
+  grid-template-columns: var(--seq-marker) 1fr; column-gap: 18px; align-items: start;
+}
+/* connector line runs down the marker rail, behind the nodes, joining each step to the next */
+.seq__step:not(:last-child)::before {
+  content: ""; position: absolute; z-index: 0;
+  left: calc(var(--seq-marker) / 2); transform: translateX(-1px);
+  top: var(--seq-marker); bottom: calc(-1 * var(--seq-gap)); width: 2px;
+  background: var(--seq-connector, var(--color-hair));
+}
+.seq__marker {
+  position: relative; z-index: 1;
+  width: var(--seq-marker); height: var(--seq-marker); border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-heading); font-weight: 700; font-size: 15px; line-height: 1;
+  color: var(--seq-node-text, var(--color-accent));
+  background: var(--seq-node, #2a2a2a);
+  border: 2px solid var(--seq-connector, var(--color-hair));
+}
+/* Plain spine: no number/date label, just a small node dot centred on the rail. An icon
+   marker keeps the full node size, so the dot shrink only applies to non-icon plain markers. */
+.seq[data-seq-spine="plain"] .seq__marker:not(.seq__marker--icon) {
+  width: 12px; height: 12px; margin: calc((var(--seq-marker) - 12px) / 2);
+  border-width: 0; background: var(--seq-connector, var(--color-hair));
+  color: transparent;
+}
+/* Icon marker (slice 5): the per-step icon fills the node; keep the circle border + surface.
+   An inlined SVG recolours to a token (mono -> ink); a raster icon is contained. */
+.seq__marker--icon { padding: 0; overflow: hidden; }
+.seq__marker--icon svg, .seq__marker--icon .seq__icon-img {
+  width: 62%; height: 62%; display: block;
+}
+.seq__marker--icon .seq__icon-img { object-fit: contain; }
+/* Date caption beside an icon in Dated spine (the icon took the marker slot) */
+.seq__date {
+  font-family: var(--font-heading); font-weight: 700; font-size: 13px;
+  color: var(--color-accent); letter-spacing: 0.02em; margin-bottom: 4px;
+}
+.seq__body { min-width: 0; padding-bottom: 2px; }
+.seq__title {
+  font-family: var(--font-heading); font-weight: 700; font-size: 16px;
+  color: var(--color-ink); margin-bottom: 8px;
+}
+.seq__content > * { margin-top: 0; }
+.seq__empty, .seq__step-empty {
+  color: var(--color-muted); font-style: italic; font-size: 13px;
+}
+/* Horizontal orientation (slice 2): steps flow left-to-right, fit/wrap — NOT a sideways
+   filmstrip (overflow-x is reachability only). Marker sits above a centred body; the
+   connector runs horizontally from each marker to the next. Too-long sequence -> vertical. */
+.seq[data-seq-orient="horizontal"] {
+  flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+  gap: var(--seq-gap); overflow-x: auto;
+}
+.seq[data-seq-orient="horizontal"] .seq__step {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  flex: 1 1 160px; min-width: 150px; row-gap: 12px;
+}
+.seq[data-seq-orient="horizontal"] .seq__step:not(:last-child)::before {
+  top: calc(var(--seq-marker) / 2); transform: translateY(-1px);
+  left: 50%; right: auto; bottom: auto;
+  width: calc(100% + var(--seq-gap)); height: 2px;
+}
+.seq[data-seq-orient="horizontal"] .seq__body { min-width: 0; width: 100%; }
+
+/* Reveal engine (slice 3). Behaviour is DOM-bound in runtime.js (bindSequence); CSS owns the
+   visuals. All hiding is class-driven by the runtime, never a bare selector — so the EDITOR
+   canvas (which never runs the runtime) always shows every step. */
+/* Scroll: the runtime ARMS the block (.is-armed) then reveals each step (.is-in) on viewport
+   entry; the passed step's connector fills with the accent (progress-fill along the spine).
+   Hiding is gated on .is-armed (runtime-only) so the editor canvas always shows every step. */
+.seq.is-armed .seq__step {
+  opacity: 0; transform: translateY(14px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.seq.is-armed[data-seq-orient="horizontal"] .seq__step { transform: translateY(0) scale(0.96); }
+.seq.is-armed .seq__step.is-in { opacity: 1; transform: none; }
+.seq.is-armed .seq__step:not(:last-child)::before { transition: background 0.5s ease; }
+.seq.is-armed .seq__step.is-in:not(:last-child)::before { background: var(--seq-fill, var(--color-accent)); }
+/* Click wizard: the runtime hides steps after the active index (.is-future); the ‹ counter ›
+   control shows only in click mode. */
+.seq__wizard { display: none; }
+.seq[data-seq-reveal="click"] .seq__wizard {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  margin-top: 20px; font-family: var(--font-heading);
+}
+.seq[data-seq-reveal="click"] .seq__step.is-future { display: none; }
+.seq__wizard-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 999px; cursor: pointer;
+  color: var(--color-ink); background: var(--color-bg);
+  border: 1px solid var(--color-ink-soft);
+  transition: border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+.seq__wizard-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.seq__wizard-btn:disabled { opacity: 0.35; cursor: default; }
+.seq__wizard-btn .course-nav__arrow { width: 18px; height: 18px; }
+.seq__counter { color: var(--color-muted); font-weight: 700; font-size: 14px; min-width: 48px; text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  .seq__step { transition: none; }
+  /* reduced motion: never hold a step hidden waiting on a reveal (runtime already skips arming,
+     this is belt-and-braces if a block is armed) — show them all statically */
+  .seq.is-armed .seq__step { opacity: 1; transform: none; transition: none; }
+  .seq.is-armed .seq__step:not(:last-child)::before { transition: none; }
+}

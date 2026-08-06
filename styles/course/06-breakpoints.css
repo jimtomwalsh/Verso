@@ -1,0 +1,38 @@
+/* ==================== responsive breakpoints (M6) ====================
+   Explicit, Captivate-style — keyed off data-bp on the course root (set by the
+   editor per active breakpoint; set by width thresholds at export). Base rules
+   above are desktop; these override for tablet + mobile. */
+
+.course-root[data-bp="tablet"] .page { padding-left: var(--page-pad-x-tablet, 6%); padding-right: var(--page-pad-x-tablet, 6%); padding-top: 40px; padding-bottom: 40px; }
+.course-root[data-bp="tablet"] .page-title { font-size: 28px; }
+.course-root[data-bp="tablet"] .card-grid { gap: var(--space-sm); }
+.course-root[data-bp="tablet"] .chapter-card { padding: var(--space-md); }
+.course-root[data-bp="tablet"] .body-copy { font-size: 16px; }
+
+.course-root[data-bp="mobile"] .page { padding-left: var(--page-pad-x-mobile, 5%); padding-right: var(--page-pad-x-mobile, 5%); padding-top: 32px; padding-bottom: 32px; }
+.course-root[data-bp="mobile"] .page-title { font-size: 24px; margin-bottom: var(--space-md); }
+.course-root[data-bp="mobile"] .card-grid { grid-template-columns: 1fr; gap: var(--space-sm); }
+.course-root[data-bp="mobile"] .chapter-card { padding: var(--space-md); }
+.course-root[data-bp="mobile"] .chapter-card__title { font-size: 19px; }
+.course-root[data-bp="mobile"] .body-copy { font-size: 15px; }
+
+/* Layout Columns System */
+.layout-columns {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+  width: 100%;
+}
+.layout-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* GG: 0 by default -> block Space top/bottom margins drive spacing (render.js
+     sets an inline gap only when block.rowGap is authored). */
+  gap: 0;
+  min-width: 0;
+}
+.course-root[data-bp="mobile"] .layout-columns {
+  flex-direction: column;
+  gap: 16px;
+}

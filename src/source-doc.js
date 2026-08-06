@@ -32,7 +32,10 @@
   // and is not itself markable; its image children keep their own keys + marks (nesting must not
   // change a key, or object marks orphan). Walkers that resolve a node by key descend into rows.
   var NODE_TYPES = ["heading", "paragraph", "list", "table", "image", "callout", "row"];
-  var MARK_TYPES = ["link", "alternate", "comment"];
+  // uio-S-C06 added "restricted": a passage whose distribution is controlled. It is the SOURCE-side
+// surface of uio-F07, not a decoration — the level it reads is resolved down F07's ladder, and the
+// mark may carry its own `classificationId` when the passage is tighter than the document it sits in.
+var MARK_TYPES = ["link", "alternate", "comment", "restricted"];
 
   // ---- ids -----------------------------------------------------------------
   // Deterministic within a model instance (a monotonic counter on the model), so key
@@ -273,7 +276,7 @@
   // uio-S-C01 (SRC-06): the live per-type counts the labelled mark filter carries ("All 6 / Alt 1 /
   // Linked 2 / Notes 2"). One pass over the marks, so the segments can never disagree with the list.
   function markCounts(model) {
-    var out = { all: 0, alternate: 0, link: 0, comment: 0 };
+    var out = { all: 0, alternate: 0, link: 0, comment: 0, restricted: 0 };
     (model && model.marks || []).forEach(function (m) {
       out.all++;
       if (out[m.type] != null) out[m.type]++;
@@ -311,6 +314,13 @@
       anchor: a.len == null ? { nodeKey: a.nodeKey } : { nodeKey: a.nodeKey, start: a.start, len: a.len },
       variant: spec.variant || "",
       tag: spec.tag != null ? spec.tag : "", // what an alternate is "appropriate for" (detail/doc-type/purpose)
+      // uio-S-C06: a restricted mark's OWN classification, when the passage is tighter than the
+      // document around it. Absent means it simply inherits, which is the ordinary case.
+      classificationId: spec.classificationId || null,
+      // Sign-off, recorded as a request rather than an approval: who asked, when, and against which
+      // level. The approver themselves comes from uio-doc-roles-and-signoff, which is unbuilt, so
+      // this states a pending fact and never claims one has been given.
+      signoff: spec.signoff ? clone(spec.signoff) : null,
       baseText: null,
       alt: spec.alt != null ? spec.alt : null,
       comments: spec.comments ? clone(spec.comments) : [],
@@ -331,6 +341,162 @@
     return m;
   }
   function isObjectMark(m) { return m && m.anchor && m.anchor.len == null; }
+
+  // ---- uio-S-M04 (SRC-10): what condition a section is in --------------------
+  // The outline said where you were and nothing about what was there. Badges counted HEADINGS,
+  // which is rarely what a reviewer needs; the questions the review loop actually asks are which
+  // sections carry open comments, stale alternates, or broken anchors.
+  //
+  // Returns headingKey -> { total, open, stale, broken, restricted } for every heading that owns
+  // at least one mark. A heading with nothing gets no entry, so a row draws a dot only when there
+  // is something to say — silence over noise, the same rule the cross-stage facts follow.
+  //
+  // `open` counts comment marks that are not resolved. Resolution lives on the topic's comment
+  // threads, which this file does not own, so the caller passes an isResolved(mark) predicate; a
+  // caller that has no thread data omits it and every comment counts as open.
+  function marksByHeading(model, isResolved) {
+    var out = {};
+    (model && model.marks || []).forEach(function (m) {
+      if (!m || !m.anchor) return;
+      var hk = headingKeyForNode(model, m.anchor.nodeKey);
+      if (!hk) return;
+      var e = out[hk] || (out[hk] = { total: 0, open: 0, stale: 0, broken: 0, restricted: 0 });
+      e.total++;
+      if (m.broken) e.broken++;
+      else if (m.stale) e.stale++;
+      if (m.type === "restricted") e.restricted++;
+      if (m.type === "comment" && !(isResolved && isResolved(m))) e.open++;
+    });
+    return out;
+  }
+  // One dot per row, and its tone is the MOST URGENT thing in that section — a row cannot wear
+  // four dots without becoming a chart. Broken beats stale beats an open comment beats mere
+  // presence, because that is the order a reviewer would deal with them in.
+  function headingMarkDot(stat) {
+    if (!stat || !stat.total) return null;
+    var bits = [];
+    if (stat.broken) bits.push(stat.broken + " broken");
+    if (stat.stale) bits.push(stat.stale + " stale");
+    if (stat.open) bits.push(stat.open + " open comment" + (stat.open === 1 ? "" : "s"));
+    if (stat.restricted) bits.push(stat.restricted + " restricted");
+    if (!bits.length) bits.push(stat.total + " mark" + (stat.total === 1 ? "" : "s"));
+    var tone = stat.broken ? "broken" : stat.stale ? "stale" : stat.open ? "open" : "quiet";
+    return { tone: tone, title: bits.join(" · "), count: stat.total };
+  }
+
+  // ---- uio-S-A01 (SRC-03/09): the annotation gutter ---------------------------
+  // A stub is one mark, stated the way it reads in the margin: what KIND it is and its one
+  // salient fact, then a line of the passage so you can tell which mark it is without looking
+  // back at the prose. Two lines is the whole budget — a stub that says more is a card.
+  //
+  // Everything type-specific that this file cannot know (whether a comment thread is resolved,
+  // how many documents a linked passage reaches, what a restricted passage classifies as) comes
+  // in through opts.meta, the same predicate-injection marksByHeading already uses for exactly
+  // this reason. This file shapes the answer; the editor supplies the facts.
+  function markStub(model, m, opts) {
+    if (!m || !m.anchor) return null;
+    // MARK_TYPE_META is the one table (markMeta reads it too). Looked up DIRECTLY rather than
+    // through markMeta, because markMeta's fallback labels an unknown type "Mark" and paints it
+    // as an alternate — fine for a row that already exists, wrong for deciding whether to draw
+    // one at all. An unmapped type draws nothing rather than being mislabelled, which is the same
+    // call S-C06 made when it turned the paint pass's ternary default into a table.
+    var tm = MARK_TYPE_META[m.type];
+    if (!tm) return null;
+    var label = tm.label;
+    var meta = (opts && typeof opts.meta === "function") ? opts.meta(m) : "";
+    var snippet = anchorText(model, m.anchor) || "";
+    snippet = snippet.replace(/\s+/g, " ").trim();
+    var CAP = 64;
+    if (snippet.length > CAP) snippet = snippet.slice(0, CAP - 1).replace(/\s+\S*$/, "") + "…";
+    // Tone is the mark's STATE and follows the same precedence the outline dots use, so a
+    // reviewer reads one order of urgency everywhere in the stage.
+    var tone = m.broken ? "broken" : m.stale ? "stale" : (m.type === "comment" && !(opts && opts.resolved && opts.resolved(m))) ? "open" : "quiet";
+    // Type and meta stay SEPARATE, because the rail's mark row already states them as two things:
+    // the type is a coloured eyebrow, the meta is tertiary ink beside it. A stub that joined them
+    // into one coloured string would put "1 open" in the comment hue and give the same object two
+    // anatomies a column apart. `title` is the joined form, for the tooltip only.
+    return {
+      id: m.id,
+      type: m.type,
+      label: label,
+      cls: tm.cls,
+      meta: meta || "",
+      title: meta ? (label + " · " + meta) : label,
+      sub: snippet || (isObjectMark(m) ? "Whole block" : ""),
+      tone: tone,
+      broken: !!m.broken
+    };
+  }
+  function markStubs(model, opts) {
+    return ((model && model.marks) || []).map(function (m) { return markStub(model, m, opts); }).filter(Boolean);
+  }
+  // Place the stubs down the margin. Each one WANTS to sit at its passage's height; two marks on
+  // adjacent lines want the same 40 pixels, so the later one is pushed down until it clears.
+  //
+  // The rule is deliberately one-directional: a stub never moves UP to fill a gap, because then a
+  // mark near the top of the document would drift away from the line it annotates to tidy the
+  // column. Being a little low is honest; being neatly packed is not. Input order decides who wins
+  // a collision, so callers sort by `want` first and the top-most mark keeps its true position.
+  function stackStubs(items, gap) {
+    var g = gap == null ? 8 : gap;
+    var out = [], floor = null;
+    (items || []).forEach(function (it) {
+      var top = Math.max(0, it.want || 0);
+      if (floor !== null && top < floor) top = floor;
+      out.push({ id: it.id, top: top });
+      floor = top + (it.height || 0) + g;
+    });
+    return out;
+  }
+
+  // ---- uio-S-C06: restriction, as a fact about a passage --------------------
+  // A restricted mark states what the passage resolves to and WHERE that came from. It does not
+  // resolve anything itself: the level comes down uio-F07's ladder, which lives in the editor
+  // because the Product and document rungs do. So the caller hands the resolution in and this
+  // file only shapes the answer — the same split every other pure/chrome pair here uses.
+  //   res: a resolveScoped result for the classification property, resolved AT the mark
+  //   levels: the deployment's level set (VersoClassification-shaped)
+  // Returns null when nothing resolves, so a card can decline to draw rather than draw a blank.
+  function restrictionView(m, res, levels, rules) {
+    if (!m || m.type !== "restricted" || !res || !res.found) return null;
+    var byId = {};
+    (levels || []).forEach(function (l) { byId[l.id] = l; });
+    var lvl = byId[res.value] || null;
+    return {
+      markId: m.id,
+      levelId: res.value,
+      levelName: lvl ? lvl.name : String(res.value || ""),
+      // The two things the card leads with: what applies, and whose decision it was.
+      inherited: !res.overridden,
+      fromLabel: res.scopeLabel || "",
+      // The rule set as ROWS, in the fixed order uio-F07 declares, so Source states it exactly as
+      // the inspector does. `rules` is VersoClassification.ruleSet's answer.
+      rows: rules ? [
+        { key: "external", label: "External", value: rules.external === "allowed" ? "May leave the organisation" : "Withheld from external packages" },
+        { key: "internal", label: "Internal", value: (rules.internal && rules.internal.length) ? "Readable internally" : "Readable only by named people" },
+        { key: "editCapability", label: "Editing", value: rules.editCapability ? ("Needs " + rules.editCapability) : "Anyone who may edit" },
+        { key: "approverCapability", label: "Sign-off", value: rules.approverCapability ? ("Needs " + rules.approverCapability) : "Not required" }
+      ] : [],
+      // Sign-off is a REQUEST, never an approval: state who asked and when, or that nobody has.
+      signoffNeeded: !!(rules && rules.approverCapability),
+      signoff: m.signoff || null
+    };
+  }
+  // Record a sign-off request against a mark. Pure but for the caller's clock and identity, both
+  // injected, so this round-trips in a test. Re-requesting is a no-op rather than a second record —
+  // the question "has anyone asked?" has one answer.
+  function requestSignoff(m, who, whenIso, levelId) {
+    if (!m || m.type !== "restricted") return null;
+    if (m.signoff && m.signoff.requestedAt) return m.signoff;
+    m.signoff = { requestedBy: who || "", requestedAt: whenIso || "", levelId: levelId || m.classificationId || null };
+    return m.signoff;
+  }
+  // Every restricted mark in a document, as the parts uio-F07's documentDisposition takes. The
+  // Publish withholding ticket consumes this; nothing here decides anything about a package.
+  function restrictedParts(model, resolveFor) {
+    return (model && model.marks || []).filter(function (m) { return m.type === "restricted"; })
+      .map(function (m) { return { id: m.id, levelId: resolveFor ? resolveFor(m) : m.classificationId }; });
+  }
 
   // ---- source-link 05: format-split planner (pure) --------------------------
   // Split a link range into one block-spec per CONTIGUOUS same-format run, in document order, so a
@@ -682,12 +848,16 @@
     return { dot: "green", label: "In sync" };
   }
   // The permanent-id + type metadata a mark carries (spec 1.2): its distinct visual class and label.
+  // ONE table. The rail's mark rows and uio-S-A01's margin stubs both read it, so the two lists of
+  // the same marks cannot end up calling a type by two names or painting it two colours.
+  var MARK_TYPE_META = {
+    link: { cls: "sd-mark-link", label: "Linked" },
+    alternate: { cls: "sd-mark-alt", label: "Alternate" },
+    comment: { cls: "sd-mark-comment", label: "Comment" },
+    restricted: { cls: "sd-mark-restricted", label: "Restricted" }
+  };
   function markMeta(m) {
-    return {
-      link: { cls: "sd-mark-link", label: "Linked" },
-      alternate: { cls: "sd-mark-alt", label: "Alternate" },
-      comment: { cls: "sd-mark-comment", label: "Comment" }
-    }[m.type] || { cls: "sd-mark-alt", label: "Mark" };
+    return MARK_TYPE_META[m.type] || { cls: "sd-mark-alt", label: "Mark" };
   }
   // The alternate marks anchored on exactly a given span (spec 3.2: 0..N tagged alternates).
   function alternatesFor(model, nodeKey, start, len) {
@@ -1052,6 +1222,80 @@
   // The persisted form is the authored content only (nodes + marks + history + _seq); the
   // undo/redo stacks are session state, never stored, so setDoc round-trips cleanly and the
   // pure-render invariant holds (nothing editor-only leaks into stored data).
+  // ---- uio-W17: a source document as BLOCK-ADDRESSABLE ROWS -----------------
+  //
+  // THE PROBLEM THIS CLOSES. `saveLibrary()` serialises the ENTIRE LibraryStore as one JSON blob on
+  // every write, so two authors in two DIFFERENT source documents overwrite each other -- each save
+  // rewrites everything. The collaboration suite (block locking model B, presence, the lease reaper,
+  // the unacked buffer) is written against block-addressable design documents and mentions
+  // LibraryStore nowhere, and the workspace model deliberately routes MORE concurrent authors into
+  // source documents. The gap gets worse the moment it ships.
+  //
+  // WHY IT IS CHEAP. Addressability already exists: every node carries a stable `key`, and every
+  // range mark anchors to those keys. Only the persistence GRANULARITY is wrong. So this is a
+  // shape change and nothing else -- a source document presented as the block store's own doc shape,
+  // one row per node, keyed by the key the node already had.
+  //
+  // The mapping is deliberately boring. One page, whose blocks are the nodes in order; the node's
+  // `key` becomes the block `id`, because inventing a second identifier for a thing that already has
+  // one is how two ids drift apart. Everything that is not a node -- version, seq, marks, history --
+  // is document metadata, so a mark's anchors travel with the document rather than with any one row
+  // it points into.
+  //
+  // Model-B locking, presence, the reaper and the unacked buffer then cover source documents with
+  // NO NEW MERGE MODEL: they operate on block rows, and these are block rows.
+  function toBlockDoc(model) {
+    var m = model || {};
+    var meta = {};
+    Object.keys(m).forEach(function (k) {
+      if (k === "nodes" || k === "undo" || k === "redo") return;   // rows, and two session-only stacks
+      meta[k] = clone(m[k]);
+    });
+    meta.kind = "source";      // what this doc IS, so a reader never has to infer it from its shape
+    return {
+      meta: meta,
+      pages: [{ id: "source", blocks: (m.nodes || []).map(function (n) {
+        var b = clone(n);
+        b.id = n.key;          // the key it already had; never a second identifier
+        return b;
+      }) }]
+    };
+  }
+  // The inverse. A doc the block store materialised comes back as the model the editor holds, with
+  // the node keys it went in with -- which is what keeps every mark anchor pointing at the same node
+  // across the storage change.
+  function fromBlockDoc(doc) {
+    var d = doc || {};
+    var meta = d.meta || {};
+    var model = makeModel();
+    Object.keys(meta).forEach(function (k) {
+      if (k === "kind") return;
+      model[k] = clone(meta[k]);
+    });
+    var page = (d.pages || [])[0] || { blocks: [] };
+    model.nodes = (page.blocks || []).map(function (b) {
+      var n = clone(b);
+      // THE ROW ID IS THE IDENTITY, always -- not just when the content happens to have lost its
+      // key. `applyChange` replaces a block's content wholesale, so a caller that writes a patch
+      // without the key strips it from the row. Falling back to ensureKeys there would MINT A NEW
+      // KEY for a node that already had one, and every range mark anchored to the old key would
+      // resolve to nothing. Found by round-tripping a marked document through the real store.
+      if (n.id != null) n.key = n.id;
+      delete n.id;
+      return n;
+    });
+    model.marks = model.marks || [];
+    model.history = model.history || [];
+    model.undo = []; model.redo = [];    // session state, never persisted
+    ensureKeys(model);
+    return model;
+  }
+  // Is this materialised doc a source document? The store holds design documents and source
+  // documents in the same tables, so the reader asks rather than guesses.
+  function isBlockSourceDoc(doc) {
+    return !!(doc && doc.meta && doc.meta.kind === "source");
+  }
+
   function toJSON(model) {
     return { version: model.version || 1, _seq: model._seq || 0, nodes: clone(model.nodes), marks: clone(model.marks), history: clone(model.history || []) };
   }
@@ -1601,13 +1845,14 @@
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, markStub: markStub, markStubs: markStubs, stackStubs: stackStubs, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
     splitNode: splitNode, setNodeType: setNodeType, nodesInAnchor: nodesInAnchor,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
+    toBlockDoc: toBlockDoc, fromBlockDoc: fromBlockDoc, isBlockSourceDoc: isBlockSourceDoc,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
     blocksFromText: blocksFromText, fromSections: fromSections, parseInline: parseInline,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
@@ -1621,7 +1866,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, restrictionView: restrictionView, requestSignoff: requestSignoff, restrictedParts: restrictedParts, marksByHeading: marksByHeading, headingMarkDot: headingMarkDot, markStub: markStub, markStubs: markStubs, stackStubs: stackStubs, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
@@ -1639,6 +1884,8 @@
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toMarkdown: toMarkdown,
     toJSON: toJSON, fromJSON: fromJSON,
+    // uio-W17: the same document, in the block store's own shape.
+    toBlockDoc: toBlockDoc, fromBlockDoc: fromBlockDoc, isBlockSourceDoc: isBlockSourceDoc,
     _pure: _pure
   };
 

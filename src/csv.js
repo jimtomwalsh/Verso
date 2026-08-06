@@ -20,6 +20,16 @@
  * / components.js / index.html.
  */
 (function () {
+  // arch-P2 (the test seam): in the browser this binds to the REAL window, so every
+  // `window.X = ...` below publishes globally exactly as it did before -- no behaviour change.
+  // Under `require` in node there is no window, so it binds to a local stand-in and the footer
+  // hands that same namespace to module.exports. The file's interface becomes the test surface,
+  // instead of the suite string-slicing its source text back into life.
+  // The node stand-in inherits its no-op listeners from a prototype, so `module.exports` carries
+  // this file's OWN published names and nothing else.
+  var window = (typeof globalThis !== "undefined" && globalThis.window)
+    || Object.create({ addEventListener: function () {}, removeEventListener: function () {} });
+
   "use strict";
 
   // --- RFC 4180-ish CSV parser (handles quotes, escaped "", commas, CRLF) ----
@@ -453,5 +463,14 @@
   // expose the pure pieces + the end-to-end import for headless testing
   window.CSVBind = { parseCSV: parseCSV, buildRecords: buildRecords, recordToSlots: recordToSlots, findTargetGrid: findTargetGrid, fieldMatchesSlot: fieldMatchesSlot, importText: showMappingDialog };
 
-  window.Editor.registerPipelineButton("Import CSV", pick, false, { direction: "import" }); // uio-P-C05: inbound -> the Source stage's Import menu
+  // Needs a live editor, so it is skipped when the file is loaded on its own (arch-P2's node
+  // test seam). The pure CSV parsing/binding above is unaffected.
+  if (window.Editor && window.Editor.registerPipelineButton) {
+    window.Editor.registerPipelineButton("Import CSV", pick, false, { direction: "import" }); // uio-P-C05: inbound -> the Source stage's Import menu
+  }
+
+  // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --
+  // exactly what it publishes and nothing else. In the browser `module` is undefined, so this
+  // line does nothing at all.
+  if (typeof module !== "undefined" && module.exports) module.exports = window;
 })();

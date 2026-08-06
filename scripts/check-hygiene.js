@@ -9,6 +9,11 @@
  * hardcoded personal filesystem paths, secrets, external CDN <script> loads in shipping
  * HTML, or committed course-content data files.
  *
+ * It also enforces the repository boundary: every top-level entry must carry a declared
+ * role in the ROLES table below, which mirrors the table in README.md. A new top-level
+ * file or folder fails until it is classified, and nothing under the gitignored role may
+ * be staged. Runtime dependencies are rejected the same way.
+ *
  * Pure Node, no dependencies (matches the app's constraints). Runs in CI (via the test
  * suite) and locally (via the pre-commit hook + `node tests/run.js`).
  *
@@ -46,6 +51,40 @@ var TEXT = /\.(?:js|mjs|jsx|ts|css|html?|md|json|ya?ml|swift|sh|command|csv|txt)
 // Skip this control file and the test suite (both legitimately contain the patterns).
 var SKIP = /^(?:scripts\/check-hygiene\.js|tests\/run\.js)$/;
 
+// ---- Repository boundary -------------------------------------------------
+// One declared role per top-level entry. Mirrors the table in README.md; keep the two
+// in step. Directories carry a trailing slash. Adding an entry here is a deliberate act:
+// state which role it belongs to and why in the PR.
+var ROLES = {
+  // The product. Present in every install; the app runs from these alone.
+  ships: ["index.html", "styles/", "src/", "export/", "assets/", "fonts/",
+          "serve.command", "course_schema_template.csv"],
+  // Real surfaces for one posture each. The app runs without them.
+  optional: ["server/", "desktop/"],
+  // Authoring-time and CI material. Never loaded by the running app.
+  // serve-server.command is dev, not ships: it starts the Node backend so the server-mode
+  // surfaces are reachable without IIS. serve.command is a plain static server and ships.
+  dev: ["tools/", "scripts/", "tests/", "design-system/", "docs/", "viewer/",
+        "kit.html", "kit-gallery.js", "serve-server.command", ".github/"],
+  // Repository documentation and the manifest.
+  meta: ["README.md", "CONTRIBUTING.md", "LICENSE", "NOTICE", "SECURITY.md",
+         "THIRD-PARTY-NOTICES.md", "SCHEMA-TEMPLATE-GUIDE.md", "roadmap.html",
+         "package.json", ".gitignore"],
+  // Working material — local only, must never be staged.
+  ignored: ["workbench/"],
+};
+
+function declared() {
+  var m = Object.create(null);
+  Object.keys(ROLES).forEach(function (role) {
+    ROLES[role].forEach(function (entry) { m[entry] = role; });
+  });
+  return m;
+}
+
+// The app is dependency-free: package.json may declare no third-party packages.
+var DEP_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+
 function tracked() {
   var r = cp.spawnSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" });
   if (r.status !== 0) { console.error("check-hygiene: `git ls-files` failed"); process.exit(2); }
@@ -71,6 +110,48 @@ files.forEach(function (f) {
 });
 
 function lineOf(txt, idx) { return txt.slice(0, idx).split("\n").length; }
+
+// ---- Repository boundary: every top-level entry has a declared role ------
+var ROLE_OF = declared();
+var seen = Object.create(null);
+
+files.forEach(function (f) {
+  var i = f.indexOf("/");
+  var top = i === -1 ? f : f.slice(0, i + 1);
+  if (seen[top]) return;
+  seen[top] = true;
+  var role = ROLE_OF[top];
+  if (!role) {
+    violations.push({ file: f, group: "undeclared top-level entry",
+      match: top + " — classify it in ROLES (scripts/check-hygiene.js) and the README boundary table" });
+  } else if (role === "ignored") {
+    violations.push({ file: f, group: "staged working material",
+      match: top + " — this role is gitignored and must stay local" });
+  }
+});
+
+// A declared entry that no longer exists means the table has drifted from the tree.
+Object.keys(ROLE_OF).forEach(function (entry) {
+  if (ROLE_OF[entry] === "ignored") return;   // gitignored by design; never tracked
+  if (!seen[entry]) {
+    violations.push({ file: entry, group: "stale boundary entry",
+      match: entry + " — declared in ROLES but no tracked file lives there" });
+  }
+});
+
+// ---- Zero runtime dependencies ------------------------------------------
+try {
+  var pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  DEP_FIELDS.forEach(function (field) {
+    var names = Object.keys(pkg[field] || {});
+    if (names.length) {
+      violations.push({ file: "package.json", group: "third-party dependency",
+        match: field + ": " + names.join(", ") + " — Verso ships with none" });
+    }
+  });
+} catch (e) {
+  violations.push({ file: "package.json", group: "missing or unreadable manifest", match: String(e.message) });
+}
 
 if (violations.length) {
   console.error("\nHYGIENE GATE FAILED — " + violations.length + " violation(s):\n");

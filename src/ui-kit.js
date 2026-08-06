@@ -108,7 +108,55 @@
     // unlike SegmentedControl's one-of-N). `disabled` reads as a permanent baseline.
     toggleChipClass: function (active, disabled) {
       return "vds-chip" + (active ? " is-on" : "") + (disabled ? " is-disabled" : "");
+    },
+    // uio-W02: a document's type, resolved to the ONE glyph vocabulary below. An unknown or
+    // missing type reads as a course rather than drawing nothing, so a document is never a
+    // blank well.
+    docType: function (type) {
+      return Object.prototype.hasOwnProperty.call(DOCUMENT_TYPES, type) ? type : "reflow";
+    },
+    // The open-state label. A FACT about the document ("it is already open, over there"), which is
+    // why it is plain text and never a chip -- and why an unopened document says nothing at all
+    // rather than "Closed", which would be noise on every row in the list.
+    openStateLabel: function (openIn) {
+      if (openIn === "edit") return "Open in Edit";
+      if (openIn === "source") return "Open in Source";
+      return null;
+    },
+    // Compact relative time for a LIST row. formatRelativeTime's long form ("11 months ago") is
+    // 75-85px at 11px Inter and would ellipsise in every row of a 64px column, so a row gets the
+    // short form and keeps the long phrase as its tooltip. Cards have the room and keep the long
+    // form. Pure, and deliberately the same thresholds as the long formatter so the two never
+    // disagree about which unit a moment falls in.
+    compactRelativeTime: function (ts, now) {
+      if (typeof ts !== "number" || !isFinite(ts)) return "—";
+      var s = Math.floor((now - ts) / 1000);
+      if (s < 0) s = 0;
+      if (s < 45) return "just now";
+      var mins = Math.floor(s / 60);
+      if (mins < 60) return mins + "m";
+      var hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + "h";
+      var days = Math.floor(hrs / 24);
+      if (days < 7) return days + "d";
+      var wks = Math.floor(days / 7);
+      if (wks < 5) return wks + "w";
+      var mos = Math.floor(days / 30);
+      if (mos < 12) return mos + "mo";
+      return Math.floor(days / 365) + "y";
     }
+  };
+
+  // uio-W02: THE document-type vocabulary. One definition, consumed by the top-bar DocumentTab and
+  // by every document list, so a glyph cannot come to mean one thing in a strip and another in a
+  // list. Source documents get the accent-quiet well; design documents the neutral input well --
+  // that single colour difference is what makes written material legible from laid-out material
+  // without reading a word. Contract: design-system/components/browser/DocumentRow.d.ts.
+  var DOCUMENT_TYPES = {
+    source: { icon: "book-open", label: "Source", well: "source" },
+    reflow: { icon: "layers", label: "Course", well: "design" },
+    frame: { icon: "monitor", label: "Presentation", well: "design" },
+    paged: { icon: "file-text", label: "Guide", well: "design" }
   };
 
   // ==========================================================================
@@ -188,7 +236,13 @@
     if (props.multiline) {
       el = h("textarea", "vds-textfield__input"); el.rows = props.rows || 3;
     } else {
-      el = h("input", "vds-textfield__input"); el.type = "text";
+      // TextFieldProps extends InputHTMLAttributes, so `type` and `autocomplete` are part of
+      // the contract -- this factory just never forwarded them, which is why the sign-in
+      // surface (platform-pivot 19) had to hand-roll a password field instead of using the
+      // canonical control. Forwarded here rather than worked around at the call site.
+      el = h("input", "vds-textfield__input"); el.type = props.type || "text";
+      if (props.autocomplete) el.autocomplete = props.autocomplete;
+      if (props.name) el.name = props.name;
     }
     el.spellcheck = false;
     el.placeholder = props.placeholder || "";
@@ -425,6 +479,10 @@
   function DocumentTab(props) {
     props = props || {};
     var tab = h("div", "vds-doctab" + (props.active ? " is-active" : ""));
+    // uio-W10: the tab states its document TYPE, the same way DocumentRow does. Source and Edit own
+    // separate strips holding one type each, and a `type` prop that every caller passed but nothing
+    // rendered left that contract with no expression in the DOM at all.
+    if (props.type) tab.setAttribute("data-doc-type", props.type);
     // tab-doctype-glyph: a leading glyph naming the document type (course / presentation /
     // paged), so a Product's course + one-pager + deck stay distinguishable by shape.
     if (props.icon) { var g = h("span", "vds-doctab__glyph"); g.innerHTML = iconSvg(props.icon); if (props.typeLabel) { g.title = props.typeLabel; g.setAttribute("aria-label", props.typeLabel); } tab.appendChild(g); }
@@ -437,6 +495,86 @@
     if (typeof props.onClose === "function") close.addEventListener("click", function (e) { e.stopPropagation(); props.onClose(); });
     tab.appendChild(close);
     return tab;
+  }
+
+  // uio-W02: ONE document row, for every list -- Files, Publish, the pickers, the palette. 32px
+  // (--row-height-doc), one anatomy everywhere:
+  //
+  //   [type icon well 24px] [title, flex, ellipsis] [Primary?] [type chip?] [open-state] [updated]
+  //
+  // NOT the spine's shared row. That one is a settings row: a fixed label column plus a canonical
+  // control, for a value you SET. This is a list item you CLICK to open. They share the token set
+  // and nothing else, which is why this lives beside CourseCard in the browser group rather than
+  // beside FieldRow in controls.
+  //
+  // `trailing` is the extension slot. Publish needs a selection box, a drift badge, an alignment
+  // meter and a variant chip; no other list does. They go in the slot so a consumer never forks
+  // the row to add one (uio-W16).
+  // Contract: design-system/components/browser/DocumentRow.d.ts.
+  function DocumentRow(props) {
+    props = props || {};
+    var type = _pure.docType(props.type);
+    var t = DOCUMENT_TYPES[type];
+    var row = h("div", "vds-docrow" + (props.active ? " is-active" : ""));
+    row.setAttribute("data-doc-type", type);
+
+    var well = h("span", "vds-docrow__well vds-docrow__well--" + t.well);
+    well.innerHTML = iconSvg(t.icon);
+    well.title = t.label;
+    well.setAttribute("aria-label", t.label);
+    row.appendChild(well);
+
+    // The same per-product identity marker the document's tab carries, so one document reads the
+    // same in the strip and in the list.
+    if (props.dot) {
+      var dot = h("span", "vds-docrow__dot");
+      dot.style.background = props.dot;
+      if (props.dotTitle) dot.title = props.dotTitle;
+      row.appendChild(dot);
+    }
+
+    var title = h("span", "vds-docrow__title", props.title == null ? "" : String(props.title));
+    title.title = props.title == null ? "" : String(props.title); // the ellipsised name, in full
+    row.appendChild(title);
+
+    // uio-W05: "Primary source", not "Primary" -- the chip names a ROLE (the document this
+    // product traces back to), and "Primary" alone reads as a rank among equals.
+    if (props.primary) row.appendChild(h("span", "vds-docrow__chip vds-docrow__chip--accent", "Primary source"));
+    // Off by default: a view already grouped by type does not repeat it on every row.
+    if (props.typeChip) row.appendChild(h("span", "vds-docrow__chip", t.label));
+
+    var openLabel = _pure.openStateLabel(props.openIn);
+    if (openLabel) row.appendChild(h("span", "vds-docrow__open", openLabel));
+
+    // uio-W16: the RELEASE-STATE column, for the one list where "is this current?" is the question
+    // the row exists to answer. Two states and no third: a document is either as it went out or it
+    // is not, and a middle word would be a hedge the publisher then has to interpret.
+    if (props.release) {
+      row.appendChild(h("span", "vds-docrow__release vds-docrow__release--" +
+        (props.release === "ready" ? "ready" : "review"),
+        props.release === "ready" ? "Ready to release" : "Needs review"));
+    }
+
+    if (props.trailing != null) {
+      var tr = h("span", "vds-docrow__trailing");
+      appendChildren(tr, props.trailing);
+      row.appendChild(tr);
+    }
+
+    var upd = h("span", "vds-docrow__updated", props.updated == null ? "—" : String(props.updated));
+    if (props.updatedTitle) upd.title = String(props.updatedTitle);
+    row.appendChild(upd);
+
+    if (typeof props.onMenu === "function") {
+      var menu = h("button", "vds-docrow__menu"); menu.type = "button";
+      menu.title = "Document actions"; menu.setAttribute("aria-label", "Document actions");
+      menu.innerHTML = iconSvg("more-horizontal");
+      menu.addEventListener("click", function (e) { e.stopPropagation(); props.onMenu(e); });
+      row.appendChild(menu);
+    }
+
+    if (typeof props.onOpen === "function") row.addEventListener("click", props.onOpen);
+    return row;
   }
 
   // ==========================================================================
@@ -632,7 +770,7 @@
     SegmentedControl: SegmentedControl, ChoiceCards: ChoiceCards, Switch: Switch, SwitchRow: SwitchRow,
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
-    Tabs: Tabs, DocumentTab: DocumentTab,
+    Tabs: Tabs, DocumentTab: DocumentTab, DocumentRow: DocumentRow, DOCUMENT_TYPES: DOCUMENT_TYPES,
     TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, Meter: Meter, ToggleChip: ToggleChip, Timeline: Timeline,
     Modal: Modal, ContextMenu: ContextMenu, Tooltip: Tooltip,
     _pure: _pure

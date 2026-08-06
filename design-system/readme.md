@@ -141,6 +141,18 @@ Non-modal surfaces keep the canvas live: the canvas is *squeezed*, never covered
 the only surface that takes a scrim, and only for a destructive confirm or a blocking run. Every
 narrow surface (popover, menu) carries a visible route to escalate into the sheet.
 
+**The annotation margin is not a seventh presentation.** A document surface may put a permanent
+margin beside its prose holding one stub per annotation, each at the height of the passage it is
+about, with the annotation's card opening in the stub's place. The six above are how you reach the
+**settings tree**; the margin holds facts about **the content in front of you**, which is why its
+position carries meaning and theirs does not. It follows every other spine rule: the canvas is
+squeezed by a real column rather than covered, one card is open at a time, cards use the shared row
+anatomy, the save contract applies, and a visible escalation hands the full set to a list. Two
+things it may not do: take a scrim, or grow a list of its own — the whole set of annotations lives
+in one list elsewhere, and the margin routes to it. Source is the first surface to have one
+(`uio-S-A01`); the arc that produced it — clamp a lane, then dock the cards, then place them —
+is the record of why placing them beside the passage was worth the column.
+
 **The sheet and the inspector share one right dock.** They are the same tree at two sizes — the
 inspector holds the sheet's Block scope — so they are never both on screen. Opening the sheet
 widens the dock to `--panel-sheet-width` and supersedes the inspector; closing it restores the
@@ -200,6 +212,29 @@ scope chain. **A second, parallel inheritance path is a hard fail.**
 Concrete anatomy in the app: `--override-dot` sizes the one accent dot (rows and sections
 alike), the inherited scope name reads in `--text-tertiary` at `--text-xs`, and **Reset is a
 live edit, not a commit control** — it writes straight away and Undo takes it back.
+
+A rung may NAME ITSELF. "Theme" and "Style “Lead”" occupy the system and course rungs of the text
+ladder and are called neither on screen, so a rung's own label wins over the ladder's. Rungs that
+supply no label read as System · Product · Course · Page · Block, unchanged.
+
+**The canonical section types**, in the order a panel emits them:
+
+    Type · Content · Appearance · Layout · Spacing · Behaviour · Classification · Light/Dark · Advanced
+
+Type leads because a selection's identity comes first. `Classification` follows Behaviour: it is
+about the content's disposition rather than how it looks or acts, and filing it under Advanced
+would bury a governance fact in a drawer named for developer settings. `Classification`,
+`Light/Dark` and `Advanced` open COLLAPSED — most selections simply inherit, and a section that
+always shows an inherited value is the pre-expanded wall this spine forbids. Actions is pinned
+last, in the footer, and is not in this list. **Adding a type is a change HERE first**, then in
+the code that reads it.
+
+**Second axes ride the ladder; they never build one.** An export-control classification, an
+approval state, anything else that inherits, supplies a property key and a scope chain whose
+rungs read its own storage — and, where the deepest rung must not simply win, a `choose()`. A
+classification's "a block may only tighten what it inherits, never loosen it" is exactly a
+`choose()`, which is why the rule holds in resolution and not only in the picker that hides the
+looser options. A second, parallel inheritance path is a hard fail.
 
 ### Cross-stage facts
 

@@ -35,7 +35,7 @@ size budget (~200 KB for stills).
 `covers` lists what the scene depends on. Two kinds of entry:
 
 - **File surfaces** — a repo path, optionally with an `#anchor`: `"src/editor.js"`,
-  `"editor.css"`, `"src/editor.js#LIBRARY"`. These drive **staleness**.
+  `"styles/editor/"`, `"src/editor.js#LIBRARY"`. These drive **staleness**.
 - **Human tags** — a readable name for the surface: `"block-palette"`, `"pages-outliner"`.
   Documentation only; they never trigger a file match.
 
@@ -44,10 +44,10 @@ Every scene should list at least one file surface so a code change can map to it
 ### Re-capturing after a UI change (same-session docs-alignment)
 
 When you change editor chrome, list the scenes your diff touches and re-run them so the
-committed figures don't drift (the same rule the repo applies to `USER-GUIDE.md`):
+committed figures don't drift (the same rule the repo applies to the user guide):
 
 ```
-node tools/docs-capture.js --stale src/editor.js editor.css
+node tools/docs-capture.js --stale src/editor.js styles/editor/
 ```
 
 It prints each scene whose `covers` matches a changed file, with the command to re-run it.
@@ -101,7 +101,7 @@ toggle driven in one scene can't change the next run's starting state.
 
 ## Wiring a figure into the guide
 
-Reference the emitted asset from `docs/USER-GUIDE.md` with the figure directive (#25):
+Reference the emitted asset from the relevant `docs/guide/*.md` section with the figure directive (#25):
 
 ```
 ![Alt text](docs/assets/structure-panel.webp "Caption shown under the image")

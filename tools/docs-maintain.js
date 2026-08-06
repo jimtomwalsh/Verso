@@ -3,8 +3,8 @@
  *
  * The guide is hand-written prose (rich per-feature detail we do NOT want to auto-overwrite),
  * so this tool does NOT regenerate the guide. It DETECTS DRIFT: it introspects the app's
- * author-facing surfaces from source (today: the block palette `LIBRARY` in src/editor.js,
- * grouped by category) and checks that `docs/USER-GUIDE.md` documents each one — so adding a
+ * author-facing surfaces from source (today: the block palette `LIBRARY` in src/editor/assets.js,
+ * grouped by category) and checks that `docs/guide/` documents each one — so adding a
  * feature without documenting it is caught, in the same session, before it ships.
  *
  * This is the runnable, author-facing form of the `#91` anti-drift test gate (which enforces
@@ -24,7 +24,8 @@ var path = require("path");
 
 // ---- Pure core (no IO; shared with the tests/run.js #91 gate) ----------------------------
 
-// Extract the top-level block palette from src/editor.js source -> [{ group, label }].
+// Extract the top-level block palette from src/editor/assets.js source -> [{ group, label }].
+// (arch-P3b-07h: the palette moved there with the Assets tab it feeds.)
 // Matches only top-level LIBRARY entries (`group:"..", icon:"..", label:".."`), skipping
 // nested labels inside make() bodies (checkbox default, quiz retry, ...), same as the gate.
 function extractLibrary(editorSrc) {
@@ -66,8 +67,13 @@ module.exports = {
 if (require.main === module) {
   var ROOT = path.resolve(__dirname, "..");
   var mode = process.argv.indexOf("--report") !== -1 ? "report" : "check";
-  var editorSrc = fs.readFileSync(path.join(ROOT, "src/editor.js"), "utf8");
-  var guide = fs.readFileSync(path.join(ROOT, "docs/USER-GUIDE.md"), "utf8");
+  var editorSrc = fs.readFileSync(path.join(ROOT, "src/editor/assets.js"), "utf8");
+  // arch-P5-03: the guide is docs/guide/*.md, read in the order it declares. Coverage is over the
+  // whole guide exactly as before -- which section documents a block does not matter, only that one
+  // of them does.
+  var guide = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/guide/order.json"), "utf8"))
+    .map(function (o) { return fs.readFileSync(path.join(ROOT, "docs/guide", o.file), "utf8"); })
+    .join("\n");
   var cov = blockCoverage(editorSrc, guide);
 
   if (mode === "report") {
@@ -80,17 +86,17 @@ if (require.main === module) {
       });
       console.log("");
     });
-    console.log("Coverage: " + cov.documented.length + "/" + cov.total + " blocks documented in docs/USER-GUIDE.md");
+    console.log("Coverage: " + cov.documented.length + "/" + cov.total + " blocks documented in docs/guide/");
     process.exit(0);
   }
 
   // --check (default)
   if (cov.undocumented.length === 0) {
-    console.log("docs-maintain: OK — all " + cov.total + " palette blocks are documented in docs/USER-GUIDE.md");
+    console.log("docs-maintain: OK — all " + cov.total + " palette blocks are documented in docs/guide/");
     process.exit(0);
   }
-  console.error("docs-maintain: DRIFT — " + cov.undocumented.length + " block(s) not documented in docs/USER-GUIDE.md:");
+  console.error("docs-maintain: DRIFT — " + cov.undocumented.length + " block(s) not documented in docs/guide/:");
   cov.undocumented.forEach(function (b) { console.error("  - " + b.label + "  (group: " + b.group + ")"); });
-  console.error("\nDocument each in docs/USER-GUIDE.md (§ 5 — the block catalogue), then re-run.");
+  console.error("\nDocument each in docs/guide/07-block-catalogue.md, then re-run.");
   process.exit(1);
 }

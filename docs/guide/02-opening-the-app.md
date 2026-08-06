@@ -1,0 +1,55 @@
+## 2. Opening the app
+
+Verso is a plain web app — nothing to install.
+
+- **Desktop app:** launch it. It wraps the same app in a window.
+- **Browser:** open `index.html`. For export and fonts to work, serve the folder over `http://`
+  rather than `file://`:
+  ```
+  cd "…/verso"
+  python3 -m http.server 8123      # or: ./serve.command
+  ```
+  Then visit `http://localhost:8123/index.html`.
+
+Your work **saves automatically to this browser** (IndexedDB) as you go; the **All changes
+saved** status in the top bar confirms it.
+
+**Create a document.** The **＋** beside the tabs opens **New document**: pick a **Product**
+(defaults to the one you're scoped to), a **preset** — the starting matrix cell (eLearning,
+Presentation, 1-pager, Quick-start guide, Responsive doc), each shown as *geometry · interactive
+or static* — then a **title** and **code**. The document is born in that Product and that cell;
+you can change the cell later. The same dialog also opens a saved course, imports a document, or
+loads a sample.
+
+**Change the document type later.** The **cell chip** in the editor header (e.g. *Reflow ·
+Interactive*) opens a small menu to change the document's matrix cell after creation. Toggling
+**Interactive / Static** applies at once; switching the **geometry** (Reflow / Fixed frame /
+Paged) warns first, because content reflows into the new geometry and may not survive 1:1 — you
+can switch back. In a **Static** document the interactive block types (Quiz, Image hotspots,
+Web/HTML Embed, Accordion, Card Reveal, and the rest) are hidden from the Blocks library; any
+interactive blocks you already placed are kept, and turning interactivity back on restores them.
+
+**One noun: document.** A source document, a course, a presentation and a paged guide are four
+**types** of one thing, and Verso calls all of them documents. "Course" names a *type*, never the
+generic. Each type has a fixed glyph, and source documents carry a tinted icon well while the other
+three carry a neutral one — so you can tell written material from laid-out material in a list
+without reading a word.
+
+**The same row everywhere.** Any list of documents — the picker, and later Publish — draws the same
+row: type glyph, title, its product's colour dot, a type chip, whether it's already open, and when
+it was last edited. Learn it once.
+
+**The code is the document's name.** Every document is filed under its **code**, and that code is
+what tabs, the picker and the publish queue all refer to. Two documents cannot share one — and
+codes that differ only in capitalisation (`ACME-101-E` and `ACME-101-e`) count as the same code, so
+Verso will not let you create the second.
+
+**Importing a `.verso` or JSON file.** If the file is a backup of a document you already have,
+Verso says so and asks whether to **Replace** it. Replacing overwrites the copy on this machine
+with the version in the file, and the copy you had is not recovered afterwards — export it first
+if you might want it. If the code is new, the document is added and opened in a new tab.
+
+> **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
+> before clearing browser data or switching machines (§15).
+
+---

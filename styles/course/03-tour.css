@@ -1,0 +1,276 @@
+/* ---- Guided tour (learner coach-marks) ---------------------------------------
+   Opt-in per courseNav block (block.tour.on). render.js appends one .course-tour
+   marker as a child of each footer control; it stays hidden until runtime.js adds
+   .is-tour-live on the .course-nav (on the trigger page), so the author canvas is
+   untouched and demo == export. Ported from the Menu-tour specimen; colours are
+   THEME TOKENS (accent) so it tracks light/dark + the course palette. */
+.course-nav__prev, .course-nav__next, .course-nav__mode, .course-nav__glossary { position: relative; }
+/* issue 204: the inline (non-pinned) prev/next sit at z-index auto, so a block's
+   positioned overlay (e.g. a hotspot popover, z-index 3) hoists above them and blocks the
+   click. Lift them clear of any block content (max block z-index is ~4). The floating pill
+   is already z-index 50 and the pinned prev/next rule (z-index 50) out-specifies this. */
+.course-nav__prev, .course-nav__next { z-index: 6; }
+/* The marker is a ZERO-SIZE anchor point 14px above the control; the dot, connector
+   and label all position off it (bottom = above, centred on its x). Zero size means a
+   wide label can never spill the anchor into the click target, and the runtime shifts
+   the label horizontally via --tour-shift so it always renders inside the frame. */
+.course-tour {
+  position: absolute; left: 50%; bottom: calc(100% + 14px); transform: translateX(-50%);
+  width: 0; height: 0; pointer-events: none; z-index: 60; visibility: hidden;
+}
+.course-nav.is-tour-live .course-tour { visibility: visible; }
+/* dot: pulsing beacon, its bottom at the anchor (14px above the control -> clear of the
+   click target). 20px so it pulls attention to the helper, not the menu item. */
+.course-tour__dot {
+  position: absolute; bottom: 0; left: 0; width: 20px; height: 20px;
+  transform: translate(-50%, 0) scale(0); opacity: 0; cursor: pointer; pointer-events: none;
+}
+.course-nav.is-tour-live .course-tour__dot { pointer-events: auto; animation: tour-pop .5s cubic-bezier(.34,1.56,.64,1) forwards; }
+.course-tour__core {
+  position: absolute; inset: 5px; border-radius: 50%; background: var(--color-accent);
+  transition: background .3s ease, box-shadow .3s ease;
+}
+.course-tour__ring {
+  position: absolute; inset: 0; border: 2px solid var(--color-accent); border-radius: 50%;
+  opacity: 0;
+}
+.course-nav.is-tour-live .course-tour__ring { animation: tour-ping 2.8s ease-out infinite; }
+.course-tour__dot.is-hot .course-tour__core, .course-tour__dot.is-open .course-tour__core {
+  background: color-mix(in srgb, var(--color-accent) 72%, white);
+  box-shadow: 0 0 11px color-mix(in srgb, var(--color-accent) 75%, transparent);
+}
+.course-tour__dot.is-hot .course-tour__ring { border-color: color-mix(in srgb, var(--color-accent) 72%, white); }
+.course-tour__dot.is-visited .course-tour__ring { animation: none; opacity: 0; }
+/* connector: a short stub drawn upward from the dot when the label opens */
+.course-tour__conn {
+  position: absolute; left: 0; bottom: 24px; height: 16px; width: 2px;
+  background: var(--color-accent); transform: translateX(-50%) scaleY(0); transform-origin: bottom center;
+  opacity: 0; transition: background .3s ease, box-shadow .3s ease;
+}
+.course-tour__conn.is-open { animation: tour-draw .7s cubic-bezier(.5,0,.2,1) forwards; }
+.course-tour__conn.is-hot { box-shadow: 0 0 5px color-mix(in srgb, var(--color-accent) 60%, transparent); }
+/* label: the text box, sitting just above the callout. Solid LMS surface (mirrors the
+   chapter modal + glossary popover), LEFT-aligned, Exo title / body copy. --tour-shift
+   (set by runtime.js) slides it horizontally so it always stays inside the frame. */
+.course-tour__label {
+  position: absolute; bottom: 40px; left: 0; width: min(300px, 78vw);
+  transform: translateX(calc(-50% + var(--tour-shift, 0px))); pointer-events: none; text-align: left;
+  /* Closed = OUT of layout. The 300px box is anchored at left:0 of its control; on a
+     right-gutter control (Next/glossary) it would otherwise spill past the page edge and
+     add a CONSTANT horizontal-scroll gutter on every tour page (opacity:0 alone still
+     lays out + overflows). runtime.js opens it on click and clampTourLabel then sets
+     --tour-shift so the OPEN box stays inside the frame. */
+  display: none;
+}
+.course-tour__label.is-open { display: block; pointer-events: auto; }
+.course-tour__inner {
+  display: block; padding: 13px 16px; text-align: left;
+  background: var(--nav-surface-default, var(--color-bg));
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  opacity: 0; transform: translateY(8px);
+  transition: border-color .3s ease;
+}
+.course-tour__label.is-open .course-tour__inner { animation: tour-rise .55s ease forwards; }
+.course-tour__label.is-hot .course-tour__inner { border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-hair)); }
+.course-tour__title {
+  display: block; font-family: var(--font-heading); font-weight: 700; font-size: 16px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-ink);
+  margin-bottom: 5px; transition: color .3s ease;
+}
+.course-tour__label.is-hot .course-tour__title { color: var(--color-accent); }
+.course-tour__desc { display: block; font-family: var(--font-body); font-size: 14px; line-height: 1.5; color: var(--color-ink-soft); text-wrap: pretty; }
+@keyframes tour-pop  { to { transform: translate(-50%, 0) scale(1); opacity: 1; } }
+@keyframes tour-ping { 0% { transform: scale(.5); opacity: 0; } 18% { opacity: .55; } 70%, 100% { transform: scale(2.1); opacity: 0; } }
+@keyframes tour-draw { to { transform: translateX(-50%) scaleY(1); opacity: 1; } }
+@keyframes tour-rise { to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .course-nav.is-tour-live .course-tour__dot { animation: none; opacity: 1; transform: translate(-50%, 0) scale(1); }
+  .course-nav.is-tour-live .course-tour__ring { animation: none; }
+  .course-tour__conn.is-open { animation: none; transform: translateX(-50%) scaleY(1); opacity: 1; }
+  .course-tour__label.is-open .course-tour__inner { animation: none; opacity: 1; transform: none; }
+}
+
+/* disclaimer footer — global header/footer, full-bleed */
+.course-footer {
+  padding: 14px var(--headerfooter-pad-x, 10%); /* III: decoupled from page width */
+  /* INLINE at the page bottom in ALL contexts (canvas, preview, export) so the author
+     sees EXACTLY what ships (one-to-one) and it NEVER slides on the zoomed canvas.
+     Was position:sticky (CCCC) -> stuck to the canvas viewport under the world zoom
+     transform and slid over the page. Transparent + no border -> the nav sits as pills
+     over the page bottom, no solid bar. prev/next fall in the side gutters via the
+     full-width .course-nav grid below; progress is a centred pill. CCCC's scroll-gated
+     Next still applies (Next is revealed at the page bottom, where it now lives). */
+  position: static; background: transparent; border-top: none;
+}
+.course-footer__text {
+  margin: 0; max-width: 900px;
+  font-size: 11px; line-height: 1.45; letter-spacing: 0.01em; color: var(--color-muted);
+}
+
+/* III: header/footer use their OWN per-breakpoint padding, independent of the page */
+.course-root[data-bp="tablet"] .course-header, .course-root[data-bp="tablet"] .course-footer { padding-left: var(--headerfooter-pad-x-tablet, 6%); padding-right: var(--headerfooter-pad-x-tablet, 6%); }
+.course-root[data-bp="mobile"] .course-header, .course-root[data-bp="mobile"] .course-footer { padding-left: var(--headerfooter-pad-x-mobile, 5%); padding-right: var(--headerfooter-pad-x-mobile, 5%); }
+
+/* Footer nav = an inline pill layout at the page bottom, IDENTICAL in canvas, preview
+   and export (no position:fixed/sticky -> can't slide on the zoomed canvas; the author
+   sees exactly what ships). The full-width .course-nav grid (1fr auto 1fr) already
+   detaches prev/next into the side gutters with progress centred; here progress is a
+   rounded pill. The prev/next buttons are styled by .course-nav__btn (author-overridable
+   fill/border/text/hover). The mode-toggle, if the author placed one in the footer
+   chrome, sits centred beneath the nav. `data-env="runtime"` is retained on the export/
+   preview roots but no longer drives footer POSITION (kept for the theme/env hooks). */
+.course-nav__progress {
+  /* §1: author opacity — surface only (color-mix keeps the text/glyphs/bar/modal crisp),
+     mirrors the card-reveal --cr-cover pattern. Default 100% = fully opaque (unchanged). */
+  background: color-mix(in srgb, var(--nav-pill-fill, var(--nav-surface-default, #2a2a2a)) var(--nav-pill-opacity, 100%), transparent);
+  /* §1: author LAYER BLUR — frosts the content BEHIND the pill (pairs with a translucent
+     opacity for a real glass look). Default 0 = no blur (unchanged). */
+  -webkit-backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  border: var(--nav-pill-border-width, 1px) solid var(--nav-pill-border, var(--color-hair));
+  border-radius: var(--nav-pill-radius, 4px); padding: calc(6px * var(--pill-scale, 1)) 16px;
+}
+.course-footer__extra { justify-content: center; }
+
+/* TTTT: Card Reveal grid — responsive cards under a frosted "Hold to reveal" cover
+   that clears on hover / focus (pure CSS, air-gap clean). Aligned to the "Assessment
+   Tiles" reference (references/card-reveal-reference-assessment-tiles.html): gradient
+   card, faint technical-grid texture, auto-numbered index, title + rule, strong frost.
+   Tokens only -> ships in SCORM, tracks light/dark; author cardBox overrides the look. */
+.card-reveal { display: grid; grid-template-columns: repeat(var(--cr-cols, 3), 1fr); gap: var(--cr-gap, 24px); }
+/* per-mode card fill: switches on the learner light/dark toggle (via the course-root
+   data-mode), so an author's custom colour still adapts. Defaults: dark #2a2a2a / light
+   #ffffff; author overrides --cr-fill-dark / --cr-fill-light per mode. */
+.course-root[data-mode="dark"] .card-reveal { --cr-card-fill: var(--cr-fill-dark, #2a2a2a); }
+.course-root[data-mode="light"] .card-reveal { --cr-card-fill: var(--cr-fill-light, #ffffff); }
+.card-reveal__card {
+  position: relative; overflow: hidden; isolation: isolate; min-height: var(--cr-card-h, 320px); outline: none;
+  border: 1px solid var(--color-hair);
+  background: var(--cr-card-fill, #2a2a2a);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+/* faint surface texture inside each card (reference signature). Pattern is author-
+   selected via data-pattern on the .card-reveal root (default = grid) and its colour
+   via --tex-color (default = the theme hairline); dots / none variants below. */
+.card-reveal__card::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.card-reveal[data-pattern="dots"] .card-reveal__card::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.card-reveal[data-pattern="none"] .card-reveal__card::before { display: none; }
+.card-reveal__card:hover, .card-reveal__card:focus-within {
+  transform: translateY(-2px); border-color: var(--color-ink-soft);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
+}
+/* auto-numbered index, top-left, kept above the frost so it always shows */
+.card-reveal__index {
+  position: absolute; top: 22px; left: 24px; z-index: 3;
+  font-family: var(--font-heading); font-weight: 700; font-size: 13px; letter-spacing: 0.15em;
+  color: var(--color-muted);
+}
+.card-reveal__content {
+  /* #178: no z-index — see .card-deck__content. A stacking context here defeats a child
+     image's mix-blend-mode (blends against a transparent group backdrop, not the card). */
+  position: relative; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; padding: 26px;
+}
+/* reserve top clearance for the auto-index ONLY when it's shown (a numbered card);
+   otherwise content flows from the top edge and fills the tile like a normal block. */
+.card-reveal__card:has(.card-reveal__index) .card-reveal__content { padding-top: 60px; }
+/* title -> rule -> body typographic rhythm (matches the reference card body) */
+.card-reveal__content .page-title { font-size: 20px; line-height: 1.15; margin: 0; }
+.card-reveal__content .page-title::after {
+  content: ""; display: block; width: 34px; height: 2px;
+  background: var(--color-ink-soft); margin: 14px 0 16px;
+}
+.card-reveal__content .body-copy { font-size: 14px; line-height: 1.6; color: var(--color-ink-soft); margin: 0; }
+.card-reveal__card-empty { color: var(--color-muted); font-size: 12px; }
+
+/* Card Deck — a paged "carousel" of full-frame cards. One card shown at a time at
+   runtime (‹ › paging + counter); the editor shows every card stacked so each body is a
+   drop target. Tokens only -> ships in SCORM, tracks light/dark; author cardBox overrides. */
+.course-root[data-mode="dark"] .card-deck { --cd-card-fill: var(--cd-fill-dark, #1c1c1c); }
+.course-root[data-mode="light"] .card-deck { --cd-card-fill: var(--cd-fill-light, #ffffff); }
+.card-deck { display: flex; flex-direction: column; gap: 24px; }
+.card-deck__card {
+  position: relative; isolation: isolate; box-sizing: border-box;
+  display: flex; flex-direction: column; min-height: 420px; padding: 40px 44px;
+  border: 1px solid var(--color-hair); border-radius: 14px;
+  background: var(--cd-card-fill, #1c1c1c);
+}
+/* faint surface texture (shared shape with card-reveal): grid (default) | dots | none */
+.card-deck__card::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.4; border-radius: inherit;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.card-deck[data-pattern="dots"] .card-deck__card::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px); background-size: 22px 22px;
+}
+.card-deck[data-pattern="none"] .card-deck__card::before { display: none; }
+/* meta line: CARD NN / TT  +  optional section label */
+.card-deck__meta {
+  position: relative; z-index: 1; display: flex; align-items: baseline; gap: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.card-deck__meta-card, .card-deck__meta-num { color: var(--color-accent); font-weight: 600; }
+.card-deck__meta-sep, .card-deck__meta-total { color: var(--color-muted); }
+.card-deck__meta-label { color: var(--color-muted); margin-left: 6px; }
+/* #178: NO z-index here — a z-index on the content wrapper makes it a stacking context, which
+   traps a child image's mix-blend-mode against a transparent backdrop (blend silently defeated
+   inside cards). position:relative alone keeps it above the ::before texture (tree order) AND
+   as the containing block, while letting a blended image composite against the card surface. */
+.card-deck__content { position: relative; flex: 1 1 auto; padding: 22px 0 0; }
+.card-deck__card-empty { color: var(--color-muted); font-size: 12px; }
+/* footer: counter (bottom-left) + ‹ › nav (bottom-right) */
+.card-deck__footer {
+  position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between;
+  margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--color-hair);
+}
+.card-deck__count {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px;
+  letter-spacing: 0.1em; color: var(--color-muted);
+}
+.card-deck__nav { display: flex; gap: 10px; }
+.card-deck__nav-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px;
+  border: 1px solid var(--color-ink-soft); border-radius: 8px; background: transparent;
+  color: var(--color-ink); cursor: pointer; transition: border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+.card-deck__nav-btn:hover { border-color: var(--color-ink); }
+.card-deck__nav-btn:disabled { opacity: 0.32; cursor: default; }
+.card-deck__nav-btn .course-nav__arrow { width: 18px; height: 18px; display: block; }
+.card-deck__nav-btn .course-nav__arrow svg { width: 100%; height: 100%; }
+.card-deck__empty { color: var(--color-muted); font-size: 13px; padding: 20px; border: 1px dashed var(--color-hair); border-radius: 12px; }
+/* runtime paging: once armed (demo/export), show only the active card. The editor never
+   arms the deck, so every card stays visible and droppable on the canvas. */
+.card-deck.is-armed .card-deck__card { display: none; }
+.card-deck.is-armed .card-deck__card.is-active { display: flex; }
+.card-reveal__cover {
+  position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
+  /* SEMI-TRANSPARENT fill so the backdrop-blur actually reads (an opaque fill defeats it —
+     the tease is that there's something blurred behind the frost). Author-tunable colour +
+     opacity + blur via the --cr-cover-* vars (default = the theme surface at ~48%). */
+  background: color-mix(in srgb, var(--cr-cover-color, var(--cr-card-fill, #2a2a2a)) var(--cr-cover-opacity, 48%), transparent);
+  backdrop-filter: blur(var(--cr-cover-blur, 16px)) saturate(110%); -webkit-backdrop-filter: blur(var(--cr-cover-blur, 16px)) saturate(110%);
+  transition: opacity 0.55s cubic-bezier(.4, .05, .2, 1); cursor: pointer;
+}
+.card-reveal__cover::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px var(--color-hair); }
+.card-reveal__hint {
+  font-family: var(--font-heading); font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--color-muted);
+}
+/* reveal on hover (desktop), focus (keyboard/tap -> tabindex), or runtime .is-revealed */
+.card-reveal__card:hover .card-reveal__cover,
+.card-reveal__card:focus-within .card-reveal__cover,
+.card-reveal__card.is-revealed .card-reveal__cover { opacity: 0; pointer-events: none; }

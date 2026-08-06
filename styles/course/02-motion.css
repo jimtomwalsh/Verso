@@ -1,0 +1,381 @@
+/* ---- Global motion (doc.motion): chapter-change fade -------------------------------------
+   The light/dark fade lives in the [data-mode] transition block above (configurable via the
+   same --motion-mode-fade var). Here: the runtime adds .is-chapter-enter to the incoming page
+   box when its chapter id differs from the outgoing page -> a slightly-slower opacity fade-in
+   (--motion-chapter-fade, default 450ms). Disabled for prefers-reduced-motion users. */
+@media (prefers-reduced-motion: no-preference) {
+  .scorm-page.is-chapter-enter,
+  .course-root.is-chapter-enter {
+    animation: motion-chapter-enter var(--motion-chapter-fade, 450ms) ease both;
+  }
+}
+@keyframes motion-chapter-enter { from { opacity: 0; } to { opacity: 1; } }
+
+/* Item FF — learner footer navigation bar (prev / progress / next). Token-driven,
+   ships inside the SCORM package. Full-width row inside the footer __extra region. */
+.course-footer__extra:has(.course-nav) { display: block; }
+.course-nav {
+  /* MMM: 3-col grid with FIXED column assignments so the progress bar is truly
+     centred regardless of whether prev/next are present (prev/next/bar are each
+     optional). A flex + margin-left:auto grouped prev+bar to the left. */
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; width: 100%;
+  font-family: var(--font-heading);
+  position: relative; /* anchor for the floating interaction-gate reminder */
+}
+.course-nav__prev { grid-column: 1; justify-self: start; }
+.course-nav__progress { grid-column: 2; justify-self: center; }
+.course-nav__next { grid-column: 3; justify-self: end; }
+/* Default nav-button look (James): white outline + white text, FILL = the page
+   background so it feels subtle/blended; hover lifts to a "white feel". These are the
+   defaults an author can override per course (courseNav appearance controls). Tokens
+   -> tracks light/dark ("white" = --color-ink, which is light in dark mode). */
+.course-nav__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  /* author-overridable via the courseNav "Button appearance" controls (--nav-btn-*);
+     the fallbacks ARE James's default (white outline + text, background-colour fill). */
+  color: var(--nav-btn-text, var(--color-ink));
+  background: var(--nav-btn-fill, var(--color-bg));
+  border: 1px solid var(--nav-btn-border, var(--color-ink-soft));
+  border-radius: var(--button-radius, 8px);
+  padding: 8px 14px; cursor: pointer; line-height: 1; white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.course-nav__btn:hover {
+  border-color: var(--nav-btn-hover, var(--color-ink));
+  color: var(--nav-btn-hover, var(--color-ink));
+  background: var(--color-surface);
+}
+.course-nav__btn[disabled], .course-nav__btn[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+/* Interaction-gated Next: greyed like disabled, but STILL CLICKABLE (pointer-events:auto
+   overrides the aria-disabled rule above) so the runtime can intercept the click and remind
+   the learner instead of giving dead, unexplained feedback — the reason page-gating never
+   stuck. The shake reuses the chapter-jump nudge keyframe. */
+.course-nav__next.is-nav-gated { opacity: 0.45; cursor: not-allowed; pointer-events: auto; }
+.course-nav__next.is-nav-gated:hover { border-color: var(--nav-btn-border, var(--color-ink-soft)); color: var(--nav-btn-text, var(--color-ink)); background: var(--nav-btn-fill, var(--color-bg)); }
+.course-nav__next.is-nudge { animation: nav-jump-nudge 0.38s ease; }
+/* Floating reminder above the footer pill (absolute -> out of the 3-col grid flow). */
+.course-nav__gate-hint {
+  position: absolute; bottom: calc(100% + 10px); right: 0;
+  display: inline-flex; align-items: center; gap: 8px; max-width: 340px;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--color-surface); color: var(--color-ink);
+  border: 1px solid var(--color-ink-soft);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-body, inherit); font-size: 13px; font-weight: 500; line-height: 1.35;
+  z-index: 5;
+}
+.course-nav__gate-hint[hidden] { display: none; }
+.course-nav__gate-hint-icon {
+  flex: 0 0 auto; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--color-warning, var(--color-accent)); color: var(--color-bg);
+  font-weight: 700; font-size: 12px; line-height: 1;
+}
+.course-nav__gate-hint.is-flash { animation: gate-hint-flash 0.9s ease; }
+@keyframes gate-hint-flash { 0%, 100% { transform: translateY(0); } 20% { transform: translateY(-4px); } 45% { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .course-nav__next.is-nudge, .course-nav__gate-hint.is-flash { animation: none; } }
+.course-nav__arrow { display: inline-flex; }
+.course-nav__arrow svg { width: 16px; height: 16px; display: block; }
+
+.course-nav__progress {
+  position: relative; flex: 1 1 auto; margin: 0 auto;
+  /* author width: an explicit width FORCES the pill wider/narrower (it's a centred grid item
+     sized to its content by default) — not just a max-width cap. Blank var = auto (content
+     width, capped at 460). Height FORCES the pill height; border-box counts the padding INSIDE
+     the height (so a small value slims the pill instead of stacking on top of the padding).
+     Blank = auto (content height). --pill-pad-y lets a slim pill drop its own vertical padding. */
+  box-sizing: border-box;
+  width: var(--nav-pill-width, auto); max-width: var(--nav-pill-width, 460px);
+  /* HEIGHT via min-height (never a forced height): the pill grows to fit its content so the
+     content can NEVER overflow + get bottom-anchored (that was the "bar drops after images/
+     fonts finish loading + the layout settles" bug). Slimness comes from --pill-scale shrinking
+     the CONTENT (icons/title/bar/pad) below the target, so a small min-height is achievable
+     while everything still fits + stays grid-centred. Blank = auto (natural content height). */
+  min-height: var(--nav-pill-height, auto);
+  /* symmetric 3-track grid: equal-width side slots (the two icons) keep the progress
+     bar TRULY centred in the pill with equal spacing to each icon — even when one icon
+     (mode-toggle / glossary) is absent, its empty slot still reserves --pill-side. */
+  display: grid; grid-template-columns: var(--pill-side, 34px) minmax(110px, 1fr) var(--pill-side, 34px);
+  align-items: center; gap: 12px;
+  cursor: pointer; padding: calc(4px * var(--pill-scale, 1)) 0;
+  /* author-controllable drop shadow (single source for editor + runtime + export); render
+     composes --nav-pill-shadow from offset/blur/spread/colour+opacity, or 'none' when off. */
+  box-shadow: var(--nav-pill-shadow, 0 10px 30px rgba(0, 0, 0, 0.35));
+}
+/* §1 P2: the chapter TITLE sits above the bar and the two are a GROUP, centred as one unit
+   on the pill's vertical midline (title on top via DOM order, both in a centred column). */
+/* --pill-scale (set by render from the author's pill Height; default 1) shrinks the height-
+   driving dimensions so the pill CONTENTS resize + stay centred as the pill slims — the bar
+   keeps its 100% width (only its height scales), so a slim pill stays full-width + centred. */
+.course-nav__progress-main { grid-column: 2; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(7px * var(--pill-scale, 1)); min-width: 0; }
+.course-nav__mode { grid-column: 1; justify-self: center; transform: translateX(calc(-1 * var(--pill-glyph-nudge, 0px))); }  /* light/dark glyph — pill LEFT slot; nudge pushes it toward the edge */
+/* no box around the glyphs in the pill — just the bare icon (border/bg none). */
+.course-nav__mode.mode-toggle { width: calc(34px * var(--pill-scale, 1)); height: calc(30px * var(--pill-scale, 1)); padding: 0; border: none; background: transparent; }
+.course-nav__mode svg { width: calc(19px * var(--pill-scale, 1)); height: calc(19px * var(--pill-scale, 1)); }  /* glyph scales with the pill */
+/* shared pill hover colour: author's --nav-btn-hover drives EVERY pill object (prev/next + glyphs). */
+.course-nav__mode.mode-toggle:hover { color: var(--nav-btn-hover, var(--color-accent)); }
+.course-nav__bar {
+  width: 100%; height: calc(6px * var(--pill-scale, 1)); border-radius: 999px;
+  background: var(--nav-bar-track, var(--color-surface-alt)); overflow: hidden;  /* author-overridable groove */
+}
+.course-nav__fill {
+  height: 100%; width: 0; border-radius: 999px;
+  background: var(--nav-bar-fill, var(--color-accent)); transition: width 0.35s ease;  /* author-overridable fill */
+}
+.course-nav__label {
+  white-space: nowrap;
+  /* line-height:1 pins the label's box height to its font-size so a web-font swap (fallback ->
+     Exo 2, ~1-2s after load) can't grow the label's line-box, which was growing the title+bar
+     group and shoving the bar to the bottom of the pill (demo baked the post-load state). */
+  font-size: calc(11px * var(--pill-scale, 1)); line-height: 1; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+/* hover BRIGHTENS the current-chapter label to ink (white in dark), never orange —
+   the pill is persistent chrome, so orange stays reserved for the "you are here" ring
+   marker inside the open chapter list, not a hover state. */
+.course-nav__progress:hover .course-nav__label { color: var(--color-ink); }
+
+/* chapter-jump modal — anchored popover above the bar */
+/* Per-mode DEFAULT surface for the floating nav (pill + chapter-jump modal): dark
+   #2a2a2a / light #ffffff, so the nav matches the page it's on (mirrors card-reveal's
+   --cr-card-fill pattern). The author's --nav-pill-fill override still wins on the pill.
+   No data-mode stamped (no-JS export pre-runtime) -> the final #2a2a2a fallback. */
+.course-root[data-mode="dark"] { --nav-surface-default: #2a2a2a; }
+.course-root[data-mode="light"] { --nav-surface-default: #ffffff; }
+.course-nav__modal[hidden] { display: none; }
+.course-nav__modal {
+  /* SPAN the pill width (left:0/right:0 on this absolute child of .course-nav__progress) so
+     the menu matches the pill's width + centre by construction — chapters get room to sit on
+     one line, and the menu tracks any author pill width automatically. */
+  position: absolute; bottom: calc(100% + 10px); left: 0; right: 0;
+  z-index: 20; overflow: hidden;
+  background: var(--nav-surface-default, #2a2a2a); border: 1px solid var(--color-hair);
+  border-radius: var(--radius-card); padding: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.course-nav__modal-title {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-ink-faint, var(--color-ink-soft)); padding: 12px 34px 8px 12px;  /* right pad clears the × */
+}
+/* top-right close box (mirrors the outside-click dismiss). */
+.course-nav__modal-close {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--color-ink-soft);
+  border-radius: var(--radius-sm, 2px); cursor: pointer; line-height: 1;
+  transition: background 0.12s, color 0.12s;
+}
+.course-nav__modal-close:hover { background: var(--color-surface); color: var(--color-ink); }
+.course-nav__modal-close svg { width: 15px; height: 15px; display: block; }
+/* rows carry their own padding — no extra gap; the LIST scrolls (not the modal) so the ×
+   + title stay pinned. */
+.course-nav__modal-list { display: flex; flex-direction: column; gap: 0; max-height: 54vh; overflow-y: auto; }
+
+/* §1 glossary: a button in the footer pill + a centred abbreviations overlay. */
+.course-nav__glossary {
+  font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--color-ink); background: transparent;
+  border: 1px solid var(--color-ink-soft); border-radius: 999px;
+  padding: 5px 12px; cursor: pointer; white-space: nowrap; line-height: 1;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.course-nav__glossary:hover { border-color: var(--color-ink); background: var(--color-surface); }
+/* icon variant: a circular/rounded glyph button in the pill's RIGHT slot, sized +
+   styled to match the mode-toggle glyph on the LEFT (symmetric pill). */
+.course-nav__glossary { grid-column: 3; justify-self: center; transform: translateX(var(--pill-glyph-nudge, 0px)); }  /* nudge pushes it toward the RIGHT edge */
+.course-nav__glossary--icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+  color: var(--color-ink-soft); background: transparent; border: none;  /* no box — bare glyph */
+}
+.course-nav__glossary--icon:hover { color: var(--nav-btn-hover, var(--color-accent)); background: transparent; }
+.course-nav__glossary--icon svg { width: calc(20px * var(--pill-scale, 1)); height: calc(20px * var(--pill-scale, 1)); display: block; }  /* scales with the pill (§1 P2 base 20px) */
+/* §1 glossary: an anchored term/definition popover above the pill, right-aligned to it
+   (mirrors the chapter modal + the redesign's glossary card). Same per-mode surface as
+   the chapter modal. Ships in SCORM; runtime.js owns open/close + the live filter. */
+.glossary-pop[hidden] { display: none; }
+.glossary-pop {
+  /* match the chapter menu exactly: SPAN + centre on the pill width (left:0/right:0 on this
+     absolute child of .course-nav__progress), same size + position as the menu. */
+  position: absolute; bottom: calc(100% + 12px); left: 0; right: 0; z-index: 30;
+  max-height: 62vh;
+  display: flex; flex-direction: column;
+  background: var(--nav-surface-default, #2a2a2a); border: 1px solid var(--color-hair);
+  border-radius: var(--radius-card); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden; animation: nav-pop-rise 0.2s cubic-bezier(0, 0, 0.2, 1);
+}
+@keyframes nav-pop-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .glossary-pop { animation: none; } }
+.glossary-pop__title {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 500; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--color-ink-soft); padding: 16px 20px 10px;
+}
+.glossary-pop__search {
+  display: flex; align-items: center; gap: 8px; margin: 0 20px 4px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--color-hair);
+}
+.glossary-pop__search-icon { flex: 0 0 auto; width: 15px; height: 15px; color: var(--color-ink-soft); display: block; }
+.glossary-pop__input {
+  flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none;
+  color: var(--color-ink); font-family: var(--font-body, inherit); font-size: 14px; padding: 2px 0;
+}
+.glossary-pop__input::placeholder { color: var(--color-ink-soft); }
+.glossary-pop__list { overflow-y: auto; padding: 4px 20px 16px; }
+.glossary-pop__row { padding: 12px 0; border-top: 1px solid var(--color-hair); }
+.glossary-pop__row:first-child { border-top: none; }
+.glossary-pop__row[hidden] { display: none; }
+.glossary-pop__term {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--color-ink); margin-bottom: 4px;
+}
+.glossary-pop__def { font-family: var(--font-body, inherit); font-size: 14px; line-height: 1.5; color: var(--color-ink-soft); }
+.glossary-pop__empty[hidden] { display: none; }
+.glossary-pop__empty { font-family: var(--font-body, inherit); font-size: 14px; color: var(--color-ink-soft); padding: 4px 20px 16px; }
+
+/* Image lightbox (learner aid): click any image to zoom it into a near-fullscreen
+   overlay with its caption. The zoom cursor only shows once the runtime has bound the
+   click (.is-lightbox-bound) -- never while editing on the authoring canvas. Ships in SCORM. */
+.block-image--zoomable.is-lightbox-bound { cursor: zoom-in; }
+.image-lightbox[hidden] { display: none; }
+.image-lightbox {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center; padding: 4vmin;
+}
+.image-lightbox__backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.82); }
+.image-lightbox__card {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  max-width: 92vw; max-height: 92vh;
+}
+.image-lightbox__stage {
+  display: flex; align-items: center; justify-content: center;
+  max-width: 92vw; max-height: 82vh; overflow: hidden;
+}
+.image-lightbox__media { max-width: 92vw; max-height: 82vh; width: auto; height: auto; object-fit: contain; }
+.image-lightbox__cap {
+  color: #fff; font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  text-align: center; max-width: 60ch;
+}
+.image-lightbox__cap[hidden] { display: none; }
+.image-lightbox__close {
+  position: absolute; top: -40px; right: -4px; width: 34px; height: 34px;
+  border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.14); color: #fff;
+  font-size: 24px; line-height: 1; cursor: pointer;
+}
+.image-lightbox__close:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* §64 chapter summary: a purpose-built bulleted list on the native quiz's completion
+   panel (kc-done). It only shows after the KC is passed (the kc-done panel is itself
+   pass-gated). Left-aligned dot points read better than the centred pass message.
+   An empty summary is hidden at runtime so the section never shows blank. */
+.kc-done__summary-wrap { margin-top: 22px; text-align: left; }
+.kc-done__summary-label {
+  font-family: var(--font-heading); font-weight: 600; font-size: 11px;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 10px;
+}
+.kc-done__summary {
+  margin: 0; padding-left: 1.4em; font-family: var(--font-body);
+  font-size: 15px; line-height: 1.6; color: var(--color-ink-soft);
+}
+.kc-done__summary li { margin: 5px 0; }
+/* Hide the summary when it has no non-empty bullet: covers a truly empty <ul> AND the
+   render-seeded <ul><li></li></ul> (one blank bullet the editor needs as a caret target). */
+.course-root[data-env="runtime"] .kc-done__summary-wrap:has(.kc-done__summary:not(:has(li:not(:empty)))) { display: none; }
+/* DS redesign: chapter rows read as a title list with a hollow "you are here" ring
+   marker. ORANGE DISCIPLINE — the accent appears ONLY on the current chapter (ring +
+   inner dot); every other marker is a ghost ring. The title uses the display face
+   (Exo 2) at 14px so the popover reads like the redesign's chapter list. */
+.course-nav__jump {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left;
+  font-family: var(--font-heading); font-size: 14px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.3;
+  color: var(--color-ink);
+  background: transparent; border: 0; border-radius: var(--radius-sm, 2px);
+  padding: 9px 10px; cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.course-nav__jump:hover { background: var(--color-surface); }
+/* current chapter TITLE stays ink (white in dark) — NOT orange; the orange lives only on
+   the ring marker below (the "you are here" locator). Weight lifts it instead of colour. */
+.course-nav__jump.is-current { color: var(--color-ink); font-weight: 600; }
+.course-nav__jump-dot {
+  flex: 0 0 auto; margin-top: 3px; width: 13px; height: 13px; border-radius: 50%;
+  border: 1.5px solid var(--color-ink-soft); background: transparent; box-sizing: border-box;
+}
+/* current: orange ring + a 5px orange inner dot (drawn with a radial fill). */
+.course-nav__jump.is-current .course-nav__jump-dot {
+  border-color: var(--color-accent);
+  background: radial-gradient(circle at center, var(--color-accent) 0 2.5px, transparent 2.6px);
+}
+/* done: a subtle FILLED ink marker — completion affordance kept, but ink (not orange)
+   so the accent stays reserved for the current crux. */
+.course-nav__jump.is-done .course-nav__jump-dot { background: var(--color-ink-soft); border-color: var(--color-ink-soft); }
+/* C: a LOCKED (not-yet-unlocked) chapter is greyed + not clickable; a blocked tap shakes */
+.course-nav__jump.is-locked { opacity: 0.4; cursor: not-allowed; }
+.course-nav__jump.is-locked:hover { background: transparent; }
+.course-nav__jump.is-nudge { animation: nav-jump-nudge 0.38s ease; }
+@keyframes nav-jump-nudge { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+@media (prefers-reduced-motion: reduce) { .course-nav__jump.is-nudge { animation: none; } }
+.course-nav__jump-label { flex: 1 1 auto; }
+
+/* mobile: hide arrow labels, keep icons */
+.course-root[data-bp="mobile"] .course-nav__btn-label { display: none; }
+/* icons-only nav (author toggle): drop the Back/Next words, keep just the chevrons */
+.course-nav--icons .course-nav__btn-label { display: none; }
+.course-nav--icons .course-nav__btn { padding: 8px 10px; gap: 0; }
+
+/* Runtime float: at RUNTIME (learner preview + export) the CENTRE pill (progress /
+   chapter menu) FLOATS at the bottom, always visible over the content — position:fixed
+   (export has no transform -> true viewport centre-bottom; the demo preview contains it
+   via .demo__device transform). The authoring CANVAS has NO data-env, so the pill stays
+   INLINE in the footer grid (no float, so it can NOT slide on the zoomed canvas — the
+   earlier slide was the base sticky, now removed). */
+.course-root[data-env="runtime"] .course-nav__progress {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  z-index: 50; pointer-events: auto;
+  /* the floating pill gets a real surface (author-styleable via --nav-pill-* vars). */
+  /* §1: author opacity — surface only (color-mix keeps the text/glyphs/bar/modal crisp),
+     mirrors the card-reveal --cr-cover pattern. Default 100% = fully opaque (unchanged). */
+  background: color-mix(in srgb, var(--nav-pill-fill, var(--nav-surface-default, #2a2a2a)) var(--nav-pill-opacity, 100%), transparent);
+  /* §1: author LAYER BLUR — frosts the content BEHIND the pill (pairs with a translucent
+     opacity for a real glass look). Default 0 = no blur (unchanged). */
+  -webkit-backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  border: var(--nav-pill-border-width, 1px) solid var(--nav-pill-border, var(--color-hair));
+  border-radius: var(--nav-pill-radius, 4px);
+  padding: calc(8px * var(--pill-scale, 1)) 18px; min-width: min(300px, var(--nav-pill-width, 300px)); /* author width below 300 still applies */
+  /* box-shadow now lives on the base .course-nav__progress rule (author var) so it's WYSIWYG
+     across editor + runtime + export; the hardcoded one here was removed. */
+}
+/* Opt-in: also PIN prev/next to the bottom gutters (else they sit inline at the page
+   end and appear as the learner scrolls down, per CCCC). Author toggle -> .course-nav--pin. */
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__prev,
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__next {
+  position: fixed; bottom: 16px; z-index: 50; pointer-events: auto;
+}
+/* #169b: FIXED-px gutters (was 5%) so the pinned corners read identically in EVERY course —
+   position:fixed anchors to the viewport, so a fixed px inset ignores the page's side padding /
+   content-width entirely (the 5% scaled with viewport width and looked "inset" on wide screens,
+   diverging course-to-course). Matches the reference corner-flush look. Mobile hugs tighter. */
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__prev { left: 24px; }
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__next { right: 24px; }
+.course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__prev { left: 12px; }
+.course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__next { right: 12px; }
+/* When the nav is pinned, prev/next are lifted OUT of the bar to fixed viewport corners,
+   but the interaction-gate reminder is absolute-anchored to the .course-nav bar (up in the
+   page flow) -- so it detached from the button and rendered at the bar instead of above the
+   pinned Next. Pin it to the same corner, just above the Next button (16px bottom inset +
+   ~34px button height + 10px gap). Mobile hugs the 12px gutter like the button. */
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__gate-hint {
+  position: fixed; left: auto; top: auto; right: 24px; bottom: calc(16px + 34px + 10px); z-index: 51;
+}
+.course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__gate-hint { right: 12px; }
+
+/* CCCC(2): scroll-gate the Next button. runtime.js stamps .rt-gated on each
+   course-root when the gate is active; the editor canvas never runs the runtime,
+   so its Next always shows. Next is hidden until the page is scrolled to the
+   bottom (or already fits the viewport) -> the box gains .is-scroll-done. Kept in
+   layout (visibility, not display) so the 3-col nav grid doesn't reflow. */
+.course-nav__next { transition: opacity 0.3s ease; }
+.course-root.rt-gated:not(.is-scroll-done) .course-nav__next {
+  visibility: hidden; opacity: 0; pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) { .course-nav__next { transition: none; } }

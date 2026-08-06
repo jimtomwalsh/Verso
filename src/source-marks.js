@@ -20,7 +20,12 @@
 (function () {
   "use strict";
 
-  var HL_TYPES = ["link", "alt", "comment", "active", "stale", "broken"];
+  var HL_TYPES = ["link", "alt", "comment", "restricted", "active", "stale", "broken"];
+  // mark type -> highlight set. It is a TABLE, not a chain of ternaries: the chain ended in a
+  // default that sent anything it did not recognise to the alternate set, so uio-S-C06's fourth
+  // type would have painted purple and read as an alternate. An unmapped type paints nothing,
+  // which is visible, rather than something, which is a lie.
+  var HL_FOR_TYPE = { link: "link", comment: "comment", alternate: "alt", restricted: "restricted" };
 
   function hasHighlight() {
     return typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined";
@@ -190,14 +195,15 @@
         // (the registry is ordered so they win per-property, and their washes composite over the
         // type colour) instead of replacing it -- so clicking a mark, or a mark going stale, never
         // costs you the colour that says what kind of mark it is.
-        reg[m.type === "link" ? "link" : m.type === "comment" ? "comment" : "alt"].add(r);
+        var set = HL_FOR_TYPE[m.type];
+        if (set) reg[set].add(r);
         if (m.stale) reg.stale.add(r);
         if (m.id === activeId) reg.active.add(r);
       });
     }
     // Object marks can't be Range-highlighted, so they tint the node element itself with a status
     // class (the CSS mirrors the ::highlight tints). Cleared + re-applied each paint.
-    var OBJ_CLASSES = ["sd-obj-marked", "sd-obj-broken", "sd-obj-stale", "sd-obj-active"];
+    var OBJ_CLASSES = ["sd-obj-marked", "sd-obj-broken", "sd-obj-stale", "sd-obj-active", "sd-obj-restricted"];
     function clearObjectDecor() {
       if (!root) return;
       Array.prototype.forEach.call(root.querySelectorAll(".sd-obj-marked"), function (el) {
@@ -208,6 +214,10 @@
       sd.refreshMark(model, m);
       var el = nodeEl(m.anchor.nodeKey); if (!el) return;
       el.classList.add("sd-obj-marked");
+      // uio-S-C06: a classified figure says so on the figure. The badge itself is drawn by the
+      // stage (it needs the resolved level, which lives up the ladder); this only carries the
+      // state the tint reads from, so the two can never disagree about which figures are marked.
+      if (m.type === "restricted") el.classList.add("sd-obj-restricted");
       if (m.broken) el.classList.add("sd-obj-broken");
       else if (m.id === activeId) el.classList.add("sd-obj-active");
       else if (m.stale) el.classList.add("sd-obj-stale");

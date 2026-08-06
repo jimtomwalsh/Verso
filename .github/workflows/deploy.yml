@@ -38,7 +38,7 @@ jobs:
           ref: ${{ matrix.branch }}
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
       - name: node tests/run.js
         run: node tests/run.js
 

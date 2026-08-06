@@ -1,0 +1,178 @@
+/* ---- primitive blocks (Text / Media / Layout library) -------------------- */
+.page-subtitle {
+  font-family: var(--font-heading);
+  font-size: calc(var(--size-page-title) * 0.62);
+  font-weight: 600;
+  color: var(--color-ink);
+  margin: 0 0 var(--space-sm);
+}
+.body-quote {
+  border-left: 3px solid var(--color-accent);
+  margin: var(--space-sm) 0;
+  padding: var(--space-xs) var(--space-md);
+  color: var(--color-ink-soft);
+  font-style: italic;
+}
+/* Bullet lists — ONE look everywhere text is typed. A rich text field may BE a <ul>
+   (the list block) or CONTAIN an inline <ul>/<ol> (made from the shared Text panel, like
+   bold); both render identically. Base + nesting apply to any content list; the author's
+   marker style/colour/size ride on data-list-marker stamped on the field node. */
+.body-list, .body-copy ul, .body-copy ol, .kc-done__summary ul, .kc-done__summary ol {
+  margin: var(--space-sm) 0; padding-left: 1.4em; color: var(--color-ink); line-height: 1.55;
+}
+.body-list li, .body-copy li, .kc-done__summary li { margin: 0.2em 0; }
+/* nested Tab-indented levels get distinct markers so the hierarchy reads */
+.body-list ul, .body-copy ul ul, .body-copy ol ul, .kc-done__summary ul ul { list-style-type: circle; padding-left: 1.4em; margin: 0.2em 0; }
+.body-list ul ul, .body-copy ul ul ul { list-style-type: square; }
+/* marker colour rides on the native ::marker for any list (field or inline) */
+.body-list li::marker, [data-list-marker] li::marker { color: var(--li-marker-color, currentColor); }
+/* author marker style: data-list-marker on the FIELD node styles its list items — whether
+   the field IS a <ul> (its own li's) or CONTAINS a list (descendant li's). Native types: */
+[data-list-marker="disc"] li { list-style-type: disc; }
+[data-list-marker="circle"] li { list-style-type: circle; }
+[data-list-marker="square"] li { list-style-type: square; }
+[data-list-marker="decimal"] li { list-style-type: decimal; }
+[data-list-marker="lower-alpha"] li { list-style-type: lower-alpha; }
+[data-list-marker="lower-roman"] li { list-style-type: lower-roman; }
+[data-list-marker="none"] li { list-style: none; }
+/* custom-glyph markers: no native marker; a ::before glyph gives full char + colour +
+   size control with a hanging indent so wrapped lines align under the text. */
+[data-list-marker="dash"] li,
+[data-list-marker="arrow"] li,
+[data-list-marker="check"] li,
+[data-list-marker="custom"] li { list-style: none; position: relative; padding-left: 1.4em; }
+[data-list-marker="dash"] li::before,
+[data-list-marker="arrow"] li::before,
+[data-list-marker="check"] li::before,
+[data-list-marker="custom"] li::before {
+  position: absolute; left: 0; color: var(--li-marker-color, currentColor);
+  font-size: var(--li-marker-size, 1em);
+}
+[data-list-marker="dash"] li::before { content: "\2013"; }
+[data-list-marker="arrow"] li::before { content: "\25B8"; }
+[data-list-marker="check"] li::before { content: "\2713"; }
+[data-list-marker="custom"] li::before { content: var(--li-marker, "\2022"); }
+/* #90: native table block. On-token only (borders --color-hair, header --color-surface,
+   zebra --color-surface-alt, text --color-ink) so it tracks light/dark + theme edits.
+   The scroll wrapper keeps a wide table from breaking the page width on mobile (#79). */
+.table-block { margin: var(--space-sm) 0; }
+.table-block__scroll { overflow-x: auto; max-width: 100%; }
+.table-block__table {
+  border-collapse: collapse;
+  width: 100%;
+  --table-cell-pad: 10px;
+  color: var(--color-ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.table-block__cell {
+  padding: var(--table-cell-pad);
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--color-hair);
+}
+.table-block__table[data-borders="rows"] .table-block__cell { border-left: 0; border-right: 0; }
+.table-block__table[data-borders="none"] .table-block__cell { border: 0; }
+.table-block__table th.table-block__cell {
+  font-weight: 700;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.table-block__table[data-zebra] tr:nth-child(even) td.table-block__cell {
+  background: var(--color-surface-alt);
+}
+.table-block__cell > :first-child { margin-top: 0; }
+.table-block__cell > :last-child { margin-bottom: 0; }
+.block-divider { padding: var(--space-sm) 0; }
+.block-divider__line { border: 0; border-top: 1px solid var(--color-hair); margin: 0; }
+.block-spacer { width: 100%; }
+/* hidden blocks/instances are dropped from the shipped page + demo; the editor
+   re-shows them dimmed on the canvas (editor.css) so they stay reachable. */
+[data-hidden] { display: none; }
+/* auto spacer: a flex spring that eats leftover height on a filled page. */
+.block-spacer--auto { flex: 1 1 0; min-height: 0; height: auto; }
+
+/* Fill layout — only applied when a page contains an auto spacer (gated by
+   render.js). --vp-h is set per-frame by the editor to the device height; in the
+   shipped SCORM course no one sets it, so it falls back to the real viewport. */
+.course-root--fill { display: flex; flex-direction: column; min-height: var(--vp-h, 100vh); }
+/* Auto vertical spacing: the filled page centres its content vertically by
+   default (short pages sit in the middle; long pages just flow). A manual
+   auto-spacer (flex:1) still overrides. page.vAlign="distribute" spreads blocks. */
+.course-root--fill .page--fill { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+.course-root--fill .page--fill[data-valign="distribute"] { justify-content: space-between; }
+.block-image { margin: var(--space-sm) 0; text-align: center; }
+.block-image__img { max-width: 100%; height: auto; border-radius: var(--img-radius, var(--radius-card)); mix-blend-mode: var(--img-blend, normal); }
+/* Item Y — per-asset light/dark contrast (own dimension, not the CSV variant axis) */
+/* opt-in auto-tint: recolour a mono image/SVG to contrast the bg in dark (mirrors the logo) */
+.course-root[data-mode="dark"] .block-image__img--auto { filter: invert(1); }
+/* per-mode raster sources: show the source matching the active mode (default = light) */
+.block-image__img--light, .block-image__img--dark { display: inline-block; }
+.block-image__img--dark { display: none; }
+.course-root[data-mode="dark"] .block-image__img--light { display: none; }
+.course-root[data-mode="dark"] .block-image__img--dark { display: inline-block; }
+/* no-JS export fallback: follow the OS preference until the runtime stamps data-mode */
+@media (prefers-color-scheme: dark) {
+  .course-root:not([data-mode]) .block-image__img--light { display: none; }
+  .course-root:not([data-mode]) .block-image__img--dark { display: inline-block; }
+}
+.block-image--empty {
+  border: 1px dashed var(--color-hair);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--color-muted);
+}
+.block-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-sm) 0;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+}
+.block-frame__empty {
+  color: var(--color-muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-md);
+}
+
+/* Build-time visibility aid: unfilled image / HTML-interaction slots glare NEON PINK on
+   the authoring canvas so they can't be missed. Scoped to .course-root:not([data-env]) =
+   the authoring canvas ONLY (demo + export both stamp data-env="runtime", export.js:371),
+   so a placeholder NEVER ships hot-pink in a course and never shows in preview. */
+.course-root:not([data-env]) .block-image--empty,
+.course-root:not([data-env]) .embed__empty-hint,
+.course-root:not([data-env]) .embed--empty .embed__iframe {
+  border: 2px dashed #ff2bd6;
+  background: repeating-linear-gradient(45deg, rgba(255, 43, 214, 0.10), rgba(255, 43, 214, 0.10) 12px, rgba(255, 43, 214, 0.22) 12px, rgba(255, 43, 214, 0.22) 24px);
+}
+.course-root:not([data-env]) .block-image--empty,
+.course-root:not([data-env]) .embed__empty-title,
+.course-root:not([data-env]) .embed__empty-sub,
+.course-root:not([data-env]) .block-frame__empty { color: #ff2bd6; }
+
+/* Group: invisible container — keeps children's exact layout (no box) */
+.block-group { display: contents; }
+.block-group__empty { color: var(--color-muted); font-style: italic; padding: var(--space-sm) 0; }
+
+/* #94: empty-column drop slot — a targetable placeholder for a fresh Columns block's
+   empty columns. Muted in a shipped course (columns get filled before ship), but glares
+   as a dashed drop zone on the authoring canvas only (same aid as empty image/frame). */
+.layout-column__empty {
+  color: var(--color-muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-md);
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.course-root:not([data-env]) .layout-column__empty {
+  border: 2px dashed #ff2bd6;
+  color: #ff2bd6;
+  background: repeating-linear-gradient(45deg, rgba(255, 43, 214, 0.10), rgba(255, 43, 214, 0.10) 12px, rgba(255, 43, 214, 0.22) 12px, rgba(255, 43, 214, 0.22) 24px);
+}

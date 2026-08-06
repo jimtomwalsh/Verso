@@ -11,5 +11,6 @@ export interface RecentsMenuRowProps {
   style?: React.CSSProperties;
 }
 
-/** One recent course inside the top-bar save/recents dropdown (mini snapshot + title/code + last-edited). */
+/** One recent document inside the top-bar save/recents dropdown (mini snapshot + title/code + last-edited).
+ *  For a document list proper, use DocumentRow -- this is the condensed dropdown form. */
 export function RecentsMenuRow(props: RecentsMenuRowProps): JSX.Element;

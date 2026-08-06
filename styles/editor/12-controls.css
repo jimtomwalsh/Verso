@@ -1,0 +1,279 @@
+/* ===================================================================   Verso Design System canonical control set (issue #10, SPEC-chrome-redesign).
+   CHROME ONLY — never enters src/course.css / render() / the SCORM export.
+   Token-driven (DS tokens referenced directly). Consumed by window.
+   VersoUI (src/ui-kit.js); the surface re-skins that adopt these land in #11+.
+   ========================================================================== */
+
+/* --- Button ------------------------------------------------------------- */
+.vds-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: var(--font-ui, Inter, system-ui, sans-serif);
+  font-size: var(--text-sm, 11px); font-weight: var(--weight-medium, 500);
+  border: 1px solid transparent; border-radius: var(--radius-md, 4px);
+  cursor: pointer; white-space: nowrap; user-select: none;
+  transition: background var(--dur-fast, 120ms) var(--ease-out, cubic-bezier(.2,0,0,1)), border-color var(--dur-fast, 120ms);
+}
+.vds-btn--md { height: 32px; padding: 0 12px; }
+.vds-btn--sm { height: 24px; padding: 0 8px; font-size: var(--text-xs, 10px); }
+.vds-btn--full { width: 100%; }
+.vds-btn__icon { display: inline-flex; }
+.vds-btn__icon svg { width: 16px; height: 16px; }
+.vds-btn:disabled { opacity: .45; cursor: default; }
+.vds-btn--primary { background: var(--accent, #0d99ff); color: var(--text-on-accent, #fff); }
+.vds-btn--primary:hover:not(:disabled) { background: var(--accent-hover, #2aa8ff); }
+.vds-btn--primary:active:not(:disabled) { background: var(--accent-pressed, #0b87e0); }
+.vds-btn--secondary { background: var(--surface-raised); color: var(--text-primary); border-color: var(--border-subtle); }
+.vds-btn--secondary:hover:not(:disabled) { background: var(--surface-hover, rgba(255,255,255,.1)); }
+.vds-btn--ghost { background: transparent; color: var(--text-secondary); }
+.vds-btn--ghost:hover:not(:disabled) { background: var(--surface-hover, rgba(255,255,255,.06)); color: var(--text-primary); }
+.vds-btn--danger { background: var(--danger, #f24822); color: #fff; }
+.vds-btn--danger:hover:not(:disabled) { background: var(--danger-hover, #ff5c38); }
+
+/* --- IconButton --------------------------------------------------------- */
+.vds-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; cursor: pointer; color: var(--icon-idle);
+  border-radius: var(--radius-sm, 2px); transition: background var(--dur-fast, 120ms), color var(--dur-fast, 120ms);
+}
+.vds-iconbtn--sm { width: 20px; height: 20px; }
+.vds-iconbtn--md { width: 24px; height: 24px; }
+.vds-iconbtn--lg { width: 32px; height: 32px; }
+.vds-iconbtn svg { width: 16px; height: 16px; }
+.vds-iconbtn:hover:not(:disabled) { background: var(--surface-hover, rgba(255,255,255,.06)); color: var(--icon-strong); }
+.vds-iconbtn.is-active { background: var(--accent-quiet, rgba(13,153,255,.15)); color: var(--accent, #0d99ff); }
+.vds-iconbtn.is-danger { color: var(--danger, #f24822); }
+.vds-iconbtn:disabled { opacity: .4; cursor: default; }
+
+/* --- TextField ---------------------------------------------------------- */
+.vds-textfield { display: flex; align-items: center; gap: 6px; width: 100%; background: var(--surface-input); border: 1px solid transparent; border-radius: var(--radius-sm, 2px); padding: 0 8px; }
+.vds-textfield:focus-within { border-color: var(--border-focus, var(--accent, #0d99ff)); }
+.vds-textfield__icon { display: inline-flex; color: var(--icon-idle, #999); }
+.vds-textfield__icon svg { width: 14px; height: 14px; }
+.vds-textfield__input { flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none; color: var(--text-primary); font-family: var(--font-ui, Inter, sans-serif); font-size: var(--text-sm, 11px); padding: 6px 0; resize: vertical; }
+.vds-textfield__input::placeholder { color: var(--text-tertiary); }
+
+/* --- Select ------------------------------------------------------------- */
+.vds-select { width: 100%; height: 24px; background: var(--surface-input); color: var(--text-primary); border: 1px solid transparent; border-radius: var(--radius-sm, 2px); font-family: var(--font-ui, Inter, sans-serif); font-size: var(--text-sm, 11px); padding: 0 6px; cursor: pointer; }
+.vds-select:hover { border-color: var(--border-input); }
+.vds-select:focus { outline: none; border-color: var(--border-focus, var(--accent, #0d99ff)); }
+
+/* --- Checkbox ----------------------------------------------------------- */
+.vds-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.vds-check__box { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--border-input); border-radius: var(--radius-xs, 2px); background: var(--surface-input, rgba(255,255,255,.04)); color: var(--text-on-accent, #fff); }
+.vds-check__box svg { width: 11px; height: 11px; }
+.vds-check__box.is-on, .vds-check__box.is-mixed { background: var(--accent, #0d99ff); border-color: var(--accent, #0d99ff); }
+.vds-check__label { font-size: var(--text-sm, 11px); color: var(--text-secondary); }
+.vds-check.is-disabled { opacity: .45; cursor: default; }
+
+/* --- ColorField (opacity + eyedropper additions) ------------------------ */
+.vds-color { display: flex; align-items: center; gap: 6px; }
+.vds-color__hex { flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none; color: var(--text-primary); font-family: var(--font-mono, "JetBrains Mono", monospace); font-size: var(--text-sm, 11px); }
+.vds-color__opacity { width: 40px; background: transparent; border: none; outline: none; color: var(--text-secondary, #999); font-size: var(--text-sm, 11px); text-align: right; }
+.vds-color__eyedrop { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: none; background: transparent; color: var(--icon-idle, #999); cursor: pointer; border-radius: var(--radius-sm, 2px); }
+.vds-color__eyedrop svg { width: 14px; height: 14px; }
+.vds-color__eyedrop:hover { background: var(--surface-hover, rgba(255,255,255,.06)); color: var(--icon-strong, #e6e6e6); }
+
+/* --- SwitchRow (labels + description) ----------------------------------- */
+.switch-row__labels { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; }
+.switch-row__desc { font-size: var(--text-xs, 10px); color: var(--text-tertiary); }
+
+/* --- FieldRow / PanelSection modifiers ---------------------------------- */
+.insp-row--top { align-items: flex-start; }
+.insp-section--no-divider .insp-section__head { border-top: none; }
+.prop-toggle-row--sm .prop-toggle { height: 20px; }
+
+/* --- Panel -------------------------------------------------------------- */
+.vds-panel { display: flex; flex-direction: column; height: 100%; background: var(--surface-panel); }
+.vds-panel--left { border-right: 1px solid var(--border-strong); }
+.vds-panel--right { border-left: 1px solid var(--border-strong); }
+.vds-panel__header { flex: 0 0 auto; border-bottom: 1px solid var(--border-subtle); }
+.vds-panel__body { flex: 1 1 auto; overflow-y: auto; }
+.vds-panel__footer { flex: 0 0 auto; border-top: 1px solid var(--border-subtle); padding: 8px; }
+
+/* --- Tabs --------------------------------------------------------------- */
+.vds-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border-subtle); }
+.vds-tab { position: relative; background: transparent; border: none; cursor: pointer; color: var(--text-secondary); font-family: var(--font-ui, Inter, sans-serif); font-size: var(--text-sm, 11px); padding: 8px 10px; }
+.vds-tab:hover { color: var(--text-primary); }
+.vds-tab.is-on { color: var(--text-primary); }
+.vds-tab.is-on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent, #0d99ff); }
+
+/* --- DocumentTab -------------------------------------------------------- */
+/* uio-W11: A TAB NEVER SHRINKS. A strip that shrinks its tabs to fit trades one problem for a worse
+   one -- at twelve open documents every tab is too narrow to read, and you have lost the thing tabs
+   are for. So the width is fixed, the strip scrolls, and past the threshold the remainder moves into
+   a `+N more`. `flex: 0 0 auto` is what stops the flex parent squeezing it. */
+.vds-doctab { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; width: 168px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-sm, 2px) var(--radius-sm, 2px) 0 0; color: var(--text-secondary); font-size: var(--text-sm, 11px); cursor: pointer; }
+.vds-doctab.is-active { background: var(--surface-canvas); color: var(--text-primary); }
+.vds-doctab__dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; } /* SPEC 7: per-Product colour dot */
+.vds-doctab__glyph { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--icon-idle, #999); } /* tab-doctype-glyph: doc-type marker */
+.vds-doctab__glyph svg { width: 14px; height: 14px; }
+.vds-doctab.is-active .vds-doctab__glyph { color: var(--icon-strong, var(--text-primary)); }
+/* uio-W02 DocumentRow: ONE document row for every list — Files, Publish, the pickers, the palette.
+   Height is --row-height-doc (32px), NOT --row-height (28px): that token is the inspector row, a
+   different species (label column + one control, a value you set). This is a click target.
+   Contract: design-system/components/browser/DocumentRow.d.ts. */
+.vds-docrow {
+  display: flex; align-items: center; gap: 6px;
+  height: var(--row-height-doc, 32px); padding: 0 8px;
+  border-radius: var(--radius-sm, 4px); cursor: pointer;
+  color: var(--text-primary); font-size: var(--text-xs, 11px);
+}
+.vds-docrow:hover { background: rgba(255, 255, 255, 0.06); }
+.vds-docrow.is-active { background: var(--accent-quiet); }
+/* The type well. Its COLOUR is what reads at a glance, not its glyph: source documents are written
+   material, the other three are laid-out material, and that is the split worth seeing instantly. */
+.vds-docrow__well {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-md, 24px); height: var(--control-md, 24px);
+  border-radius: var(--radius-xs, 2px);
+  background: var(--surface-input); color: var(--icon-idle, #999);
+}
+.vds-docrow__well--source { background: var(--accent-quiet); color: var(--accent); }
+.vds-docrow__well svg { width: 14px; height: 14px; }
+.vds-docrow__dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; } /* per-Product marker, as on the tab */
+.vds-docrow__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Chips are square-ish, never pills — nothing is pill-rounded but toggles and count badges. */
+.vds-docrow__chip {
+  flex: 0 0 auto; padding: 0 4px; border-radius: var(--radius-xs, 2px);
+  background: var(--surface-input); color: var(--text-secondary);
+}
+.vds-docrow__chip--accent { background: var(--accent-quiet); color: var(--accent); }
+/* Open-state states a fact about the document; it is not a control, so it is plain text. */
+.vds-docrow__open { flex: 0 0 auto; color: var(--text-secondary); }
+.vds-docrow__trailing { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+/* Compact time ("11mo"), right-aligned in a fixed column so the dates form a clean edge. */
+.vds-docrow__updated { flex: 0 0 64px; text-align: right; color: var(--text-secondary); }
+.vds-docrow__menu {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-md, 24px); height: var(--control-md, 24px); padding: 0;
+  border: 0; background: none; color: var(--icon-idle, #999); cursor: pointer;
+  border-radius: var(--radius-xs, 2px); visibility: hidden;
+}
+.vds-docrow:hover .vds-docrow__menu { visibility: visible; }
+.vds-docrow__menu:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+.vds-docrow__menu svg { width: 14px; height: 14px; }
+
+/* SPEC 7 ChoiceCards: a single-select grid of preset/mode cards (create flow, cell switcher). */
+.vds-choicecards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vds-choicecard {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+  padding: 11px 12px; border: 1px solid var(--border-input, var(--border-strong));
+  background: var(--surface-input); border-radius: var(--radius-md, 8px);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.vds-choicecard:hover { border-color: var(--border-strong); }
+.vds-choicecard.is-on { border-color: var(--accent); background: var(--accent-quiet); }
+.vds-choicecard__title { font-size: var(--text-md, 13px); font-weight: 500; color: var(--text-primary); }
+.vds-choicecard__desc { font-size: var(--text-sm, 11px); color: var(--text-tertiary); }
+/* One line, ellipsised. A label that wrapped would grow the tab's height and push the strip past
+   the 40px toolbar it lives in. */
+.vds-doctab__label { flex: 1 1 auto; min-width: 0; text-align: left; background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vds-doctab__close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; background: transparent; color: var(--icon-idle, #999); cursor: pointer; border-radius: var(--radius-xs, 2px); opacity: 0; }
+.vds-doctab__close svg { width: 12px; height: 12px; }
+.vds-doctab:hover .vds-doctab__close, .vds-doctab.is-active .vds-doctab__close { opacity: 1; }
+.vds-doctab__close:hover { background: var(--surface-hover, rgba(255,255,255,.1)); color: var(--icon-strong, #e6e6e6); }
+
+/* --- TreeItem ----------------------------------------------------------- */
+.vds-tree-item { display: flex; align-items: center; gap: 4px; height: 28px; padding-right: 8px; cursor: pointer; color: var(--text-primary); font-size: var(--text-sm, 11px); border-radius: var(--radius-sm, 2px); }
+.vds-tree-item:hover { background: var(--surface-hover, rgba(255,255,255,.06)); }
+.vds-tree-item.is-selected { background: var(--surface-selected, var(--accent-quiet, rgba(13,153,255,.15))); }
+.vds-tree-item.is-muted { opacity: .5; }
+.vds-tree-item__twirl { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; background: transparent; color: var(--icon-idle, #999); cursor: pointer; padding: 0; }
+.vds-tree-item__twirl svg { width: 12px; height: 12px; transition: transform var(--dur-fast, 120ms); }
+.vds-tree-item__twirl.is-open svg { transform: rotate(90deg); }
+.vds-tree-item__twirl--ghost { visibility: hidden; }
+.vds-tree-item__icon { display: inline-flex; color: var(--icon-idle, #999); }
+.vds-tree-item__icon svg { width: 14px; height: 14px; }
+.vds-tree-item__label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vds-tree-item__trailing { flex: 0 0 auto; display: inline-flex; align-items: center; }
+
+/* --- BlockPaletteItem --------------------------------------------------- */
+.vds-palette-item { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius-sm, 2px); cursor: grab; color: var(--text-primary); font-size: var(--text-sm, 11px); }
+.vds-palette-item:hover { background: var(--surface-hover, rgba(255,255,255,.06)); }
+.vds-palette-item__chip { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius-sm, 2px); background: var(--surface-raised, rgba(255,255,255,.06)); color: var(--icon-idle, #999); }
+.vds-palette-item__chip svg { width: 15px; height: 15px; }
+
+/* --- BlockTile + BlockGrid ---------------------------------------------- */
+.vds-grid { display: grid; gap: 6px; padding: 8px; }
+.vds-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 12px 6px; border-radius: var(--radius-md, 6px); background: var(--surface-raised, rgba(255,255,255,.04)); border: 1px solid var(--border-subtle, rgba(255,255,255,.08)); cursor: grab; color: var(--text-secondary); font-size: var(--text-xs, 10px); text-align: center; }
+.vds-tile:hover { background: var(--surface-hover, rgba(255,255,255,.08)); color: var(--text-primary, #e6e6e6); }
+.vds-tile.is-selected { border-color: var(--accent, #0d99ff); color: var(--text-primary, #e6e6e6); }
+/* issue 105: single-line, ellipsised label -> every tile is the same height regardless
+   of label length (2-line labels were the source of the irregular rows). Full text on
+   hover via the tile's title attribute. */
+.vds-tile__label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* issue 105: match the DS default UI glyph scale (--icon-md: 16px); 20px read as oversized. */
+.vds-tile__icon svg { width: 16px; height: 16px; }
+
+/* --- Badge -------------------------------------------------------------- */
+.vds-badge { display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-full, 999px); font-family: var(--font-ui, Inter, sans-serif); font-weight: var(--weight-medium, 500); line-height: 1; }
+.vds-badge--md { min-width: 16px; height: 16px; padding: 0 5px; font-size: var(--text-xs, 10px); }
+.vds-badge--sm { min-width: 14px; height: 14px; padding: 0 4px; font-size: var(--text-2xs, 9px); }
+.vds-badge--neutral { background: var(--surface-raised, rgba(255,255,255,.1)); color: var(--text-secondary, #bbb); }
+.vds-badge--accent { background: var(--accent, #0d99ff); color: var(--text-on-accent, #fff); }
+.vds-badge--success { background: var(--success, #14ae5c); color: #fff; }
+.vds-badge--danger { background: var(--danger, #f24822); color: #fff; }
+.vds-badge--warning { background: var(--warning, #e0a83e); color: #1a1a1a; }
+.vds-badge--component { background: var(--component, #9747ff); color: #fff; }
+/* quiet — tinted background, tone as ink. For a badge that repeats down a list (a release log's
+   outcome, a row's state), where a column of solid fills would outshout the rows. */
+.vds-badge--quiet { font-weight: var(--weight-semibold, 600); }
+.vds-badge--neutral.vds-badge--quiet { background: var(--surface-raised); color: var(--text-secondary); }
+.vds-badge--accent.vds-badge--quiet { background: var(--accent-quiet); color: var(--accent); }
+.vds-badge--success.vds-badge--quiet { background: var(--green-tint); color: var(--success); }
+.vds-badge--danger.vds-badge--quiet { background: var(--danger-quiet); color: var(--danger); }
+.vds-badge--warning.vds-badge--quiet { background: var(--yellow-tint); color: var(--warning); }
+.vds-badge--component.vds-badge--quiet { background: var(--purple-tint, rgba(151,71,255,0.16)); color: var(--component); }
+
+/* --- Meter (vds-meter; structure/Meter, uio-P-C01 / PUB-01) -------------- */
+/* Labelled banded percentage: label · 4px track · value. The band tone is the FILL and the
+   value's INK (the quiet Badge's tone-as-ink move); the track stays surface-raised. Not-indexed
+   is a dashed empty track with the words in tertiary ink -- a measurement that could not be
+   taken, never a 0% score. */
+.vds-meter { display: inline-flex; align-items: center; gap: var(--space-4, 4px); font-family: var(--font-ui, Inter, sans-serif); line-height: 1; }
+.vds-meter__label { font-size: var(--text-2xs, 9px); color: var(--text-secondary); }
+.vds-meter__track { width: 56px; height: 4px; border-radius: var(--radius-full, 999px); background: var(--surface-raised); overflow: hidden; }
+.vds-meter__fill { height: 100%; border-radius: var(--radius-full, 999px); }
+.vds-meter__value { font-size: var(--text-2xs, 9px); font-weight: var(--weight-semibold, 600); }
+.vds-meter--success .vds-meter__fill { background: var(--success); }
+.vds-meter--success .vds-meter__value { color: var(--success); }
+.vds-meter--warning .vds-meter__fill { background: var(--warning); }
+.vds-meter--warning .vds-meter__value { color: var(--warning); }
+.vds-meter--neutral .vds-meter__fill { background: var(--text-tertiary); }
+.vds-meter--neutral .vds-meter__value { color: var(--text-secondary); }
+.vds-meter--notindexed .vds-meter__track { background: none; border: 1px dashed var(--border-strong); }
+.vds-meter--notindexed .vds-meter__value { color: var(--text-tertiary); font-weight: var(--weight-medium, 500); }
+
+/* --- Modal (vds-modal head/body/footer) --------------------------------- */
+.vds-modal { position: relative; }
+.vds-modal .modal-head { flex-direction: row; align-items: center; justify-content: space-between; }
+.vds-modal .modal-title { font-family: var(--font-ui, Inter, sans-serif); font-size: var(--text-md, 13px); font-weight: var(--weight-semibold, 600); color: var(--text-primary); }
+.vds-modal__close { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--icon-idle, #999); cursor: pointer; border-radius: var(--radius-sm, 2px); }
+.vds-modal__close svg { width: 16px; height: 16px; }
+.vds-modal__close:hover { background: var(--surface-hover, rgba(255,255,255,.08)); color: var(--icon-strong, #e6e6e6); }
+.vds-modal__body { padding: 12px 0; }
+.vds-modal__footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 8px; }
+
+/* --- ContextMenu (icon/label/shortcut sub-parts) ------------------------ */
+.ctx-item__icon { display: inline-flex; align-items: center; margin-right: 8px; }
+.ctx-item__icon svg { width: 15px; height: 15px; }
+.ctx-item__label { flex: 1 1 auto; }
+.ctx-item__shortcut { margin-left: 16px; opacity: .6; font-size: var(--text-xs); }
+.ctx-item.is-disabled { opacity: .4; pointer-events: none; }
+
+/* --- Tooltip ------------------------------------------------------------ */
+.vds-tip-wrap { position: relative; display: inline-flex; }
+.vds-tip { position: absolute; z-index: 10000; pointer-events: none; opacity: 0; transition: opacity var(--dur-fast, 120ms); background: var(--surface-raised, #262626); color: var(--text-primary, #e6e6e6); font-size: var(--text-xs, 10px); white-space: nowrap; padding: 4px 8px; border-radius: var(--radius-sm, 4px); border: 1px solid var(--border-subtle, rgba(255,255,255,.1)); box-shadow: var(--shadow-popover, 0 4px 12px rgba(0,0,0,.4)); }
+.vds-tip-wrap:hover .vds-tip { opacity: 1; }
+.vds-tip--top { bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 6px; }
+.vds-tip--bottom { top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; }
+.vds-tip--left { right: 100%; top: 50%; transform: translateY(-50%); margin-right: 6px; }
+.vds-tip--right { left: 100%; top: 50%; transform: translateY(-50%); margin-left: 6px; }
+
+/* --- Icon wrapper ------------------------------------------------------- */
+.vds-icon { display: inline-flex; align-items: center; }
+/* uio-W16: the release-state column. Two states, no third — a document is either as it went out or
+   it is not, and a middle word would be a hedge the publisher then has to interpret. */
+.vds-docrow__release { flex: 0 0 auto; font-size: var(--text-2xs, 10px); white-space: nowrap; }
+.vds-docrow__release--ready { color: var(--success, var(--text-secondary)); }
+.vds-docrow__release--review { color: var(--warning, var(--text-secondary)); }

@@ -5,20 +5,91 @@ on:
     branches: [main]
   pull_request:
 
+# arch-P6-01: four named jobs, not one.
+#
+# CI used to be a single `node tests/run.js`. Everything the repo enforces ran inside it, so a red
+# build said "something is wrong" and nothing else -- a hygiene violation, a syntax error and a
+# logic regression were the same red X, and you opened the log to find out which. A build should
+# say which contract broke before anyone reads a log.
+#
+# They are separate JOBS rather than steps so they run in parallel and each reports its own status:
+# a PR shows four checks, and the failing one names the contract. Ordered below by how cheap the
+# failure is to diagnose.
+#
+# No dependencies are installed anywhere. Every job is pure Node against the repo as checked out --
+# the same commands a contributor runs locally.
+#
+# NODE 22, not 20 (platform-pivot 34). The storage layer is node:sqlite, which arrived in
+# 22.5 -- so on Node 20 every server test in the suite hit its `catch -> warn -> return`
+# guard and skipped. The whole platform-pivot backend (SQLite store, block-addressable
+# rows, sync, auth, locking, review links, backup) had therefore never been exercised by
+# CI at all, on a suite that reported itself green. The product's own runtime requires
+# 22.5+; CI now matches it, which turns those tests on for the first time.
 jobs:
-  test:
+  hygiene:
+    name: Hygiene gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # Customer/proprietary content, the removed assistant + i18n layers, personal filesystem
+      # paths, secrets, new external network calls, and the top-level boundary manifest. A failure
+      # here is never a logic bug -- it is something that must not be in the repository at all.
+      - name: node scripts/check-hygiene.js
+        run: node scripts/check-hygiene.js
+
+  syntax:
+    name: Syntax sweep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # `node --check` over every source file, DISCOVERED rather than listed -- the hand-maintained
+      # list once drifted four modules behind src/editor/, which meant a syntax error in any of
+      # them would have shipped. This isolates "this file does not parse" from "this behaviour is
+      # wrong", which are different problems for whoever is reading.
+      - name: node --check every source file
+        run: |
+          set -euo pipefail
+          count=$(find src server tools scripts tests -name '*.js' | wc -l | tr -d ' ')
+          find src server tools scripts tests -name '*.js' -print0 | xargs -0 -n1 node --check
+          echo "syntax OK: $count files"
+
+  suite:
     name: Regression suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
-
-      # The suite is pure Node (no dependencies) and syntax-checks every src/*.js
-      # itself, then exercises the extracted pure cores. Exits non-zero on any
-      # FAIL, which fails the job.
+          node-version: "22"
+      # Pure Node, no dependencies. It boots the real editor in a VM tier, drives the extracted
+      # pure cores, and carries the standing ratchets: the four-file block contract (P4-04), the
+      # stylesheet and guide ORDER (P5), the module map (P3b-08), the editor-namespace wiring
+      # (P3b-01), and design-system adherence (P6-02). Exits non-zero on any FAIL.
       - name: node tests/run.js
         run: node tests/run.js
+
+  drift:
+    name: Docs drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # This reads source and compares it to something written down. Separated from the suite
+      # because "the documentation no longer matches the code" is a different job for whoever reads
+      # the log than "the code is wrong".
+      - name: Every palette block is documented
+        run: node tools/docs-maintain.js
+      # The browser-driven suites (tests/e2e.js, tests/e2e-publish-paths.js) need Puppeteer and are
+      # deliberately NOT run here: installing a browser would make CI depend on a package this repo
+      # does not have and does not want. They run locally against a real browser before a PR, and
+      # the evidence is recorded against the branch.
+      - name: Browser suites are local-only, by design
+        run: echo "e2e + e2e-publish-paths run locally against a real browser (no Puppeteer in CI by design)"

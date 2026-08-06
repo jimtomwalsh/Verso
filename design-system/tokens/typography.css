@@ -21,6 +21,23 @@
   --text-2xl: 28px;   /* brand / marketing headings */
   --text-3xl: 40px;
 
+  /* Reading type (uio-S-M03). The ramp above is CHROME — labels, menus, rows, all built to be
+     scanned at a glance. Source is the first surface in Verso where an author READS long-form
+     prose rather than operating a control, and chrome sizes are wrong for that: 13px at 1.65 is a
+     dense working measure, not something you read a manual in. These two are the reading pair, and
+     they belong to a reading surface, never to chrome. */
+  --text-reading:    17px;
+  --leading-reading: 1.78;
+
+  /* uio-S-A01. S-M03 shipped the pair above and then MEASURED the result: working prose was still
+     running at ~101 characters a line, because only Read mode had been taken off the chrome ramp.
+     Working prose kept inheriting --text-md (13px), and no cap can rescue 13px — 45-75 characters
+     at that size is a 310-520px column, which is not a surface anyone wants to write in.
+     So working prose gets its own pair too. It sits below reading (you are editing, and a denser
+     line lets more of the passage stay on screen) and well above chrome. */
+  --text-source:    16px;
+  --leading-source: 1.70;
+
   /* Weights */
   --weight-regular:  400;
   --weight-medium:   500;

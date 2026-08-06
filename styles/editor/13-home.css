@@ -1,0 +1,647 @@
+/* =====================================================   #73 Home / file browser ("local-first, no cloud")
+   A full-screen overlay OVER the editor. Chrome only — never ships.
+   Built to the DS browser/ patterns (CourseCard/CardGrid/ThumbnailFrame/
+   SearchField); tokens come from the vendored design-system/tokens/*.css
+   imported at the top of this file, so this matches the DS card spec 1:1.
+   ============================================================ */
+.vbrowser {
+  /* chrome invariant: contained to the workspace region (below the 44px top bar, right of the
+     --rail-w rail) so the product picker + stage rail stay visible + interactive while browsing. */
+  position: fixed; top: var(--toolbar-height, 40px); left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 60;
+  display: flex; flex-direction: column;
+  background: var(--surface-app);
+}
+.vbrowser[hidden] { display: none; }
+/* uio-W09: THE DOCUMENT BROWSER ITSELF IS GONE -- its card grid, its live page-1 thumbnails, its
+   per-card menu, its empty state and its footer are deleted rather than kept in parallel with the
+   Files destination. Two surfaces answering "where are my documents?" is the divergence this
+   overhaul exists to end, and the overlay only ever listed HALF the answer: design documents from
+   the registry, never the source documents in LibraryStore.
+
+   THE SHELL STAYS, and not out of caution: the tour builder overlay is built on it (.vbrowser +
+   __bar + __title + __spacer + __btn + __close), and the search chrome below is rendered by the
+   Source stage and the Edit source panel. Both are shared chrome that happened to be named after
+   the surface they were born in. */
+.vbrowser__bar {
+  display: flex; align-items: center; gap: var(--space-6);
+  padding: var(--space-6) var(--space-10);
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+.vbrowser__title { font: var(--type-section); color: var(--text-primary); letter-spacing: var(--tracking-normal); }
+.vbrowser__spacer { flex: 1 1 auto; }
+.vbrowser__search {
+  display: flex; align-items: center; gap: var(--space-3);
+  height: var(--control-md); width: 260px; padding: 0 var(--space-3);
+  border-radius: var(--radius-xs); background: var(--surface-input);
+  box-shadow: inset 0 0 0 1px transparent; transition: box-shadow var(--dur-fast) var(--ease-standard);
+  color: var(--icon-idle);
+}
+.vbrowser__search:hover { box-shadow: inset 0 0 0 1px var(--border-input); }
+.vbrowser__search:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.vbrowser__search .vds-icon, .vbrowser__search svg { flex: none; width: 14px; height: 14px; }
+.vbrowser__search-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  color: var(--text-primary); font: var(--type-value);
+}
+.vbrowser__search-input::placeholder { color: var(--text-tertiary); }
+.vbrowser__btn {
+  height: var(--control-md); padding: 0 var(--space-6); border: none; cursor: pointer;
+  border-radius: var(--radius-sm); font: var(--type-label-strong);
+  background: var(--surface-input); color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.vbrowser__btn:hover { background: var(--surface-hover); }
+.vbrowser__btn--primary { background: var(--accent); color: var(--text-on-accent); box-shadow: none; }
+.vbrowser__btn--primary:hover { background: var(--accent-hover); }
+.vbrowser__close { flex: none; }
+
+/* ── Tour builder (#221/#222/#223) — the 2D screen-graph board overlay ──────────
+   DSLMS board/ category (GraphBoard/ScreenNode/Edge/ConnectionPort). Verso UI only;
+   reuses the .vbrowser shell + bar. Renders/exports nothing. */
+/* the headline "Open tour builder" action in the hotspot Screens section */
+/* solid accent (not the faint accent-text look) so it's legible in light + dark */
+.prop-btn--board { display: flex; align-items: center; justify-content: center; gap: var(--space-2);
+  height: var(--control-lg, 34px); width: 100%; font: var(--type-label-strong);
+  background: var(--accent); color: var(--text-on-accent); box-shadow: none; border: none; }
+.prop-btn--board:hover { background: var(--accent-hover); color: var(--text-on-accent); }
+.prop-btn--board svg { width: 15px; height: 15px; flex: none; stroke: currentColor; }
+.tourb__bar .tourb__count { font: var(--type-label); color: var(--text-tertiary); }
+.tourb__switch { display: inline-flex; align-items: center; gap: var(--space-3); cursor: pointer; }
+.tourb__switch-label { font: var(--type-label-strong); color: var(--text-secondary); white-space: nowrap; }
+.tourb__zoom { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-md); padding: 0 var(--space-3);
+  border-radius: var(--radius-sm); background: var(--surface-input); box-shadow: inset 0 0 0 1px var(--border-subtle); cursor: pointer; }
+.tourb__zoom:hover { background: var(--surface-hover); }
+.tourb__zoom-level { font: var(--type-label-strong); color: var(--text-primary); min-width: 34px; text-align: center; }
+.tourb__zoom .zoom__caret svg { width: 12px; height: 12px; }
+.tourb__body { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+.tourb__board {
+  flex: 1 1 auto; position: relative; overflow: hidden; outline: none;
+  background: var(--surface-canvas);
+  background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.tourb__board.is-panning { cursor: grabbing; }
+.tourb__board.is-pannable { cursor: grab; }
+/* floating tool pill — a canvas-overlay-bar mirror, bottom-centre over the board. The inner
+   reuses .canvas-overlay-bar__inner (raised surface / radius-lg / shadow); only positioning is
+   local. pointer-events:none on the wrapper so the board still pans behind the pill's gaps. */
+.tourb__pill { position: absolute; z-index: 40; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; pointer-events: none; }
+.tourb__pill-inner { pointer-events: auto; }
+/* the contextual segment's Action / Shape toggles: compact inline segmented controls that fit
+   the pill height (override the panel's full-width stretch). */
+.tourb__pill .tourb__pillseg { display: inline-flex; }
+.tourb__pill .prop-toggle-row { margin: 0; width: auto; }
+.tourb__pill .prop-toggle-row--icon .prop-toggle--icon { flex: 0 0 auto; width: 26px; padding: 4px 0; }
+/* click-to-drop armed: crosshair over the whole board so it's obvious the next click drops a
+   marker; the screen thumbs read as the drop target. */
+.tourb__board.is-placing { cursor: crosshair; }
+.tourb__board.is-placing .tourb-node__thumb { cursor: crosshair; }
+/* "Add hotspot" armed = an accent-outlined toggle (mode engaged), matching the IconButton
+   active convention. */
+.tourb__addhs.is-armed { background: var(--accent); color: var(--text-on-accent); box-shadow: none; }
+.tourb__addhs.is-armed:hover { background: var(--accent-hover); }
+/* No `will-change:transform` here: promoting the layer to a cached GPU texture makes it
+   rasterise ONCE at 1x, so zooming in upscales that bitmap and blurs the screen previews.
+   Without it the browser re-samples at the live zoom, so content stays crisp when zoomed in. */
+.tourb__layer { position: absolute; top: 0; left: 0; transform-origin: top left; }
+.tourb__marquee { position: absolute; z-index: 20; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
+.tourb-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.tourb__nodes { position: absolute; top: 0; left: 0; }
+.tourb__sources { position: absolute; top: 0; left: 0; }
+/* Source-video scratch node: the harvest surface. Distinct from a ScreenNode (accent-tinted
+   header, dashed ring) so it reads as an author-time tool, NOT a screen that ships. */
+.tourb-source {
+  position: absolute; display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--surface-raised); border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-popover);
+  padding: var(--space-2); cursor: grab; user-select: none;
+}
+.tourb-source.is-dragging { cursor: grabbing; z-index: 5; }
+.tourb-source__head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 0; }
+.tourb-source__glyph { display: inline-flex; color: var(--accent); }
+.tourb-source__glyph svg { width: 15px; height: 15px; }
+.tourb-source__tag {
+  flex: none; font: var(--type-label); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding: 1px 6px; border-radius: var(--radius-full);
+}
+.tourb-source__title { flex: 1 1 auto; min-width: 0; font: var(--type-label-strong); color: var(--text-primary); background: transparent; border: 0; padding: 2px 4px; border-radius: var(--radius-sm); }
+.tourb-source__title:focus { outline: none; background: var(--surface-canvas); box-shadow: inset 0 0 0 1px var(--border-input); }
+.tourb-source__remove { flex: none; width: 24px; height: 24px; }
+.tourb-source__thumb { position: relative; width: 100%; border-radius: var(--radius-sm); background: var(--surface-canvas); overflow: hidden; }
+.tourb-source__thumb img, .tourb-source__thumb video { width: 100%; height: auto; display: block; pointer-events: none; border-radius: var(--radius-sm); }
+.tourb-source__thumb.is-empty { display: flex; align-items: center; justify-content: center; color: var(--icon-idle); }
+.tourb-source__thumb.is-empty svg { width: 32px; height: 32px; }
+/* MediaTransport (DSLMS board/SourceNode): scrub rail + playhead + in/out ticks, then a
+   controls row. Bound to DSLMS tokens; the transport lives ON the media it controls. */
+.tourb-transport { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) 2px 2px; }
+.tourb-transport__rail { position: relative; height: 4px; border-radius: var(--radius-full); background: var(--border-subtle); cursor: pointer; touch-action: none; }
+.tourb-transport__range { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); background: color-mix(in srgb, var(--accent) 24%, transparent); pointer-events: none; }
+.tourb-transport__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: var(--radius-full); background: var(--accent); pointer-events: none; }
+.tourb-transport__tick { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }
+.tourb-transport__knob { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: var(--radius-full); background: var(--accent); box-shadow: var(--shadow-popover); transform: translateY(-50%); pointer-events: none; }
+.tourb-transport__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); row-gap: var(--space-2); }
+.tourb-transport__play { flex: none; width: 28px; height: 28px; }
+.tourb-transport__time { flex: none; font-variant-numeric: tabular-nums; font: var(--type-label); color: var(--text-secondary); }
+.tourb-transport__spacer { flex: 1 1 auto; }
+.tourb-transport__mark { flex: none; font: var(--type-label); color: var(--text-secondary); background: var(--surface-canvas); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__mark:hover { color: var(--text-primary); border-color: var(--border-focus); }
+.tourb-transport__harvest { flex: none; display: inline-flex; align-items: center; gap: 4px; font: var(--type-label); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__harvest svg { width: 13px; height: 13px; }
+.tourb-transport__harvest:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.tourb-transport__harvest:disabled { opacity: 0.4; cursor: not-allowed; }
+.tourb-transport__crop { flex: none; width: 28px; height: 28px; }
+.tourb-transport__crop.is-on { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+/* speed sub-row: caption label + segmented preset picker, disclosed with the segment tools */
+.tourb-transport__speed { display: flex; align-items: center; gap: var(--space-2); }
+.tourb-transport__speed[hidden] { display: none; }
+.tourb-transport__speed-label { flex: none; font: var(--type-label); color: var(--text-secondary); }
+/* ripple cuts (T3/T4): cut sub-row + rail punch-out bands. Removed = ABSENCE, so a flat neutral
+   sunken fill (accent means kept/live); pending = dashed accent bracket; selected = 1px accent outline. */
+.tourb-transport__cutrow { display: flex; align-items: center; gap: var(--space-2); }
+.tourb-transport__cutrow[hidden] { display: none; }
+.tourb-transport__mark.is-on { color: var(--accent); border-color: var(--accent); }
+.tourb-transport__cuts { position: absolute; inset: 0; pointer-events: none; }
+/* committed removed band: extends a little above/below the 4px rail so it is a comfortable click target */
+.tourb-transport__cut { position: absolute; top: -4px; bottom: -4px; background: var(--surface-canvas); box-shadow: inset 1px 0 0 var(--border-subtle), inset -1px 0 0 var(--border-subtle); border-radius: 2px; pointer-events: auto; cursor: pointer; }
+.tourb-transport__cut.is-sel { box-shadow: inset 0 0 0 1px var(--accent); } /* the one place accent touches a cut */
+.tourb-transport__cut--pending { background: transparent; border: 1px dashed var(--accent); box-shadow: none; pointer-events: none; }
+.tourb-transport__cutrm { flex: none; width: var(--control-sm); height: var(--control-sm); }
+.tourb-transport__cutrm[hidden] { display: none; }
+/* crop overlay on the source thumb: a bright rect with corner handles; dim outside via a big ring shadow */
+.tourb-crop { position: absolute; inset: 0; z-index: 4; }
+.tourb-crop__box { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); box-shadow: 0 0 0 9999px color-mix(in srgb, #000 45%, transparent); cursor: move; }
+.tourb-crop__handle { position: absolute; width: 12px; height: 12px; background: var(--accent); border: 1px solid #fff; border-radius: 2px; }
+.tourb-crop__handle--nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.tourb-crop__handle--ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.tourb-crop__handle--sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.tourb-crop__handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+/* right inspector — re-hosts renderHotspotInspector */
+/* Properties DRAWER: an absolute slide-in over the right of the board (the board is always full
+   width behind it), collapsed by default so the board dominates — canvas-first. Opens on demand for
+   the deep value settings the pill/menus don't carry. */
+.tourb__panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 320px; z-index: 45;
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--border-subtle); background: var(--surface-panel);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.28);
+  transform: translateX(100%); transition: transform 0.18s cubic-bezier(.2, 0, 0, 1);
+  pointer-events: none;
+}
+.tourb__panel.is-open { transform: translateX(0); pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .tourb__panel { transition: none; } }
+.tourb__panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-subtle); }
+.tourb__panel-title { font: var(--type-label-strong); color: var(--text-secondary); }
+.tourb__panel-close { width: 24px; height: 24px; }
+.tourb__panel-body { flex: 1 1 auto; overflow-y: auto; padding: var(--space-4); }
+/* the top-bar Properties toggle (icon + label); is-on when the drawer is open. */
+.tourb__propsbtn { display: inline-flex; align-items: center; gap: 6px; }
+.tourb__propsbtn svg { width: 14px; height: 14px; }
+.tourb__propsbtn.is-on { background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--border-input); }
+
+/* ScreenNode card */
+.tourb-node {
+  position: absolute; display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--surface-raised); border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-popover);
+  padding: var(--space-2); cursor: grab; user-select: none;
+}
+.tourb-node.is-dragging { cursor: grabbing; z-index: 5; }
+.tourb-node.is-selected { box-shadow: inset 0 0 0 2px var(--border-focus), var(--shadow-selected); }
+/* marquee/multi-select: an OUTSET accent ring + glow so a box-selection is unmistakable
+   (an inset ring was hidden under the node's thumbnail + padding -- #224 QA). */
+/* SOLID blue ring (no color-mix -- an unsupported color-mix voids the whole box-shadow, so
+   the ring vanished entirely; outline is a second guaranteed-visible layer). #224 QA. */
+.tourb-node.is-multi { z-index: 4; box-shadow: 0 0 0 3px var(--accent), var(--shadow-menu); outline: 2px solid var(--accent); outline-offset: 2px; }
+.tourb-node.is-selected.is-multi { z-index: 4; box-shadow: 0 0 0 3px var(--border-focus), var(--shadow-menu); outline: 2px solid var(--accent); outline-offset: 2px; }
+/* overflow VISIBLE so pins at the very edge (x/y = 0% or 100%) aren't clipped (#224 QA);
+   the IMAGE keeps rounded corners via its own radius + clip. */
+.tourb-node__thumb { position: relative; width: 100%; border-radius: var(--radius-sm); background: var(--surface-canvas); }
+/* natural aspect ratio (no crop) so a pin at x/y% overlays the exact learner-visible point */
+.tourb-node__thumb img, .tourb-node__thumb video { width: 100%; height: auto; display: block; pointer-events: none; border-radius: var(--radius-sm); }
+.tourb-node__thumb.is-empty { border-radius: var(--radius-sm); }
+.tourb-node__thumb.is-empty { display: flex; align-items: center; justify-content: center; color: var(--icon-idle); }
+.tourb-node__thumb.is-empty svg { width: 28px; height: 28px; }
+.tourb-node__badge {
+  position: absolute; top: var(--space-2); left: var(--space-2); z-index: 2;
+  display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 var(--space-2);
+  border-radius: var(--radius-full); font: var(--type-label);
+  background: var(--surface-app); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transform: scale(var(--tour-inv, 1)); transform-origin: top left;
+}
+.tourb-node__badge--entry { color: var(--accent); }
+.tourb-node__badge--done { left: auto; right: var(--space-2); color: var(--accent); transform-origin: top right; }
+.tourb-node__badge--done svg { width: 12px; height: 12px; }
+/* #55: video badge (bottom-left corner, a free spot) — a play glyph marking a video screen. */
+.tourb-node__badge--video { top: auto; bottom: var(--space-2); left: var(--space-2); color: var(--accent); transform-origin: bottom left; padding: 0 4px; }
+.tourb-node__badge--video svg { width: 12px; height: 12px; }
+.tourb-node__title { border: none; outline: none; background: transparent; font: var(--type-label-strong); color: var(--text-primary);
+  padding: 2px var(--space-1); border-radius: var(--radius-xs); width: 100%; }
+.tourb-node__title:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); }
+.tourb-node__title::placeholder { color: var(--text-tertiary); }
+/* secondary caption field beneath the node title (the learner's below-screen caption) */
+.tourb-node__caption { border: none; outline: none; background: transparent; font: var(--type-label); color: var(--text-secondary);
+  padding: 1px var(--space-1); border-radius: var(--radius-xs); width: 100%; }
+.tourb-node__caption:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); color: var(--text-primary); }
+.tourb-node__caption::placeholder { color: var(--text-tertiary); }
+
+/* pins + ConnectionPort — sized so every handle is visible and grab-able on the node */
+.tourb-pin {
+  position: absolute; transform: translate(-50%, -50%) scale(var(--tour-inv, 1)); z-index: 3;
+  width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font: var(--type-label); font-style: italic; font-weight: 700; line-height: 1;
+  background: var(--accent); color: var(--text-on-accent);
+  box-shadow: 0 0 0 2px var(--surface-raised), var(--shadow-popover); cursor: grab; touch-action: none;
+}
+.tourb-pin:active { cursor: grabbing; }
+.tourb-pin:hover { filter: brightness(1.08); }
+.tourb-pin svg { width: 15px; height: 15px; }
+.tourb-pin.is-selected { box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--border-focus); z-index: 5; }
+/* card pins read differently from navigate pins so they don't look like links */
+.tourb-pin--card { background: var(--surface-raised); color: var(--accent); box-shadow: 0 0 0 2px var(--surface-raised), inset 0 0 0 2px var(--accent); }
+/* WYSIWYG board markers: the REAL .hotspot-marker (course.css) rendered on the board node so the
+   design phase matches the learner exactly, with editor affordances layered on. */
+.tourb-marker { cursor: grab; touch-action: none; }
+.tourb-marker:active { cursor: grabbing; }
+/* suppress the learner hover-scale during placement (it fights the drag) */
+.tourb-node__thumb .hotspot-marker:hover, .tourb-node__thumb .hotspot-marker:focus-visible { transform: translate(-50%, -50%); }
+/* selection ring — editor chrome only */
+.tourb-marker.is-selected { outline: 2px solid var(--border-focus); outline-offset: 3px; z-index: 5; }
+/* #48 region (box) pin: a transparent, sized outline (w/h inline %). Unlike point pins it
+   scales WITH the board (it maps to a real screen area), so it drops the --tour-inv counter-scale. */
+.tourb-pin--box {
+  transform: translate(-50%, -50%); width: 20%; height: 12%; border-radius: 4px;
+  background: transparent; color: transparent; box-shadow: inset 0 0 0 2px var(--accent);
+}
+.tourb-pin--box:hover { filter: none; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tourb-pin--box.is-selected { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px var(--border-focus); }
+.tourb-pin__resize {
+  position: absolute; right: 0; bottom: 0; width: 11px; height: 11px;
+  transform: translate(50%, 50%) scale(var(--tour-inv, 1)); transform-origin: bottom right;
+  background: var(--accent); border: 2px solid var(--surface-raised); border-radius: 2px;
+  cursor: nwse-resize; touch-action: none; z-index: 7;
+}
+/* #48 on-canvas region-marker resize handle (editor chrome — never ships in SCORM) */
+.hotspot-resize {
+  position: absolute; right: 0; bottom: 0; width: 12px; height: 12px;
+  transform: translate(50%, 50%); background: var(--accent);
+  border: 2px solid var(--surface-raised); border-radius: 2px; cursor: nwse-resize; z-index: 4;
+}
+/* Canvas screen cycler: little prev/next buttons flanking a multi-screen hotspot on the canvas so
+   the author can step through screens to clean up markers. Editor chrome only (never exported). */
+.hotspot-canvas-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 6;
+  width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.96);
+  transition: background var(--dur-fast, 0.12s) var(--ease-standard, ease);
+}
+.hotspot-canvas-nav:hover { background: rgba(0, 0, 0, 0.78); }
+.hotspot-canvas-nav svg { width: 20px; height: 20px; }
+.hotspot-canvas-nav--prev { left: 8px; }
+.hotspot-canvas-nav--next { right: 8px; }
+/* #53 authoring visibility: a hotspot gated on a play-once video is opacity:0 at runtime until
+   the video ends. On the EDITING canvas (#canvas-viewport) the AUTHOR must still see + place it,
+   so reveal it dimmed with a dashed accent ring. Scoped to the editing viewport by ID so it beats
+   course.css (loaded after) and does NOT leak into Demo (#demo) or the tour Preview
+   (#tourb-preview) -- those preview the true reveal-after-video behaviour. Export never loads
+   editor.css, so the shipped course is unaffected. */
+#canvas-viewport .hotspot-marker--gated { opacity: 0.5; pointer-events: auto; outline: 1px dashed var(--accent); outline-offset: 2px; }
+.tourb-port {
+  position: absolute; transform: translate(calc(-50% + 15px), calc(-50% - 15px)) scale(var(--tour-inv, 1)); z-index: 6;
+  width: 15px; height: 15px; border-radius: 50%; background: var(--surface-raised);
+  box-shadow: inset 0 0 0 2px var(--border-strong), var(--shadow-popover); cursor: crosshair; touch-action: none;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+.tourb-port::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--border-strong); }
+.tourb-port:hover { transform: translate(calc(-50% + 15px), calc(-50% - 15px)) scale(calc(var(--tour-inv, 1) * 1.3)); }
+.tourb-port.is-connected, .tourb-port.is-active { box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-popover); }
+.tourb-port.is-connected::after, .tourb-port.is-active::after { background: var(--accent); }
+
+/* Edge connectors (reuse connectorPathD geometry) */
+.tourb-edge { fill: none; stroke: var(--border-strong); stroke-width: 2; }
+.tourb-edge.is-selected { stroke: var(--accent); stroke-width: 2.5; }
+.tourb-edge.is-connected { stroke: var(--accent); stroke-width: 2.5; } /* #224 QA: connectors of the selected node */
+.tourb-edge--draft { stroke: var(--accent); stroke-dasharray: 5 4; opacity: 0.8; }
+.tourb-edge__del circle { fill: var(--accent); }
+.tourb-edge__del { cursor: pointer; pointer-events: auto; }
+.tourb-edge__del-x { stroke: var(--text-on-accent); stroke-width: 1.6; }
+/* T5c leader wire: pin -> its face-up card (a lighter cousin of the tour edge) */
+.tourb-wire { fill: none; stroke: var(--border-strong); stroke-width: 1.5; opacity: 0.6; }
+.tourb-wire.is-hot { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
+
+/* T5c face-up card popover — laid out AROUND the node (board space), wired to its pin */
+.tourb-card {
+  position: absolute; z-index: 7;
+  background: var(--surface-panel); color: var(--text-primary); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-menu), inset 0 0 0 1px var(--border-subtle);
+  padding: var(--space-3); font: var(--type-value); display: flex; flex-direction: column; gap: var(--space-2); cursor: auto;
+}
+.tourb-card.is-hot { box-shadow: var(--shadow-menu), inset 0 0 0 2px var(--accent); }
+.tourb-card .is-editable:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-xs); }
+.tourb-card__empty { color: var(--text-tertiary); font: var(--type-label); }
+
+/* #224 T6: LoopContainer — a group frame (beneath the nodes) holding a screen carousel */
+.tourb-loop {
+  position: absolute; z-index: 0; box-sizing: border-box;
+  border-radius: var(--radius-lg); background: var(--surface-app); background: color-mix(in srgb, var(--surface-app) 55%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--border-strong); cursor: grab; user-select: none;
+}
+.tourb-loop::before { /* dashed inset outline — reads as a container, not a solid node */
+  content: ""; position: absolute; inset: var(--space-2); border-radius: var(--radius-md);
+  border: 1.5px dashed var(--border-strong); pointer-events: none;
+}
+.tourb-loop.is-selected { box-shadow: inset 0 0 0 2px var(--border-focus), var(--shadow-selected); }
+.tourb-loop.is-target { box-shadow: inset 0 0 0 2px var(--accent); }
+.tourb-loop.is-target::before { border-color: var(--accent); }
+.tourb-loop__head {
+  position: absolute; top: 0; left: 0; right: 0; height: 34px; display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-3); transform: scale(var(--tour-inv, 1)); transform-origin: top left;
+}
+.tourb-loop__glyph { display: inline-flex; color: var(--accent); }
+.tourb-loop__glyph svg { width: 15px; height: 15px; }
+.tourb-loop__title {
+  border: none; outline: none; background: transparent; font: var(--type-label-strong); color: var(--text-primary);
+  padding: 2px var(--space-1); border-radius: var(--radius-xs); flex: 1 1 auto; min-width: 0;
+}
+.tourb-loop__title:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); }
+.tourb-loop__title::placeholder { color: var(--text-tertiary); }
+.tourb-loop__count { font: var(--type-label); color: var(--text-tertiary); white-space: nowrap; }
+.tourb-loop__empty {
+  position: absolute; top: 44px; left: var(--space-4); right: var(--space-4);
+  font: var(--type-label); color: var(--text-tertiary); transform: scale(var(--tour-inv, 1)); transform-origin: top left;
+}
+/* member node: a subtle accent ring + an order pill so its place in the carousel reads */
+.tourb-node.is-loop-member { box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow-popover); }
+.tourb-node__badge--loop { left: auto; right: var(--space-2); color: var(--accent); transform-origin: top right; }
+
+/* loop inspector — ordered member strip */
+.tourb-loop__hint { font: var(--type-label); color: var(--text-tertiary); margin: var(--space-2) 0; }
+.tourb-memlist { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-2) 0; }
+.tourb-memrow { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm); background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.tourb-memrow__ord { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full); background: var(--surface-app); color: var(--accent); font: var(--type-label); }
+.tourb-memrow__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-value); color: var(--text-primary); }
+.tourb-memrow__btn { flex: none; }
+.tourb-memrow__btn:disabled { opacity: 0.35; cursor: default; }
+
+/* #224 QA: isolated tour preview overlay (sits ABOVE the builder .vbrowser at z 60) */
+.tourb-preview { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; background: var(--surface-app); }
+.tourb-preview__bar {
+  flex: none; display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-strong); background: var(--surface-panel);
+}
+.tourb-preview__title { font: var(--type-panel-title); color: var(--text-primary); }
+.tourb-preview__hint { font: var(--type-label); color: var(--text-tertiary); }
+.tourb-preview__body { flex: 1 1 auto; overflow: auto; padding: 40px; display: flex; align-items: center; justify-content: center; }
+/* fill the overlay so the tour renders at a usable size, centred both axes (#224 QA) */
+.tourb-preview__body .course-root { width: 100%; max-width: 1100px; margin: auto; }
+
+.toolbar__home { align-self: center; }
+
+/* side-rail-cleanup slice 2: the file-picker footer -- the "where are my files" store path folded
+   in from the retired #75 save/recents popover. */
+
+/* #148 — on-canvas variant version-cycle badge (image blocks with >=1 variant version).
+   Editor chrome ONLY; the preview is a transient <img>.src swap, never doc/render state. */
+.variant-cycle {
+  position: absolute; top: 8px; right: 8px; z-index: 6;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 999px;
+  font: 600 10px/1 Inter, system-ui, sans-serif; letter-spacing: .02em;
+  color: #fff; background: rgba(18, 19, 22, .82);
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .34);
+  cursor: pointer; user-select: none; -webkit-user-select: none;
+  transition: background .12s ease, border-color .12s ease;
+}
+.variant-cycle:hover { background: #0d99ff; border-color: #0d99ff; }
+.variant-cycle svg { width: 12px; height: 12px; flex: none; }
+.variant-cycle__count { opacity: .66; font-variant-numeric: tabular-nums; }
+
+/* #145 text-style audit: red box around any text block with no theme style, + a live
+   count badge on the toolbar toggle. Editor chrome only (a class on the live canvas
+   node) -- never in render()/export. */
+.canvas-block.is-unstyled-audit {
+  outline: 2px solid var(--danger); outline-offset: 2px; border-radius: 3px;
+}
+#style-audit-toggle { position: relative; }
+#style-audit-toggle[data-count]:not([data-count=""])::after {
+  content: attr(data-count);
+  position: absolute; top: -3px; right: -3px;
+  min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 9px/1 Inter, system-ui, sans-serif; color: #fff;
+  background: var(--danger); border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   uio-W04 -- the Files destination. Not a dialog: a full destination you land
+   in, listing EVERY document from both stores (the registry's design documents
+   and LibraryStore's source documents), which no surface in Verso had ever done.
+
+   Grouping is a switch, not a screen: Product / Type / Recent are three
+   arrangements of one list, with the same row (uio-W02) and the same actions.
+   List is the default and the shipped answer -- forty products in a card grid is
+   a scrolling problem. Card mode is for visual recall.
+
+   The band header is deliberately plain here; uio-W05 gives it its voice (the
+   primary-source line, the brand face) in ONE place rather than three.
+   ========================================================================== */
+.files-stage { flex-direction: column; overflow: hidden; }
+.files__head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-6, 12px); padding: var(--space-6, 12px) var(--space-8, 16px);
+  border-bottom: 1px solid var(--border-strong);
+}
+.files__headline { display: flex; align-items: baseline; gap: var(--space-4, 8px); min-width: 0; }
+.files__title { margin: 0; font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); }
+/* The corpus count. A list with no count leaves you unsure it is showing everything. */
+.files__count { font-size: var(--text-xs, 11px); color: var(--text-secondary); white-space: nowrap; }
+.files__controls { display: flex; align-items: center; gap: var(--space-4, 8px); flex: 0 0 auto; }
+/* The canonical segmented control sizes its segments to share one fixed width, which is right in an
+   inspector row and wrong in a header: "Product" and "Recent" ellipsised to "Pro..." and "Rec...".
+   In a header the segments size to their own labels. */
+.files__controls .prop-toggle { flex: 0 0 auto; padding-left: var(--space-4, 8px); padding-right: var(--space-4, 8px); }
+.files__search { width: 200px; }
+.files__main { flex: 1 1 auto; min-height: 0; display: flex; }
+.files__body { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; padding: var(--space-4, 8px) var(--space-8, 16px) var(--space-10, 20px); }
+.files__empty { padding: var(--space-10, 20px) 0; color: var(--text-secondary); font-size: var(--text-xs, 11px); text-align: center; }
+
+/* uio-W06 -- FACETS ARE A LENS, NEVER A MODE. The rail sits BESIDE the results rather than above
+   them, so it reads as something you are looking through: the list underneath keeps its bands, its
+   rows and its actions, and the only thing that changed is how much of it you can see. A control
+   that sat across the top, pushing the results down, would read as a screen having been switched.
+
+   The rail has its own panel surface and a hard right border, the same seam every docked panel in
+   the app uses -- nothing floats while docked. */
+.files__facets {
+  flex: 0 0 200px; width: 200px; overflow-y: auto;
+  padding: var(--space-5, 10px) var(--space-4, 8px);
+  background: var(--surface-panel); border-right: 1px solid var(--border-strong);
+  display: flex; flex-direction: column; gap: var(--space-8, 16px);
+}
+.files-facets__group-label {
+  font: var(--type-label); font-size: var(--text-2xs, 10px); font-weight: 600;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--text-tertiary, var(--text-secondary)); margin-bottom: var(--space-3, 6px);
+}
+/* The row IS the canonical Checkbox (.vds-check) -- the selections within a dimension are an OR, so
+   the control that says "you can hold several" is the one the design system already publishes. What
+   is added here is the count and the row's own hit area. */
+.files-facet {
+  display: flex; align-items: center; gap: var(--space-3, 6px);
+  height: 22px; padding: 0 var(--space-2, 4px);
+  border-radius: var(--radius-xs, 2px);
+}
+.files-facet:hover { background: var(--surface-input); }
+.files-facet.is-active { background: var(--accent-quiet); }
+/* A facet with nothing behind it stays listed and stays clickable -- the four types are a fixed
+   vocabulary, and an empty product is a real thing you just made. It reads quieter, not gone. */
+.files-facet.is-empty .vds-check__label,
+.files-facet.is-empty .files-facet__count { color: var(--text-tertiary, var(--text-secondary)); }
+.files-facet .vds-check__box { flex: 0 0 auto; }
+.files-facet .vds-check__label {
+  flex: 1 1 auto; min-width: 0; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.files-facet.is-active .vds-check__label { color: var(--accent); }
+.files-facet__count { flex: 0 0 auto; font-size: var(--text-2xs, 10px); color: var(--text-tertiary, var(--text-secondary)); }
+
+/* The applied facets, said again where the results are. "Why am I seeing only these?" has to be
+   answerable without looking away from the list, and each chip undoes exactly the tick that made
+   it. */
+.files__chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3, 6px); padding-bottom: var(--space-4, 8px); }
+.files__chip {
+  display: inline-flex; align-items: center; gap: var(--space-2, 4px);
+  height: 20px; padding: 0 var(--space-4, 8px); cursor: pointer;
+  font-size: var(--text-xs, 11px); font-family: inherit;
+  background: var(--accent-quiet); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: var(--radius-full, 999px);
+}
+.files__chip-x { color: var(--accent); opacity: 0.7; }
+.files__chip:hover .files__chip-x { opacity: 1; }
+
+.files-band { margin-top: var(--space-6, 12px); }
+.files-band:first-child { margin-top: 0; }
+.files-band__head {
+  display: flex; align-items: baseline; gap: var(--space-3, 6px);
+  padding: var(--space-4, 8px) var(--space-4, 8px) var(--space-2, 4px);
+  border-bottom: 1px solid var(--border-strong);
+}
+.files-band__name { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); font-family: var(--font-brand, var(--font-ui)); }
+.files-band__note { font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+/* uio-W05: WHICH SOURCE DOCUMENT DOES THIS PRODUCT TRACE BACK TO? The band header answers it
+   without you opening anything -- that relationship is what makes a product more than a tag, and a
+   header that only counted documents left it invisible. The name carries the accent because it is
+   the answer; the label in front of it is just scaffolding. */
+.files-band__primary { display: inline-flex; align-items: baseline; gap: var(--space-2, 4px); font-size: var(--text-xs, 11px); min-width: 0; }
+.files-band__primary-label { color: var(--text-tertiary, var(--text-secondary)); }
+.files-band__primary-name { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A product with no primary source says so. A blank where a name should be reads as a bug, and a
+   new product legitimately has none yet. */
+.files-band__primary-none { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+
+/* THE DIVIDER TREATMENT. The primary source is not merely first in its band -- it is visibly the
+   thing the rest descend from: an accent left border, a heavier title, and a rule beneath it
+   separating it from the design documents. The prototype's subtitle variant is deliberately NOT
+   shipped; at forty products a second line per band is noise. */
+.files-band__rows .vds-docrow.is-primary-source {
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3, 6px);
+  border-radius: 0 var(--radius-sm, 4px) var(--radius-sm, 4px) 0;
+}
+.files-band__rows .vds-docrow.is-primary-source .vds-docrow__title { font-weight: 600; color: var(--text-primary); }
+.files-band__rows .vds-docrow.is-primary-source + .vds-docrow { border-top: 2px solid var(--border-strong); }
+/* The chip is BORDERED here, so it reads as a role rather than another tinted tag in a row that
+   already carries a type chip. */
+.files-band__rows .vds-docrow.is-primary-source .vds-docrow__chip--accent { border: 1px solid var(--accent); }
+.files-band__count { margin-left: auto; font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+.files-band__rows { padding: var(--space-1, 2px) 0; }
+
+/* Card mode. Same primary treatment as the list, so switching mode changes how much room a
+   document takes and never what it IS. */
+.files-band__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-4, 8px); padding: var(--space-4, 8px) 0; }
+.files-card {
+  position: relative; display: flex; flex-direction: column; gap: var(--space-2, 4px);
+  padding: var(--space-6, 12px); cursor: pointer;
+  background: var(--surface-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md, 6px); /* borders over shadows: nothing floats while docked */
+}
+.files-card:hover { background: var(--surface-raised, var(--surface-panel)); border-color: var(--border-input, var(--border-strong)); }
+.files-card.is-primary { border-color: var(--accent); }
+.files-card__primary {
+  position: absolute; top: var(--space-2, 4px); right: var(--space-2, 4px);
+  padding: 0 var(--space-2, 4px); border-radius: var(--radius-xs, 2px);
+  background: var(--accent-quiet); color: var(--accent); font-size: var(--text-2xs, 10px);
+}
+.files-card__glyph { display: inline-flex; width: var(--control-md, 24px); height: var(--control-md, 24px); align-items: center; justify-content: center; border-radius: var(--radius-xs, 2px); background: var(--surface-input); color: var(--icon-idle); }
+/* The one colour split that makes written material legible from laid-out material, unread. */
+.files-card__glyph--source { background: var(--accent-quiet); color: var(--accent); }
+.files-card__glyph svg { width: 14px; height: 14px; }
+.files-card__title { font-size: var(--text-xs, 11px); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-card__meta { display: flex; align-items: center; gap: var(--space-2, 4px); font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+.files-card__chip { padding: 0 var(--space-2, 4px); border-radius: var(--radius-xs, 2px); background: var(--surface-input); }
+.files-card__when { margin-left: auto; }
+
+/* uio-W04b -- assigning existing documents to a product, from Files. The No product band gathers
+   every untagged document in one place, so this is where ticking several and assigning them earns
+   its keep. The bar states the COUNT before you commit: a bulk action that does not say what it is
+   about to touch is how the wrong things get moved. */
+.files__bulk {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: var(--space-4, 8px);
+  margin-bottom: var(--space-4, 8px); padding: var(--space-3, 6px) var(--space-4, 8px);
+  background: var(--accent-quiet); border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 4px);
+}
+.files__bulk-count { flex: 1 1 auto; font-size: var(--text-xs, 11px); color: var(--text-primary); }
+/* The tick rides inside the row's own anatomy rather than being bolted in front of it, and it
+   reveals on hover exactly as the row's ... menu does -- a column of checkboxes down a list you are
+   only reading is clutter. Once anything IS selected they all show, because that is when you are
+   picking a set and hunting for the next hover target would be worse. The discoverable path to
+   assigning ONE document is its row menu; the tick is the accelerator for several. */
+.files__tick { flex: 0 0 auto; margin: 0; accent-color: var(--accent); cursor: pointer; visibility: hidden; }
+.vds-docrow:hover .files__tick,
+.vds-docrow.is-selected .files__tick,
+.files__body.has-selection .files__tick { visibility: visible; }
+.files-band__rows .vds-docrow.is-selected { background: var(--accent-quiet); }
+
+/* uio-W08 -- the three creation actions, and the screen that names all three.
+   FIRST RUN MUST NEVER INSTRUCT YOU TO GO AND USE A DIFFERENT DESTINATION FIRST. That is the whole
+   reason Source used to say "Pick a Product in the top bar", pointing at a control that no longer
+   exists. Here the three ways in are the content of the screen. */
+.files__new { flex: 0 0 auto; }
+.files-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4, 8px);
+  padding: var(--space-16, 32px) var(--space-8, 16px);
+  text-align: center;
+}
+.files-empty__glyph { color: var(--icon-idle); }
+.files-empty__glyph svg { width: 32px; height: 32px; }
+.files-empty__title { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); font-family: var(--font-brand, var(--font-ui)); }
+.files-empty__body { max-width: 380px; font-size: var(--text-xs, 11px); line-height: 1.5; color: var(--text-secondary); }
+.files-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-4, 8px); margin-top: var(--space-4, 8px); }
+/* The tick reads as a sentence rather than a bare box: "Make this the primary source" is a decision
+   about what the product traces back to, not a preference. */
+.files-new__tick { display: inline-flex; align-items: center; gap: var(--space-3, 6px); font-size: var(--text-xs, 11px); color: var(--text-primary); cursor: pointer; }
+.files-new__tick input { margin: 0; accent-color: var(--accent); visibility: visible; }
+.files-new__tick input:disabled { cursor: default; opacity: 0.5; }
+
+/* uio-W07 -- open vs reveal. A row that does not say a document is already open leaves you to find
+   out by clicking, and the wrong answer to that click is a second copy in a strip you then have to
+   reconcile by hand. Quiet ink: it is a state, not a call to action. */
+.files-card__open { color: var(--accent); }
+.files-card.is-open { border-color: var(--border-input, var(--border-strong)); }
+
+/* uio-W09: where the work actually lives. Inherited from the retired browser's footer — it belongs
+   to whichever surface answers "where are my documents?", and that is Files now. Quiet: it is a
+   fact about the machine, not about any document on screen. */
+.files__store {
+  flex: 0 0 auto; padding: var(--space-3, 6px) var(--space-8, 16px);
+  border-top: 1px solid var(--border-strong);
+  font-size: var(--text-2xs, 10px); color: var(--text-tertiary, var(--text-secondary));
+}

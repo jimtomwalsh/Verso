@@ -1,0 +1,74 @@
+[
+ {
+  "file": "01-tokens.css",
+  "is": "the file header and the design-system tokens \u2014 the source of truth"
+ },
+ {
+  "file": "02-toolbar.css",
+  "is": "the top bar"
+ },
+ {
+  "file": "03-workspace.css",
+  "is": "the workspace frame: rails, panels, stage"
+ },
+ {
+  "file": "04-source-stage.css",
+  "is": "the Source stage: continuous article, marks, toolbars"
+ },
+ {
+  "file": "05-canvas.css",
+  "is": "the infinite canvas, pan/zoom, and Interact mode"
+ },
+ {
+  "file": "06-editing.css",
+  "is": "in-place editing and selection"
+ },
+ {
+  "file": "07-inspector.css",
+  "is": "the properties panel and the live model view"
+ },
+ {
+  "file": "08-alt-views.css",
+  "is": "demo mode and the copy editor"
+ },
+ {
+  "file": "09-outliner.css",
+  "is": "the structure outliner and the floating text toolbar"
+ },
+ {
+  "file": "10-overlays.css",
+  "is": "tabs, modals, and the help typographic system"
+ },
+ {
+  "file": "11-comments.css",
+  "is": "comment mode and canvas-only hotspot affordances"
+ },
+ {
+  "file": "12-controls.css",
+  "is": "the canonical control set"
+ },
+ {
+  "file": "13-home.css",
+  "is": "the course browser"
+ },
+ {
+  "file": "14-collab.css",
+  "is": "live-collaboration presence chrome"
+ },
+ {
+  "file": "15-sign-in.css",
+  "is": "the server-mode sign-in surface"
+ },
+ {
+  "file": "16-session.css",
+  "is": "the signed-out session banner and its canvas chip"
+ },
+ {
+  "file": "17-admin.css",
+  "is": "the people-and-roles admin surface"
+ },
+ {
+  "file": "18-cutover.css",
+  "is": "the move-to-server cutover run"
+ }
+]
