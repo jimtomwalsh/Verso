@@ -138,25 +138,19 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 #canvas-viewport .course-nav--pin .course-nav__prev { left: 24px; }
 #canvas-viewport .course-nav--pin .course-nav__next { right: 24px; }
 /* JJJJ: chapter column header bar */
+/* uio-E-M04 (EDIT-13): a chapter marker is a flat LABEL pinned above its page group -- no fill,
+   no border, no buttons -- so it stops reading as a closable document tab. Its verbs live in the
+   outline (drag to reorder, right-click to delete); rename stays on double-click. */
 .chapter-header {
   position: absolute; height: 38px; box-sizing: border-box; z-index: 3;
-  display: flex; align-items: center; gap: 10px; padding: 0 14px;
-  background: var(--surface-panel); border: 1px solid var(--border-strong); border-radius: 8px;
+  display: flex; align-items: baseline; gap: 10px; padding: 0 2px;
+  background: transparent; border: none;
   cursor: default;
 }
-.chapter-header:hover { border-color: var(--accent); }
-.chapter-header__name { font-family: "Inter", system-ui, sans-serif; font-size: 15px; font-weight: 600; color: var(--text-primary); }
-.chapter-header__count { font-size: var(--text-sm); color: var(--text-secondary); }
-.chapter-header__acts { margin-left: auto; display: flex; gap: 4px; }
-.chapter-header__btn {
-  width: 22px; height: 22px; padding: 0; font-size: 14px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border-strong); border-radius: 5px;
-  background: var(--surface-raised); color: var(--text-secondary);
-}
-.chapter-header__btn:hover { color: var(--text-primary); border-color: var(--accent); }
-.chapter-header__btn--danger:hover { color: var(--danger); border-color: var(--danger); }
-.chapter-header--add { background: transparent; border-style: dashed; cursor: pointer; justify-content: center; }
+.chapter-header__name { font-family: "Inter", system-ui, sans-serif; font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+.chapter-header:hover .chapter-header__name { color: var(--text-primary); }
+.chapter-header__count { font-size: var(--text-sm); color: var(--text-tertiary, var(--text-secondary)); }
+.chapter-header--add { border: 1px dashed var(--border-strong); border-radius: 8px; cursor: pointer; justify-content: center; align-items: center; padding: 0 14px; }
 .chapter-header--add .chapter-header__name { color: var(--text-tertiary); font-weight: 500; }
 .chapter-header--add:hover { border-color: var(--accent); }
 .chapter-header--add:hover .chapter-header__name { color: var(--accent); }
