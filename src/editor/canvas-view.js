@@ -237,10 +237,13 @@
     // canvas-local x = SCROLL_PAD - scrollLeft; the existing `view.x` (world origin's canvas-local
     // x) therefore equals SCROLL_PAD - scrollLeft. Backing `view.x/y` off scroll that way keeps
     // EVERY screen<->world read (select, marquee, drag, pins) working unchanged; only the writers
-    // (pan/zoom/fit) reroute to scroll. Default OFF (flag) + a console toggle for A/B on hardware.
+    // (pan/zoom/fit) reroute to scroll. Default ON since #347: measured on a real multi-chapter
+    // course in the browser, this beat every alternative, and it is the only path where content
+    // never blanks. `window.__nativeScroll(false)` returns to transform-pan for an A/B.
     var NS_KEY = "authoring.nativeScroll";
-    var NATIVE_SCROLL = false;
-    try { NATIVE_SCROLL = localStorage.getItem(NS_KEY) === "1"; } catch (e) {} // persist across Cmd+R (testing footgun)
+    var NATIVE_SCROLL = true;
+    // Explicit "0" only -- an absent key means "never chose", which now means the new default.
+    try { if (localStorage.getItem(NS_KEY) === "0") NATIVE_SCROLL = false; } catch (e) {} // persist across Cmd+R (testing footgun)
     var SCROLL_PAD = 2000; // breathing room around the content so panning feels free (not a huge void)
     var scrollSizer = null, _scrollSync = false;
     function nativeScroll() { return NATIVE_SCROLL; } // the flag as a read, for editor.js's remaining branches
@@ -321,15 +324,15 @@
     // back. Editor chrome only (a class on the editor-built world) -- render()/doc/export are
     // untouched, and this is opt-in motion behaviour, never a persistent blank.
     var _navSettleT = null;
-    // #347: the LOD is a perf trade, and the browser may no longer need to pay it -- the 7 FPS
-    // above was measured in the packaged WKWebView, not here. This flag turns the whole
-    // suppression off so live-crisp pan/zoom can be A/B'd against it on a real course without a
-    // rebuild: window.__canvasLod(false). Default ON = today's behaviour, so nothing changes
-    // until the measurement says it should. Persisted like NATIVE_SCROLL, because the test
-    // involves importing a course and reloading, and a flag that resets on Cmd+R tests nothing.
+    // #347: the LOD is OFF by default now. The 7 FPS that justified it was measured in the
+    // packaged WKWebView; tested on a real multi-chapter course in the browser, live content
+    // stayed smooth and the blanking was pure cost. The machinery below stays intact behind the
+    // flag -- `window.__canvasLod(true)` brings it back -- because it is the only lever left if a
+    // slower machine turns up. Persisted like NATIVE_SCROLL: a flag that resets on Cmd+R is
+    // useless for the kind of testing this exists for.
     var LOD_KEY = "authoring.canvasLod";
-    var CANVAS_LOD = true;
-    try { if (localStorage.getItem(LOD_KEY) === "0") CANVAS_LOD = false; } catch (e) {}
+    var CANVAS_LOD = false;
+    try { if (localStorage.getItem(LOD_KEY) === "1") CANVAS_LOD = true; } catch (e) {}
     window.__canvasLod = function (on) {
       CANVAS_LOD = (on == null) ? CANVAS_LOD : !!on; // no arg = query
       try { localStorage.setItem(LOD_KEY, CANVAS_LOD ? "1" : "0"); } catch (e) {}

@@ -18,10 +18,13 @@
 .canvas.native-scroll::-webkit-scrollbar { width: 0; height: 0; }
 .canvas-scroll { position: relative; }
 
+/* No `will-change: transform` (#347). The world is far bigger than a cacheable GPU texture on a
+   multi-chapter course, so promoting it made the browser repaint the whole thing every pan/zoom
+   frame -- the promotion was buying the jank it was meant to prevent. Same reasoning as
+   .tourb__layer in 13-home.css. `window.__wc('transform')` puts it back for an A/B. */
 .world {
   position: absolute; top: 0; left: 0;
   transform-origin: 0 0;
-  will-change: transform;
 }
 /* Perf (#150): while a pan/zoom gesture is IN MOTION (JS adds .nav-lod, clears it ~120ms
    after the last movement), stop painting the heavy leaf content so the GPU only moves
