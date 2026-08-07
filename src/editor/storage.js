@@ -21,12 +21,18 @@
 //
 // FACET-AWARE SELECTION, and the bug it fixes. The old selector was all-or-nothing: flag flipped
 // plus an adapter present meant that adapter served the registry, the library AND the products
-// store. store-http.js implements the registry facet only. On the "http" backend every library
-// read therefore called an undefined readLibrary, threw into a catch, and returned the seeded
-// demo library -- and every save threw into a catch and vanished. A silent, total loss of the
-// shared component library, with a green suite. pickFacetAdapter now asks the injected adapter
-// whether it implements the facet being read, and falls back to the browser store when it does
-// not. Same rule the "flag flipped, no adapter" case has always followed: never strand a save.
+// store. store-http.js implemented the registry facet only at the time. On the "http" backend
+// every library read therefore called an undefined readLibrary, threw into a catch, and returned
+// the seeded demo library -- and every save threw into a catch and vanished. A silent, total loss
+// of the shared component library, with a green suite. pickFacetAdapter now asks the injected
+// adapter whether it implements the facet being read, and falls back to the browser store when it
+// does not. Same rule the "flag flipped, no adapter" case has always followed: never strand a save.
+//
+// WHICH ADAPTER SERVES WHAT is no longer prose here, because prose drifts: store-http grew the
+// other three facets and this comment did not notice. It is data in the SC section of
+// tests/run.js, checked against the real adapters both ways. The live gap it records: the file
+// store serves registry, library and products, but NOT classification -- on the "file" backend
+// classification falls back to browser localStorage and does not travel with the registry file.
 //
 // THE CUTOVER FOOTGUN. authoring.storageBackend must never be flipped by hand -- a live flip lets
 // the reload's pagehide flush write the in-memory registry to the *new* backend, which is exactly
@@ -187,7 +193,9 @@
 
   // ---- 3. the adapter swap -------------------------------------------------
   // A facet is one content type with its own key and its own read/write pair. Four of them, and
-  // an adapter may implement any subset (store-http.js implements only the registry).
+  // an adapter may implement any subset. Which adapter serves which is DECLARED, and checked
+  // against the real adapters in both directions, by the SC section of tests/run.js -- this
+  // comment used to name the subsets and had gone stale against the code it described.
   var FACETS = {
     registry: { key: KEYS.registry, read: "readRegistry", write: "writeRegistry" },
     library: { key: KEYS.library, read: "readLibrary", write: "writeLibrary" },

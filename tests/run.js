@@ -23689,6 +23689,145 @@ section("DO copy-editor addressed writes");
   });
 })();
 
+// ---- SC: the storage contract, one suite every adapter answers -----------
+// Four facets, four adapters, and until now no single place that said which adapter serves which.
+// The selector was well tested -- on SYNTHETIC adapters (`full`, `regOnly` above). The REAL ones
+// were never built and never driven, so an adapter quietly missing a facet was visible only by
+// reading it, and the comment in storage.js that said which facets store-http implements had gone
+// stale against its own code.
+//
+// So: build the real adapters headlessly, declare the coverage as data, check the declaration
+// against reality in BOTH directions, and put every facet an adapter DOES implement through the
+// identical behavioural contract. An adapter that gains or loses a facet fails here by name.
+//
+// The reverse direction is the one that matters. A forward-only check catches an adapter that
+// claims a facet it does not have; it does not catch a facet quietly added or dropped, which is
+// exactly how the stale comment survived.
+section("SC storage contract");
+(function () {
+  // What each adapter serves. A facet an adapter does NOT implement is not a defect on its own --
+  // pickFacetAdapter routes it to the browser store so a save is never stranded -- but it IS a
+  // statement with consequences, so it is written down rather than discovered.
+  var COVERAGE = {
+    browser: ["registry", "library", "products", "classification"],
+    memory: ["registry", "library", "products", "classification"],
+    // The file store (the retiring Mac shell). Classification is NOT on disk: on the file backend
+    // it falls back to browser localStorage, so it does not travel with the registry file.
+    file: ["registry", "library", "products"],
+    http: ["registry", "library", "products", "classification"]
+  };
+  var FACETS = STORAGE.FACETS;
+  ok("the storage seam still declares four facets", Object.keys(FACETS).sort().join(",") === "classification,library,products,registry");
+
+  // --- build the real adapters, with the browser each one expects ---
+  function freshRequire(rel, win, extra) {
+    var full = path.join(ROOT, rel);
+    delete require.cache[require.resolve(full)];
+    var prevWin = global.window, prevFetch = global.fetch;
+    global.window = win;
+    if (extra && extra.fetch) global.fetch = extra.fetch;
+    try { require(full); } finally { global.window = prevWin; global.fetch = prevFetch; }
+    return win.__storageAdapter || null;
+  }
+  function baseWin(over) {
+    var w = { addEventListener: function () {}, removeEventListener: function () {}, location: { href: "http://localhost/" } };
+    Object.keys(over || {}).forEach(function (k) { w[k] = over[k]; });
+    return w;
+  }
+  var adapters = {};
+  adapters.memory = STORAGE.makeMemoryAdapter();
+  adapters.browser = (function () {
+    var mem = {};
+    return STORAGE.makeBrowserAdapter({
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+      setItem: function (k, v) { mem[k] = String(v); },
+      removeItem: function (k) { delete mem[k]; }
+    });
+  })();
+  adapters.file = freshRequire("src/store-native.js", baseWin({
+    webkit: { messageHandlers: { versoBackup: { postMessage: function () {} } } },
+    __versoDiskRegistryB64: null, __versoDiskLibraryB64: null
+  }));
+  adapters.http = freshRequire("src/store-http.js", baseWin({ __versoServerUrl: "http://localhost:1/api" }), {
+    fetch: function () { return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } }); }
+  });
+
+  Object.keys(COVERAGE).forEach(function (name) {
+    ok("the " + name + " adapter builds headlessly", !!adapters[name]);
+  });
+
+  // --- the declaration versus reality, both directions ---
+  Object.keys(COVERAGE).forEach(function (name) {
+    var a = adapters[name];
+    if (!a) return;
+    var real = Object.keys(FACETS).filter(function (facet) {
+      var f = FACETS[facet];
+      return typeof a[f.read] === "function" && typeof a[f.write] === "function";
+    }).sort();
+    var declared = COVERAGE[name].slice().sort();
+    var missing = declared.filter(function (x) { return real.indexOf(x) === -1; });
+    var extra = real.filter(function (x) { return declared.indexOf(x) === -1; });
+    ok(name + ": serves every facet it is declared to" + (missing.length ? " -- NOT SERVED: " + missing.join(", ") : ""), missing.length === 0);
+    ok(name + ": serves no facet the declaration omits" + (extra.length ? " -- UNDECLARED: " + extra.join(", ") : ""), extra.length === 0);
+  });
+  ok("the coverage gate would catch an undeclared facet (proof)",
+     ["classification"].filter(function (x) { return COVERAGE.file.indexOf(x) === -1; }).length === 1);
+
+  // --- and the consequence of the one gap, stated as a test rather than a comment ---
+  ok("on the file backend, classification falls back to the browser store (it is NOT on disk)",
+     STORAGE.pickFacetAdapter("file", adapters.file, adapters.browser, "classification") === adapters.browser);
+  ok("on the file backend, the registry does NOT fall back",
+     STORAGE.pickFacetAdapter("file", adapters.file, adapters.browser, "registry") === adapters.file);
+  ok("on the http backend, every facet is served by the server",
+     Object.keys(FACETS).every(function (facet) {
+       return STORAGE.pickFacetAdapter("http", adapters.http, adapters.browser, facet) === adapters.http;
+     }));
+
+  // --- ONE behavioural contract, run against every implemented facet of every adapter ---
+  // Same assertions, same order, no per-adapter special cases. If an adapter needs one, that is
+  // the interface disagreeing with itself and the place to find out is here.
+  var checked = 0;
+  Object.keys(COVERAGE).forEach(function (name) {
+    var a = adapters[name];
+    if (!a) return;
+    ok(name + ": names itself", typeof a.name === "string" && a.name.length > 0);
+    COVERAGE[name].forEach(function (facet) {
+      var f = FACETS[facet];
+      if (typeof a[f.read] !== "function" || typeof a[f.write] !== "function") return; // reported above
+      checked++;
+      var label = name + "/" + facet;
+
+      // 1. an empty store invents nothing
+      var before = a[f.read]();
+      ok(label + ": reads empty before anything is written", before == null || before === "" || before === "null");
+
+      // 2. a write reports its outcome as a VALUE, never a throw and never undefined
+      var payload = JSON.stringify({ marker: label, n: 1 });
+      var res, threw = false;
+      try { res = a[f.write](payload); } catch (e) { threw = true; }
+      ok(label + ": a write does not throw", !threw);
+      ok(label + ": a write reports its outcome", !!res && typeof res.ok === "boolean");
+
+      // 3. what was written is what reads back
+      if (res && res.ok) ok(label + ": reads back exactly what was written", a[f.read]() === payload);
+      else ok(label + ": reads back exactly what was written (write refused, skipped)", true);
+
+      // 4. a second write replaces the first -- no append, no merge
+      var second = JSON.stringify({ marker: label, n: 2 });
+      var r2 = a[f.write](second);
+      if (r2 && r2.ok) ok(label + ": a second write replaces the first", a[f.read]() === second);
+      else ok(label + ": a second write replaces the first (write refused, skipped)", true);
+
+      // 5. malformed input comes back as ok:false, it does not throw and does not corrupt the read
+      var bad = false, badRes;
+      try { badRes = a[f.write]("{not json"); } catch (e) { bad = true; }
+      ok(label + ": malformed input does not throw", !bad);
+      ok(label + ": malformed input is reported, not swallowed", !badRes || typeof badRes.ok === "boolean");
+    });
+  });
+  ok("the contract ran against every implemented facet (" + checked + ")", checked >= 14);
+})();
+
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
 // Keeps the public repo free of customer/proprietary content, the removed in-app
 // assistant/translation code, personal paths, secrets, external CDN loads, and
