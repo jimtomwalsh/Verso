@@ -4,10 +4,10 @@
 // "the canvas feels slow" is not a bug report: the HUD separates the browser's real frame rate
 // from the JS this app spends per frame, so a slow pan can be blamed on the right half.
 //
-// The console helper beside it is the A/B for the one that is genuinely ambiguous. The world
-// carries a permanent `will-change: transform`, and on a very large world that layer can be too
-// big to cache -- so promotion makes it WORSE, and the only way to know is to drop the promotion
-// and feel the difference.
+// The console helper beside it is the A/B for the one that was genuinely ambiguous. The world
+// used to carry a permanent `will-change: transform`, and on a very large world that layer is too
+// big to cache -- so promotion made it WORSE. #347 settled it by feel and dropped the declaration;
+// __wc('transform') puts it back if the question ever reopens.
 //
 // Two names from editor.js, which is what a diagnostic should cost.
 //
@@ -59,11 +59,11 @@
       }
     }
     window.__perfHud = togglePerfHud;
-    // Diagnostic A/B: the world carries a permanent `will-change: transform` (CSS). On a
-    // very large world that layer can be too big to GPU-cache, so the browser repaints it
-    // every pan/zoom frame -- worse than not promoting it. __wc('auto') drops the promotion
-    // so you can FEEL the difference; __wc('transform') restores it. Console-only helper.
-    window.__wc = function (v) { if (E.world) E.world.style.willChange = v || "auto"; return E.world && (E.world.style.willChange || "(from CSS: transform)"); };
+    // Diagnostic A/B: the world is NOT layer-promoted (#347 removed the CSS `will-change`,
+    // because on a multi-chapter course the layer is too big to GPU-cache and the browser then
+    // repaints the lot every pan/zoom frame). __wc('transform') promotes it so you can FEEL the
+    // difference; __wc() or __wc('auto') returns to the shipped default. Console-only helper.
+    window.__wc = function (v) { if (E.world) E.world.style.willChange = v || "auto"; return E.world && (E.world.style.willChange || "(from CSS: none)"); };
 
     // The canvas view region measures its own JS cost per frame and hands it here; the HUD is the
     // only thing that reads it, so both the flag and the accumulator live in this file now.

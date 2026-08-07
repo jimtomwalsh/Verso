@@ -10979,11 +10979,29 @@ section("pan/zoom perf wiring (#150)");
   // arch-P3b-02: this moved to src/editor/canvas-view.js, so it is DRIVEN now -- boot the editor,
   // call it, read the class off the real world element. The settle is asynchronous, so the clear
   // half is asserted in the deferred block below rather than by matching a setTimeout in text.
+  // #347: the LOD is OFF by default now -- no gesture blanks page content out of the box. The
+  // machinery is kept behind __canvasLod for a slower machine, so both halves are asserted: the
+  // shipped default suppresses nothing, and switching it on still culls. Turning the LOD on means
+  // turning native-scroll off too, since that path skips markNavigating first.
   (function () {
-    var K = EDITOR_BOOT.boot().VersoEditor;
-    var world = K.get("world");
-    K.bind("markNavigating")();
-    ok("markNavigating adds nav-lod", world.classList.contains("nav-lod"));
+    var w = EDITOR_BOOT.boot();
+    var world = w.VersoEditor.get("world"), mark = w.VersoEditor.bind("markNavigating");
+    ok("canvas LOD is OFF by default (#347: no blanking out of the box)", w.__canvasLod() === false);
+    mark();
+    ok("a motion frame tags nothing by default", !world.classList.contains("nav-lod"));
+    ["panBy", "panDrag"].forEach(function (name) {
+      var w2 = EDITOR_BOOT.boot();
+      w2.VersoEditor.bind(name)(10, 10);
+      ok(name + " leaves content live by default", !w2.VersoEditor.get("world").classList.contains("nav-lod"));
+    });
+  })();
+  (function () {
+    var w = EDITOR_BOOT.boot();
+    var world = w.VersoEditor.get("world"), mark = w.VersoEditor.bind("markNavigating");
+    w.__nativeScroll(false); w.__canvasLod(true);
+    mark();
+    ok("__canvasLod(true) brings the cull back", world.classList.contains("nav-lod"));
+    ok("the choice persists across a reload", w.localStorage.getItem("authoring.canvasLod") === "1");
     // The settle clears it ~120ms after the last movement. Waiting is the only honest check --
     // a regex over a setTimeout proves the call exists, not that the class comes off.
     __async.push(new Promise(function (resolve) {
@@ -10992,30 +11010,21 @@ section("pan/zoom perf wiring (#150)");
         resolve();
       }, 200);
     }));
-    // Every motion path has to tag it, or the heavy-content cull never engages for that gesture.
-    ["panBy", "panDrag"].forEach(function (name) {
-      var w2 = EDITOR_BOOT.boot().VersoEditor;
-      w2.bind(name)(10, 10);
-      ok(name + " marks the gesture as navigating", w2.get("world").classList.contains("nav-lod"));
-    });
+    // Flipping it back off has to clear what is already on screen, not wait for the next settle.
+    __async.push(new Promise(function (resolve) {
+      setTimeout(function () {
+        mark();
+        var tagged = world.classList.contains("nav-lod");
+        w.__canvasLod(false);
+        ok("turning the LOD off clears suppression already on screen", tagged && !world.classList.contains("nav-lod"));
+        resolve();
+      }, 300);
+    }));
   })();
-  // #347: the LOD can be switched off at runtime so live-crisp pan/zoom is measurable against it
-  // on a real course. Default ON, so merging the flag changes nothing; OFF means no suppression
-  // class ever lands, and any class already on screen comes off the moment you flip it.
-  (function () {
-    var w = EDITOR_BOOT.boot();
-    var world = w.VersoEditor.get("world"), mark = w.VersoEditor.bind("markNavigating");
-    ok("canvas LOD defaults ON (today's behaviour)", w.__canvasLod() === true);
-    mark();
-    var onTagged = world.classList.contains("nav-lod");
-    w.__canvasLod(false);
-    ok("turning the LOD off clears suppression already on screen", onTagged && !world.classList.contains("nav-lod"));
-    mark();
-    ok("with the LOD off, markNavigating never tags nav-lod", !world.classList.contains("nav-lod"));
-    ok("the choice persists across a reload", w.localStorage.getItem("authoring.canvasLod") === "0");
-    w.__canvasLod(true); mark();
-    ok("turning it back on restores the cull", world.classList.contains("nav-lod"));
-  })();
+  // The world is not layer-promoted (#347): on a multi-chapter course the layer is too big to
+  // GPU-cache, so the promotion caused the repaint-every-frame it was meant to avoid.
+  ok("the world carries no will-change promotion",
+    !/\.world \{[^}]*will-change/.test(EDITOR_CSS));
   var css2 = EDITOR_CSS;
   ok("nav-lod stops painting heavy leaf content (img/svg/embed/video)",
     /\.world\.nav-lod img,[\s\S]*?\.world\.nav-lod \.embed__video \{ visibility: hidden; \}/.test(css2));
@@ -11166,14 +11175,23 @@ section("native-scroll pan (#151 lever 1)");
   // several of them would have passed against code that never ran.
   var e = src("src/editor/canvas-view.js");
   var edSrc = src("src/editor.js");
-  ok("NATIVE_SCROLL flag default OFF + SCROLL_PAD + console toggle",
-    /var NATIVE_SCROLL = false;/.test(e) && /var SCROLL_PAD = \d+;/.test(e) && /window\.__nativeScroll = function \(on\)/.test(e));
+  // #347 flipped the default ON. An absent key must mean the new default, so the localStorage read
+  // has to test for an explicit "0" -- reading `=== "1"` would silently keep everyone on the old
+  // path forever, and the flag would look flipped while nothing had changed.
+  ok("NATIVE_SCROLL flag default ON + SCROLL_PAD + console toggle",
+    /var NATIVE_SCROLL = true;/.test(e) && /var SCROLL_PAD = \d+;/.test(e) && /window\.__nativeScroll = function \(on\)/.test(e));
+  ok("an absent nativeScroll key means the new default, not the old one",
+    /getItem\(NS_KEY\) === "0"\) NATIVE_SCROLL = false/.test(e));
+  ok("native-scroll is on out of the box", EDITOR_BOOT.boot().__nativeScroll() === true);
   ok("every world mount routes through attachWorld (no raw canvas.appendChild(world) mount left)",
     (edSrc.match(/attachWorld\(\);/g) || []).length >= 2 && edSrc.indexOf("canvas.appendChild(world)") === -1);
 
-  // With the flag OFF: the world hangs straight off the viewport and pan is a transform.
+  // Switched OFF (the escape hatch, no longer the default): the world hangs straight off the
+  // viewport and pan is a transform again.
   (function () {
-    var K = EDITOR_BOOT.boot().VersoEditor;
+    var win = EDITOR_BOOT.boot();
+    win.__nativeScroll(false);
+    var K = win.VersoEditor;
     var canvas = K.get("canvas"), world = K.get("world"), view = K.get("view");
     ok("flag off: the viewport is not in native-scroll mode", !canvas.classList.contains("native-scroll"));
     view.x = 10; view.y = 20; view.zoom = 1;
@@ -11235,13 +11253,16 @@ section("native-scroll pan (#151 lever 1)");
   // real hardware meaningless. Written under the flag's own key, and read back by the next boot.
   ok("the native-scroll flag persists across reload (localStorage) + no-arg query", (function () {
     var win = EDITOR_BOOT.boot();
-    if (win.__nativeScroll() !== false) return false;           // no arg = query, and default is off
-    win.__nativeScroll(true);
-    if (win.localStorage.getItem("authoring.nativeScroll") !== "1") return false;
-    if (win.__nativeScroll() !== true) return false;            // query again, still on
-    // A fresh boot seeded with that stored value comes up in native-scroll mode.
-    var store = LOAD.makeStorage(); store.setItem("authoring.nativeScroll", "1");
-    return EDITOR_BOOT.boot({ window: { localStorage: store } }).__nativeScroll() === true;
+    if (win.__nativeScroll() !== true) return false;             // no arg = query, and default is on
+    win.__nativeScroll(false);
+    if (win.localStorage.getItem("authoring.nativeScroll") !== "0") return false;
+    if (win.__nativeScroll() !== false) return false;            // query again, still off
+    // A fresh boot seeded with that stored value comes up in transform-pan mode, and the opposite
+    // seed comes up native -- the opt-out has to survive a reload as surely as the default does.
+    var off = LOAD.makeStorage(); off.setItem("authoring.nativeScroll", "0");
+    var on = LOAD.makeStorage(); on.setItem("authoring.nativeScroll", "1");
+    return EDITOR_BOOT.boot({ window: { localStorage: off } }).__nativeScroll() === false &&
+           EDITOR_BOOT.boot({ window: { localStorage: on } }).__nativeScroll() === true;
   })());
   // Compositor zoom (#151 lever 2, done right): all zoom entry points route through startZoom;
   // native mode animates the world transform via a CSS transition (browser scales the painted
