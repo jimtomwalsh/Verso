@@ -197,6 +197,10 @@
   <!-- arch-P3b-07l variants: window.VersoVariants — the variant and version axes: the override model, the live property-panel editor and the two toolbar switchers with their preview badges. Must precede editor.js. -->
   <script src="src/editor/variants.js"></script>
   <!-- arch-P3b-07j copy editor: window.VersoCopyEditor — the Read view (every text field of the course, page by page, beside its variants) and the find & replace that shares its variant-safe write path. Must precede editor.js. -->
+  <!-- doc-ops: window.DocOps -- every change to a document as data, addressed by block cid.
+       Pure, DOM-free, dependency-free. A surface that re-addresses at write time (copy-editor.js)
+       reads it inside install(), so load order is not load-bearing -- but it must be on the page. -->
+  <script src="src/doc-ops.js"></script>
   <script src="src/editor/copy-editor.js"></script>
   <!-- arch-P3b-07j demo: window.VersoDemo — the fullscreen preview that runs the REAL learner runtime in a device frame, with the breakpoint picker, fit-scale, exit notice and end screen a preview needs and an export must not have. Must precede editor.js. -->
   <script src="src/editor/demo.js"></script>

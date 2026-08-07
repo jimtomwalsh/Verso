@@ -151,21 +151,33 @@
     // wrappers each render (the host object is the stable identity).
     var copyEditSbs = false;
     var _unlockedCells = [];
+    // Keyed by the target's ADDRESS (cid + path + key), not by its host object. The host was the
+    // identity here until a target learned its address, and it was wrong for the same reason every
+    // held reference is wrong: undo, or any other document swap, hands the next render a different
+    // object for the same cell, so a cell the author had unlocked silently re-locked itself.
+    function cellKeyOf(t) { return String(t && t.cid) + "|" + ((t && t.path) || []).join(".") + "|" + (t && t.key); }
     function cellUnlocked(t, variant) {
+      var key = cellKeyOf(t);
       for (var i = 0; i < _unlockedCells.length; i++) {
         var u = _unlockedCells[i];
-        if (u.host === t.host && u.key === t.key && u.variant === variant) return true;
+        if (u.key === key && u.variant === variant) return true;
       }
       return false;
     }
     function setCellUnlocked(t, variant) {
-      if (!cellUnlocked(t, variant)) _unlockedCells.push({ host: t.host, key: t.key, variant: variant });
+      if (!cellUnlocked(t, variant)) _unlockedCells.push({ key: cellKeyOf(t), variant: variant });
     }
     // #104: commit a cell to a SPECIFIC variant layer ("" = flagship/base). The single-view
     // rows pass activeVariant (unchanged); the side-by-side flagship/variant cells pass their
     // own column variant so each writes the correct override layer via frWrite.
+    //
+    // The write re-addresses against the LIVE document. A row is bound to its field for as long as
+    // it is on screen and commits on every keystroke, so an undo or a tab switch between binding
+    // and typing used to send the rest of that sentence into an orphaned object. frWrite returning
+    // false says the field has gone; rebuild the view rather than keep typing into nothing.
     function commitCopyRow(t, tx, variant) {
-      frWrite(t, variant == null ? activeVariant : variant, sanitizeText(sanitizeFieldHtml(tx.innerHTML)));
+      var wrote = frWrite(t, variant == null ? activeVariant : variant, sanitizeText(sanitizeFieldHtml(tx.innerHTML)), E.doc);
+      if (!wrote) { renderCopyEditorDoc(); return; }
       copyEditDirty = true;
       scheduleSave();
       scheduleSpellcheck(); // P0: re-check typos in the copy-editor view as the author types
@@ -202,7 +214,7 @@
     //  - Find & replace opens the EXISTING modal (already targets frTargets); it appears above
     // the copy-editor overlay and, after a replace, we re-paint the view + count.
     function copyEditorWordTotal() {
-      return frTargets(E.doc, "").reduce(function (n, t) { return n + frWords(frValueOf(t, "")); }, 0);
+      return frTargets(E.doc, "").reduce(function (n, t) { return n + frWords(frValueOf(t, "", E.doc)); }, 0);
     }
     function renderCopyEditorTools() {
       var host = document.getElementById("copyedit-tools"); if (!host) return;
@@ -316,7 +328,7 @@
       var sbs = copyEditSbs && cols.length;
       var listVariant = sbs ? "" : E.activeVariant;
       var list = frTargets(E.doc, listVariant).map(function (t) {
-        return { pageIndex: t.pageIndex, label: t.label, value: frValueOf(t, listVariant), ref: t };
+        return { pageIndex: t.pageIndex, label: t.label, value: frValueOf(t, listVariant, E.doc), ref: t };
       });
       var groups = window.copyEditorModel(list);
       if (!groups.length) { host.appendChild(h("div", "copyedit-empty", "No course copy yet.")); return; }
@@ -379,16 +391,16 @@
         }
         // variant column
         if (!t || !t.overridable) { cell.classList.add("copyedit-cell--na"); r.appendChild(cell); return; }
-        if (frHasOverride(t, v)) {
+        if (frHasOverride(t, v, E.doc)) {
           var unlocked = cellUnlocked(t, v);
           var vx = h("div", "copyedit-row__text");
-          vx.innerHTML = frValueOf(t, v);
+          vx.innerHTML = frValueOf(t, v, E.doc);
           if (unlocked) bindCopyRow(vx, t, v); else vx.classList.add("copyedit-cell--locked");
           cell.appendChild(vx);
           cell.appendChild(copyGlyphBtn(unlocked ? "lock-open" : "lock", "copyedit-lock",
             unlocked ? "Lock" : "Unlock to edit",
             function () {
-              if (cellUnlocked(t, v)) { _unlockedCells = _unlockedCells.filter(function (u) { return !(u.host === t.host && u.key === t.key && u.variant === v); }); }
+              if (cellUnlocked(t, v)) { var k = cellKeyOf(t); _unlockedCells = _unlockedCells.filter(function (u) { return !(u.key === k && u.variant === v); }); }
               else setCellUnlocked(t, v);
               renderCopyEditorDoc();
             }));
@@ -398,7 +410,7 @@
           cell.appendChild(copyGlyphBtn("plus", "copyedit-create", "Create variant copy from flagship",
             function () {
               pushHistory();
-              frWrite(t, v, frValueOf(t, "")); // seed the override from the flagship copy
+              frWrite(t, v, frValueOf(t, "", E.doc), E.doc); // seed the override from the flagship copy
               setCellUnlocked(t, v);
               copyEditDirty = true; scheduleSave();
               renderCopyEditorDoc();
@@ -508,46 +520,56 @@
       return m ? m.length : 0;
     }
     // Enumerate every text-copy target in the doc. When `variant` is set, only the
-    // variant-overridable targets are returned. Each target = { host, key, isSlot,
-    // overridable, label, pageIndex }. PURE (no closure deps).
+    // variant-overridable targets are returned. Each target = { host, cid, path, key,
+    // isSlot, overridable, label, pageIndex }. PURE (no closure deps).
+    //
+    // WHY A TARGET CARRIES AN ADDRESS AND NOT JUST A HOST. `host` is a live object reference into
+    // whatever document was passed in. Find & replace enumerates targets ONCE and then writes
+    // through them at the author's pace, one click at a time; the Read view holds a row's target
+    // for as long as the row is on screen. Anything that replaces the document in between -- undo,
+    // redo, a tab switch, a store refresh -- leaves every one of those hosts orphaned, and the next
+    // write lands on an object no longer in the tree. No error, and the author's replacements are
+    // gone. So each target also records `cid` (the owning block, stable and persisted) and `path`
+    // (the keys from that block down to the host), which frResolve re-walks against the LIVE
+    // document at write time. See src/doc-ops.js for the same rule stated in general.
     function frTargets(d, variant) {
       var out = [];
       function push(t) { if (variant && !t.overridable) return; out.push(t); }
-      function nested(obj, key, pageIndex, label) {
-        if (obj && typeof obj[key] === "string") push({ host: obj, key: key, isSlot: false, overridable: false, label: label, pageIndex: pageIndex });
+      function nested(obj, key, pageIndex, label, owner, path) {
+        if (obj && typeof obj[key] === "string") push({ host: obj, cid: owner && owner.cid, path: path || [], key: key, isSlot: false, overridable: false, label: label, pageIndex: pageIndex });
       }
       function addBlock(b, pageIndex) {
         if (!b || typeof b !== "object") return;
         // block-level direct copy (variant-overridable via applyOverride top-level keys)
         ["text", "label", "title", "kicker", "caption"].forEach(function (k) {
-          if (typeof b[k] === "string") push({ host: b, key: k, isSlot: false, overridable: true, label: (b.type || "block") + " · " + k, pageIndex: pageIndex });
+          if (typeof b[k] === "string") push({ host: b, cid: b.cid, path: [], key: k, isSlot: false, overridable: true, label: (b.type || "block") + " · " + k, pageIndex: pageIndex });
         });
         // component instances — slot copy (variant-overridable via slots merge)
         if (b.type === "componentGrid" && Array.isArray(b.instances)) {
-          b.instances.forEach(function (ins) {
+          b.instances.forEach(function (ins, ii) {
             if (ins && ins.slots) Object.keys(ins.slots).forEach(function (key) {
-              if (typeof ins.slots[key] === "string") push({ host: ins, key: key, isSlot: true, overridable: true, label: "card · " + key, pageIndex: pageIndex });
+              if (typeof ins.slots[key] === "string") push({ host: ins, cid: b.cid, path: ["instances", ii], key: key, isSlot: true, overridable: true, label: "card · " + key, pageIndex: pageIndex });
             });
           });
         }
         // #90: table cell copy (base-only) — each cell is a { t } object
         if (b.type === "table" && Array.isArray(b.rows)) {
-          b.rows.forEach(function (row) { (row || []).forEach(function (cell) {
-            if (cell && typeof cell.t === "string") push({ host: cell, key: "t", isSlot: false, overridable: false, label: "table cell", pageIndex: pageIndex });
+          b.rows.forEach(function (row, ri) { (row || []).forEach(function (cell, ci) {
+            if (cell && typeof cell.t === "string") push({ host: cell, cid: b.cid, path: ["rows", ri, ci], key: "t", isSlot: false, overridable: false, label: "table cell", pageIndex: pageIndex });
           }); });
         }
         // nested quiz copy (base-only, no per-variant path)
-        if (b.intro) { nested(b.intro, "body", pageIndex, "quiz intro"); nested(b.intro, "startLabel", pageIndex, "quiz start"); }
+        if (b.intro) { nested(b.intro, "body", pageIndex, "quiz intro", b, ["intro"]); nested(b.intro, "startLabel", pageIndex, "quiz start", b, ["intro"]); }
         if (b.done) {
-          nested(b.done, "title", pageIndex, "quiz done · title"); nested(b.done, "body", pageIndex, "quiz done · body"); nested(b.done, "summary", pageIndex, "quiz summary");
-          if (b.done.retry) nested(b.done.retry, "label", pageIndex, "quiz retry");
+          nested(b.done, "title", pageIndex, "quiz done · title", b, ["done"]); nested(b.done, "body", pageIndex, "quiz done · body", b, ["done"]); nested(b.done, "summary", pageIndex, "quiz summary", b, ["done"]);
+          if (b.done.retry) nested(b.done.retry, "label", pageIndex, "quiz retry", b, ["done", "retry"]);
         }
-        if (Array.isArray(b.questions)) b.questions.forEach(function (q) {
+        if (Array.isArray(b.questions)) b.questions.forEach(function (q, qi) {
           if (!q) return;
-          ["methodLabel", "stemBefore", "stemAfter", "prompt", "feedbackCorrect", "feedbackIncorrect"].forEach(function (k) { nested(q, k, pageIndex, "question · " + k); });
-          if (Array.isArray(q.options)) q.options.forEach(function (opt) { nested(opt, "text", pageIndex, "option"); });
-          if (Array.isArray(q.cards)) q.cards.forEach(function (card) { nested(card, "text", pageIndex, "sort card"); });
-          if (Array.isArray(q.cats)) q.cats.forEach(function (cat) { nested(cat, "label", pageIndex, "sort category"); });
+          ["methodLabel", "stemBefore", "stemAfter", "prompt", "feedbackCorrect", "feedbackIncorrect"].forEach(function (k) { nested(q, k, pageIndex, "question · " + k, b, ["questions", qi]); });
+          if (Array.isArray(q.options)) q.options.forEach(function (opt, oi) { nested(opt, "text", pageIndex, "option", b, ["questions", qi, "options", oi]); });
+          if (Array.isArray(q.cards)) q.cards.forEach(function (card, ci) { nested(card, "text", pageIndex, "sort card", b, ["questions", qi, "cards", ci]); });
+          if (Array.isArray(q.cats)) q.cats.forEach(function (cat, ci) { nested(cat, "label", pageIndex, "sort category", b, ["questions", qi, "cats", ci]); });
         });
       }
       var pages = (d && d.pages) || [];
@@ -558,9 +580,9 @@
             addBlock(b, pi);
             if (Array.isArray(b.children)) walk(b.children);
             if (Array.isArray(b.columns)) b.columns.forEach(walk);
-            if (Array.isArray(b.items)) b.items.forEach(function (it) {
+            if (Array.isArray(b.items)) b.items.forEach(function (it, ii) {
               if (!it) return;
-              nested(it, "title", pi, "item title"); // accordion / sequence step title (base-only)
+              nested(it, "title", pi, "item title", b, ["items", ii]); // accordion / sequence step title (base-only)
               if (Array.isArray(it.children)) walk(it.children);
               if (Array.isArray(it.front)) walk(it.front);
             });
@@ -571,25 +593,60 @@
       });
       return out;
     }
+    // Re-address a target against a live document: find its block by cid, then walk `path` down to
+    // the host it named. Returns the LIVE host, or null when the block or the path has gone (the
+    // block was deleted, the question it belonged to was removed, the table lost a row).
+    //
+    // A null here is the signal that used to be a silent write into an orphan. Callers must treat
+    // it as "this target no longer exists" and skip the write, not fall back to t.host.
+    //
+    // `d` is optional ONLY so the headless F&R fence can exercise the layer logic on raw targets.
+    // In the app every call passes the live document -- a ratchet in tests/run.js fails a call site
+    // that does not, and a second one fails a page that does not load src/doc-ops.js before this
+    // module. Those two together are why there is no "doc-ops is missing, use the held reference"
+    // branch here: a fallback that silently restores the fault is worse than a page that cannot
+    // boot, and the gates make the second case unreachable.
+    function frResolve(t, d) {
+      if (!t) return null;
+      if (!d) return t.host || null;               // fence: the held reference, layer logic only
+      if (t.cid == null) return t.host || null;    // a block with no cid predates normalizeDoc
+      var hit = window.DocOps.locate(d, t.cid);
+      if (!hit) return null;
+      var node = hit.block;
+      var path = t.path || [];
+      for (var i = 0; i < path.length; i++) {
+        if (node == null || typeof node !== "object") return null;
+        node = node[path[i]];
+      }
+      return (node && typeof node === "object") ? node : null;
+    }
     // Effective current value of a target (the override wins when previewing a
     // variant that has one, else the base) — the string F&R searches + replaces in.
-    function frValueOf(t, variant) {
+    // Reads the live host when `d` is supplied; "" when the target has gone.
+    function frValueOf(t, variant, d) {
+      var host = frResolve(t, d);
+      if (!host) return "";
       if (variant && t.overridable) {
-        var o = t.host.overrides && t.host.overrides[variant];
+        var o = host.overrides && host.overrides[variant];
         if (o) {
           if (t.isSlot) { if (o.slots && o.slots[t.key] != null) return String(o.slots[t.key]); }
           else if (o[t.key] != null) return String(o[t.key]);
         }
       }
-      if (t.isSlot) return (t.host.slots && t.host.slots[t.key] != null) ? String(t.host.slots[t.key]) : "";
-      return t.host[t.key] != null ? String(t.host[t.key]) : "";
+      if (t.isSlot) return (host.slots && host.slots[t.key] != null) ? String(host.slots[t.key]) : "";
+      return host[t.key] != null ? String(host[t.key]) : "";
     }
     // Write a target's value to the correct layer: the variant override (when a
     // variant is active + the target is overridable), else the base. Mirrors
     // writeVariantField's prune-on-empty so an inherited field carries no override.
-    function frWrite(t, variant, value) {
+    //
+    // Returns true when it wrote, FALSE when the target no longer exists in `d`. A false is not a
+    // failure to handle quietly: it means the author is editing something that has been deleted or
+    // replaced under them, and the caller should stop and rebuild from the live document.
+    function frWrite(t, variant, value, d) {
+      var host = frResolve(t, d);
+      if (!host) return false;
       if (variant && t.overridable) {
-        var host = t.host;
         host.overrides = host.overrides || {};
         var o = host.overrides[variant] || (host.overrides[variant] = {});
         if (value === "" || value == null) { if (t.isSlot) { if (o.slots) delete o.slots[t.key]; } else delete o[t.key]; }
@@ -598,44 +655,48 @@
         if (!Object.keys(o).length) delete host.overrides[variant];
         if (host.overrides && !Object.keys(host.overrides).length) delete host.overrides;
       } else {
-        if (t.isSlot) { t.host.slots = t.host.slots || {}; t.host.slots[t.key] = value; }
-        else t.host[t.key] = value;
+        if (t.isSlot) { host.slots = host.slots || {}; host.slots[t.key] = value; }
+        else host[t.key] = value;
       }
+      return true;
     }
     // #104 side-by-side: does target `t` HOLD a variant override for `variant`?
     // (overridable target + a stored value on host.overrides[variant] for its key).
     // Pure over the host — drives which copy-editor variant cells are "held" (locked,
     // editable on unlock) vs "empty" (offer create-from-flagship). Mirrors frValueOf's
     // override lookup exactly so the two never disagree.
-    function frHasOverride(t, variant) {
+    function frHasOverride(t, variant, d) {
       if (!t || !t.overridable || !variant) return false;
-      var o = t.host && t.host.overrides && t.host.overrides[variant];
+      var host = frResolve(t, d);
+      var o = host && host.overrides && host.overrides[variant];
       if (!o) return false;
       return t.isSlot ? !!(o.slots && o.slots[t.key] != null) : (o[t.key] != null);
     }
-    // Total occurrences across every target, for the live count.
-    function frTotal(targets, variant, needle) {
-      return targets.reduce(function (n, t) { return n + frCount(frValueOf(t, variant), needle); }, 0);
+    // Total occurrences across every target, for the live count. A target that has left the
+    // document reads as "" and contributes nothing, so the count never claims matches the author
+    // cannot reach.
+    function frTotal(targets, variant, needle, d) {
+      return targets.reduce(function (n, t) { return n + frCount(frValueOf(t, variant, d), needle); }, 0);
     }
     // The next match at-or-after `after` = { tIndex, pos }, wrapping ONCE to the top.
     // Returns { tIndex, start } or null.
-    function frNext(targets, variant, needle, after) {
+    function frNext(targets, variant, needle, after, d) {
       if (!needle || !targets.length) return null;
       var startT = after ? after.tIndex : 0, startPos = after ? after.pos : 0;
       for (var i = startT; i < targets.length; i++) {
-        var val = frValueOf(targets[i], variant);
+        var val = frValueOf(targets[i], variant, d);
         var idx = val.indexOf(needle, i === startT ? startPos : 0);
         if (idx !== -1) return { tIndex: i, start: idx };
       }
       for (var j = 0; j <= startT && j < targets.length; j++) { // wrap
-        var v2 = frValueOf(targets[j], variant);
+        var v2 = frValueOf(targets[j], variant, d);
         var i2 = v2.indexOf(needle, 0);
         if (i2 !== -1) return { tIndex: j, start: i2 };
       }
       return null;
     }
     /* @fr-end */
-    window.__frCore = { count: frCount, replaceAll: frReplaceAll, targets: frTargets, valueOf: frValueOf, write: frWrite, total: frTotal, next: frNext, words: frWords, hasOverride: frHasOverride };
+    window.__frCore = { count: frCount, replaceAll: frReplaceAll, targets: frTargets, valueOf: frValueOf, write: frWrite, total: frTotal, next: frNext, words: frWords, hasOverride: frHasOverride, resolve: frResolve };
     var frCore = window.__frCore; // in-app alias the dialog composes from
 
     var frOpen = false;
@@ -671,7 +732,7 @@
       // the Flagship base — a course-level metric, so it ignores the active variant scope).
       var wordCount = h("div", "fr-wordcount");
       box.appendChild(wordCount);
-      var docWords = frCore.targets(E.doc, "").reduce(function (n, t) { return n + frCore.words(frCore.valueOf(t, "")); }, 0);
+      var docWords = frCore.targets(E.doc, "").reduce(function (n, t) { return n + frCore.words(frCore.valueOf(t, "", E.doc)); }, 0);
       function fmtNum(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
       wordCount.textContent = fmtNum(docWords) + " word" + (docWords === 1 ? "" : "s") + " in course copy";
       var findInput = modalText(box, "Find", "", "Case-sensitive, exact");
@@ -690,7 +751,7 @@
       function showPreview() {
         if (!cur) { preview.style.display = "none"; return; }
         var arr = ts(); var t = arr[cur.tIndex]; if (!t) { preview.style.display = "none"; return; }
-        var val = frCore.valueOf(t, frVariant), n = needle();
+        var val = frCore.valueOf(t, frVariant, E.doc), n = needle();
         var a = Math.max(0, cur.start - 24), b = Math.min(val.length, cur.start + n.length + 24);
         var pre = (a > 0 ? "…" : "") + val.slice(a, cur.start);
         var mid = val.slice(cur.start, cur.start + n.length);
@@ -707,17 +768,17 @@
       function refresh() {
         var arr = ts(), n = needle();
         if (!n) { status.textContent = "Type to search."; cur = null; showPreview(); return; }
-        var total = frCore.total(arr, frVariant, n);
+        var total = frCore.total(arr, frVariant, n, E.doc);
         status.textContent = total ? (total + " match" + (total === 1 ? "" : "es")) : "No matches.";
         showPreview();
       }
       function findNext() {
         var arr = ts(), n = needle();
         if (!n) { refresh(); return; }
-        cur = frCore.next(arr, frVariant, n, searchFrom || { tIndex: 0, pos: 0 });
+        cur = frCore.next(arr, frVariant, n, searchFrom || { tIndex: 0, pos: 0 }, E.doc);
         if (cur) searchFrom = { tIndex: cur.tIndex, pos: cur.start + n.length };
         else searchFrom = { tIndex: 0, pos: 0 };
-        var total = frCore.total(arr, frVariant, n);
+        var total = frCore.total(arr, frVariant, n, E.doc);
         status.textContent = total ? ((cur ? "Match found — " : "") + total + " match" + (total === 1 ? "" : "es")) : "No matches.";
         showPreview();
       }
@@ -725,11 +786,11 @@
         var n = needle(); if (!n) return;
         if (!cur) { findNext(); return; }
         var arr = ts(), t = arr[cur.tIndex]; if (!t) { cur = null; findNext(); return; }
-        var val = frCore.valueOf(t, frVariant);
+        var val = frCore.valueOf(t, frVariant, E.doc);
         if (val.substr(cur.start, n.length) !== n) { cur = null; findNext(); return; } // stale — re-find
         var nv = val.slice(0, cur.start) + replaceInput.value + val.slice(cur.start + n.length);
         pushHistory();
-        frCore.write(t, frVariant, nv);
+        if (!frCore.write(t, frVariant, nv, E.doc)) { cur = null; findNext(); return; } // the field left the document mid-session
         mount();
         if (copyEditorIsOpen()) { renderCopyEditorDoc(); renderCopyEditorTools(); } // #119: reflect the replace in the open copy view
         searchFrom = { tIndex: cur.tIndex, pos: cur.start + replaceInput.value.length };
@@ -740,18 +801,24 @@
       function replaceAll() {
         var n = needle(); if (!n) return;
         var arr = ts(), rep = replaceInput.value, hits = 0;
-        var changed = arr.filter(function (t) { return frCore.count(frCore.valueOf(t, frVariant), n) > 0; });
+        var changed = arr.filter(function (t) { return frCore.count(frCore.valueOf(t, frVariant, E.doc), n) > 0; });
         if (!changed.length) { status.textContent = "No matches."; return; }
         pushHistory();
+        // Count a match only when its write actually landed. A target enumerated a moment ago can
+        // have left the document since; reporting "Replaced 12" when 3 of them went nowhere is the
+        // silent-loss fault wearing a status message.
+        var gone = 0;
         changed.forEach(function (t) {
-          var val = frCore.valueOf(t, frVariant);
-          hits += frCore.count(val, n);
-          frCore.write(t, frVariant, frCore.replaceAll(val, n, rep));
+          var val = frCore.valueOf(t, frVariant, E.doc);
+          var count = frCore.count(val, n);
+          if (frCore.write(t, frVariant, frCore.replaceAll(val, n, rep), E.doc)) hits += count;
+          else gone++;
         });
         mount();
         if (copyEditorIsOpen()) { renderCopyEditorDoc(); renderCopyEditorTools(); } // #119: reflect the replace in the open copy view
         cur = null; searchFrom = { tIndex: 0, pos: 0 };
-        status.textContent = "Replaced " + hits + " match" + (hits === 1 ? "" : "es") + ".";
+        status.textContent = "Replaced " + hits + " match" + (hits === 1 ? "" : "es") + "."
+          + (gone ? " " + gone + " field" + (gone === 1 ? "" : "s") + " had already been removed." : "");
         preview.style.display = "none";
         findInput.focus();
       }
