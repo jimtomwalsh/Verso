@@ -6733,7 +6733,7 @@ section("table block (#90)");
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
   ok("table has a Lucide glyph", /table: "table"/.test(OUT) && /"table":/.test(ic));
   // F&R parity: cells wired into the enumerator
-  ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, key: "t"/.test(CE));
+  ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, cid: b\.cid, path: \["rows", ri, ci\], key: "t"/.test(CE));
 })();
 
 // ---- #111 course-completion / exit splash --------------------------------
@@ -12157,6 +12157,9 @@ section("hotspot per-card size");
 })();
 
 // ---- FR: Find & replace pure core + variant routing ----------------------
+// The reconstituted core is shared with the DO section below (one fence, not two).
+var __frFence = null, __frDocOps = null;
+// ---- FR: Find & replace pure core + variant routing ----------------------
 section("FR find/replace");
 (function () {
   // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
@@ -12164,8 +12167,14 @@ section("FR find/replace");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   if (a < 0 || b < 0) { ok("locate @fr fence", false); return; }
   var body = e.slice(a, b);
-  var fr = new Function(body +
-    "\nreturn { count: frCount, replaceAll: frReplaceAll, targets: frTargets, valueOf: frValueOf, write: frWrite, total: frTotal, next: frNext, words: frWords };")();
+  // The fence takes a `window` carrying the real DocOps -- what the browser hands this module --
+  // so the addressed-write half (frResolve and everything routed through it) is driven for real,
+  // not asserted against source text. Same single reconstitution: the DO section below reuses this
+  // one rather than opening a second.
+  var DocOps = require(path.join(ROOT, "src/doc-ops.js"));
+  var fr = new Function("window", body +
+    "\nreturn { count: frCount, replaceAll: frReplaceAll, targets: frTargets, valueOf: frValueOf, write: frWrite, total: frTotal, next: frNext, words: frWords, resolve: frResolve, hasOverride: frHasOverride };")({ DocOps: DocOps });
+  __frFence = fr; __frDocOps = DocOps;
 
   // #78: word count strips inline HTML + folds entities, counts whitespace runs
   ok("words counts plain copy", fr.words("A drone is a drone.") === 5);
@@ -19842,8 +19851,8 @@ section("#175 copy-editor format toolbar");
   ok("applyCopyWeight commits via commitCopyRow (variant-aware frWrite)", /commitCopyRow\(t, tx, _activeCopyRow\.variant\)/.test(acw));
   // seed-from-flagship: frValueOf falls back to the base value when a variant has no override,
   // so a first variant edit starts from the flagship's rich HTML (inline weight spans intact).
-  var fr = slice(CE, "function frValueOf(t, variant)", "function frWrite");
-  ok("frValueOf falls back to the flagship base value (seeds variant rich text)", /return t\.host\[t\.key\] != null \? String\(t\.host\[t\.key\]\) : ""/.test(fr));
+  var fr = slice(CE, "function frValueOf(t, variant, d)", "function frWrite");
+  ok("frValueOf falls back to the flagship base value (seeds variant rich text)", /return host\[t\.key\] != null \? String\(host\[t\.key\]\) : ""/.test(fr));
   // active-row tracking + teardown
   ok("active row tracked on focus", /addEventListener\("focus", function \(\) \{ _activeCopyRow = \{ tx: tx, t: t, variant: variant == null \? activeVariant : variant \};/.test(CE));
   ok("active row dropped when rows rebuild + on exit", /_activeCopyRow = null; refreshCopyFormatState\(\)/.test(CE) && /_activeCopyRow = null; \/\/ #175/.test(CE));
@@ -19904,7 +19913,7 @@ section("#117 copy-editor read-only doc");
 
   // wiring: enter paints the doc; a VIEW over frValueOf, never a store
   ok("wiring: enterCopyEditor renders the doc", /function enterCopyEditor\(\)[\s\S]{0,320}renderCopyEditorDoc\(\)/.test(e));
-  ok("wiring: builder reads frTargets + frValueOf (model, not store)", /frTargets\(E\.doc, listVariant\)\.map[\s\S]{0,140}frValueOf\(t, listVariant\)/.test(e));
+  ok("wiring: builder reads frTargets + frValueOf (model, not store)", /frTargets\(E\.doc, listVariant\)\.map[\s\S]{0,140}frValueOf\(t, listVariant, E\.doc\)/.test(e));
   ok("wiring: rows carry a role tag + preserved inline HTML", /copyedit-row__role[\s\S]{0,220}tx\.innerHTML = row\.html/.test(e));
   ok("wiring: read-only chapter/page location header", /copyedit-loc__chapter[\s\S]{0,160}pageDisplayName\(page, E\.doc\)/.test(e));
 })();
@@ -19947,10 +19956,10 @@ section("#118 copy-editor two-way editing");
 
   // wiring: editable rows commit through frWrite (variant-aware) + sanitize; dirty -> mount on exit
   ok("wiring: rows bound editable via bindCopyRow", /if \(row\.ref\) bindCopyRow\(tx, row\.ref\)/.test(e));
-  ok("wiring: commit routes through frWrite + sanitize (rich-preserving)", /function commitCopyRow[\s\S]{0,200}frWrite\(t, variant == null \? activeVariant : variant, sanitizeText\(sanitizeFieldHtml\(tx\.innerHTML\)\)\)/.test(e));
+  ok("wiring: commit routes through frWrite + sanitize (rich-preserving)", /function commitCopyRow[\s\S]{0,400}frWrite\(t, variant == null \? activeVariant : variant, sanitizeText\(sanitizeFieldHtml\(tx\.innerHTML\)\), E\.doc\)/.test(e));
   ok("wiring: contenteditable rows, not plain flatten", /tx\.setAttribute\("contenteditable", "true"\)/.test(e) && /tx\.innerHTML = row\.html/.test(e));
   ok("wiring: paste is plain-text (no rich pollution)", /tx\.addEventListener\("paste"[\s\S]{0,300}execCommand\("insertText", false, text\)/.test(e));
-  ok("wiring: edit schedules a save", /function commitCopyRow[\s\S]{0,200}scheduleSave\(\)/.test(e));
+  ok("wiring: edit schedules a save", /function commitCopyRow[\s\S]{0,500}scheduleSave\(\)/.test(e));
   ok("wiring: dirty edit rebuilds the canvas on exit (setDoc round-trip)", /if \(copyEditDirty\) \{ copyEditDirty = false; mount\(\); \}/.test(e));
 })();
 
@@ -19965,7 +19974,7 @@ section("#119 copy-editor tools");
   var d = { pages: [{ id: "p", blocks: [{ type: "heading", text: "One two three" }, { type: "paragraph", text: "four five" }] }] };
   var frTotal = fr.targets(d, "").reduce(function (n, t) { return n + fr.words(fr.valueOf(t, "")); }, 0);
   ok("fixture F&R word total is 5", frTotal === 5);
-  ok("wiring: word count reuses frWords over frTargets base scope (matches F&R)", /function copyEditorWordTotal\(\) \{\s*return frTargets\(E\.doc, ""\)\.reduce\(function \(n, t\) \{ return n \+ frWords\(frValueOf\(t, ""\)\); \}, 0\);/.test(e));
+  ok("wiring: word count reuses frWords over frTargets base scope (matches F&R)", /function copyEditorWordTotal\(\) \{\s*return frTargets\(E\.doc, ""\)\.reduce\(function \(n, t\) \{ return n \+ frWords\(frValueOf\(t, "", E\.doc\)\); \}, 0\);/.test(e));
   ok("wiring: header shows word count + Find & replace", /copyedit-wordcount[\s\S]{0,1800}"Find & replace"/.test(e)); // #104: the Single|Side-by-side toggle now sits between them
   ok("wiring: native spellcheck ON for editable rows", /tx\.setAttribute\("spellcheck", "true"\)/.test(e));
   ok("wiring: Find & replace opens the EXISTING modal (reuse)", /find\.addEventListener\("click", function \(\) \{ openFindReplace\(\); \}\)/.test(e));
@@ -20022,7 +20031,7 @@ section("#104 copy-editor variant columns");
   ok("wiring: held variant cell is read-only until unlocked", /if \(unlocked\) bindCopyRow\(vx, t, v\); else vx\.classList\.add\("copyedit-cell--locked"\);/.test(e));
   ok("wiring: lock/unlock glyphs (Lucide lock/lock-open) with tooltips", /copyGlyphBtn\(unlocked \? "lock-open" : "lock", "copyedit-lock",\s*unlocked \? "Lock" : "Unlock to edit"/.test(e));
   ok("wiring: empty variant cell offers create-from-flagship (+ glyph)", /copyGlyphBtn\("plus", "copyedit-create", "Create variant copy from flagship"/.test(e));
-  ok("wiring: create seeds override from flagship + pushes history (undoable)", /pushHistory\(\);\s*frWrite\(t, v, frValueOf\(t, ""\)\); \/\/ seed the override from the flagship copy/.test(e));
+  ok("wiring: create seeds override from flagship + pushes history (undoable)", /pushHistory\(\);\s*frWrite\(t, v, frValueOf\(t, "", E\.doc\), E\.doc\); \/\/ seed the override from the flagship copy/.test(e));
   ok("wiring: unlock state is transient (never persisted to the doc)", /var _unlockedCells = \[\];/.test(e) && /copyEditSbs = false; _unlockedCells = \[\];/.test(e));
   ok("wiring: icon buttons carry aria-label + preventDefault (keep caret)", /b\.title = title; b\.setAttribute\("aria-label", title\);/.test(e));
 
@@ -23276,6 +23285,408 @@ section("arch-P2 slice ratchet");
   if (fnCount < FN_BUDGET || sliceCount < SLICE_BUDGET) {
     warn("the reconstitution budget has fallen to " + fnCount + "/" + sliceCount + " -- lower FN_BUDGET/SLICE_BUDGET in tests/run.js to lock the gain in");
   }
+})();
+
+// ---- DO: doc-ops, the addressed-mutation layer ---------------------------
+// src/doc-ops.js exists to make one class of fault impossible: a surface holding a block OBJECT,
+// the document being replaced underneath it, and the write landing on an orphan with no error.
+// So the assertions that matter here are the negative ones -- a stale cid THROWS, a failed op
+// changes nothing, and the input document is never mutated. A layer that quietly did the right
+// thing most of the time is what we already had.
+section("DO doc-ops");
+(function () {
+  var DO = require(path.join(ROOT, "src/doc-ops.js"));
+
+  // A document with every container shape the editor really produces: plain children, a columns
+  // block (array of block ARRAYS), a component grid whose instances are not blocks, and a hotspot
+  // whose popover cards live at screens[].markers[].blocks -- the shape editor.js's walkBlocks
+  // needed a hand-inlined special case for.
+  function fixture() {
+    return {
+      meta: { title: "T", code: "T-1" },
+      pages: [
+        { id: "p1", name: "One", blocks: [
+          { type: "heading", cid: "c_h1", text: "Hello" },
+          { type: "group", cid: "c_g1", children: [
+            { type: "text", cid: "c_t1", text: "inner" }
+          ] },
+          { type: "columns", cid: "c_col", columns: [
+            [{ type: "text", cid: "c_ca", text: "left" }],
+            [{ type: "text", cid: "c_cb", text: "right" }]
+          ] }
+        ] },
+        { id: "p2", name: "Two", blocks: [
+          { type: "componentGrid", cid: "c_grid", component: "card", instances: [
+            { status: "complete", slots: { title: "not a block" } }
+          ] },
+          { type: "hotspot", cid: "c_hs", screens: [
+            { markers: [ { blocks: [ { type: "text", cid: "c_deep", text: "in a marker" } ] } ] }
+          ] }
+        ] }
+      ]
+    };
+  }
+
+  // --- addressing ---
+  ok("locate finds a top-level block and its page", (function () {
+    var h = DO.locate(fixture(), "c_h1");
+    return h && h.block.text === "Hello" && h.index === 0 && h.pageIndex === 0;
+  })());
+  ok("locate descends into children", (DO.locate(fixture(), "c_t1") || {}).pageIndex === 0);
+  ok("locate descends into a columns block (array of block arrays)", (function () {
+    var h = DO.locate(fixture(), "c_cb");
+    return h && h.block.text === "right" && h.index === 0;
+  })());
+  ok("locate reaches screens[].markers[].blocks -- no hard-coded container list", (function () {
+    var h = DO.locate(fixture(), "c_deep");
+    return h && h.block.text === "in a marker" && h.pageIndex === 1;
+  })());
+  ok("locate returns null for a cid that is not there", DO.locate(fixture(), "c_gone") === null);
+  ok("has() agrees with locate", DO.has(fixture(), "c_deep") === true && DO.has(fixture(), "c_gone") === false);
+  ok("cids() lists every block cid, nested ones included", (function () {
+    var list = DO.cids(fixture());
+    return ["c_h1", "c_g1", "c_t1", "c_col", "c_ca", "c_cb", "c_grid", "c_hs", "c_deep"]
+      .every(function (c) { return list.indexOf(c) !== -1; });
+  })());
+  ok("duplicateCids is clean on a well-formed doc", DO.duplicateCids(fixture()).length === 0);
+  ok("duplicateCids names a cid that appears twice (a bad clone)", (function () {
+    var d = fixture();
+    d.pages[0].blocks.push({ type: "heading", cid: "c_h1", text: "copy" });
+    return DO.duplicateCids(d).join(",") === "c_h1";
+  })());
+
+  // --- THE POINT: a stale reference is loud ---
+  ok("set on a cid that has left the document THROWS StaleRefError", (function () {
+    try { DO.apply(fixture(), { op: "set", cid: "c_gone", key: "text", value: "x" }); return false; }
+    catch (e) { return e.name === "StaleRefError" && e.cid === "c_gone"; }
+  })());
+  ok("the stale-ref error names the cid, so a report says which block", (function () {
+    try { DO.apply(fixture(), { op: "remove", cid: "c_gone" }); return false; }
+    catch (e) { return e.message.indexOf("c_gone") !== -1; }
+  })());
+  ok("every op that addresses an existing block throws on a stale cid", (function () {
+    var changes = [
+      { op: "set", cid: "c_gone", key: "text", value: "x" },
+      { op: "merge", cid: "c_gone", patch: { text: "x" } },
+      { op: "replace", cid: "c_gone", block: { type: "text" } },
+      { op: "remove", cid: "c_gone" },
+      { op: "move", cid: "c_gone", into: { pageId: "p1" } }
+    ];
+    return changes.every(function (c) {
+      try { DO.apply(fixture(), c); return false; } catch (e) { return e.name === "StaleRefError"; }
+    });
+  })());
+
+  // --- purity: the caller's document never moves ---
+  ok("apply never mutates the input document", (function () {
+    var before = fixture(), snapshot = JSON.stringify(before);
+    DO.apply(before, { op: "set", cid: "c_h1", key: "text", value: "changed" });
+    return JSON.stringify(before) === snapshot;
+  })());
+  ok("apply returns a NEW document object", (function () {
+    var before = fixture();
+    return DO.apply(before, { op: "set", cid: "c_h1", key: "text", value: "x" }) !== before;
+  })());
+  ok("a failed op leaves the caller's document untouched", (function () {
+    var before = fixture(), snapshot = JSON.stringify(before);
+    try { DO.apply(before, { op: "set", cid: "c_gone", key: "text", value: "x" }); } catch (e) { /* expected */ }
+    return JSON.stringify(before) === snapshot;
+  })());
+
+  // --- set / merge ---
+  ok("set writes one field", DO.locate(DO.apply(fixture(), { op: "set", cid: "c_t1", key: "text", value: "new" }), "c_t1").block.text === "new");
+  ok("set with undefined DELETES the key (clear a setting to its default)", (function () {
+    var next = DO.apply(fixture(), { op: "set", cid: "c_h1", key: "text", value: undefined });
+    return !("text" in DO.locate(next, "c_h1").block);
+  })());
+  ok("set needs a key", (function () {
+    try { DO.apply(fixture(), { op: "set", cid: "c_h1" }); return false; } catch (e) { return e.name === "OpError"; }
+  })());
+  ok("merge writes several fields as one change", (function () {
+    var next = DO.apply(fixture(), { op: "merge", cid: "c_h1", patch: { text: "a", level: 2 } });
+    var b = DO.locate(next, "c_h1").block;
+    return b.text === "a" && b.level === 2;
+  })());
+  ok("merge leaves fields it does not name alone", (function () {
+    var next = DO.apply(fixture(), { op: "merge", cid: "c_h1", patch: { level: 3 } });
+    return DO.locate(next, "c_h1").block.text === "Hello";
+  })());
+
+  // --- replace keeps the address ---
+  ok("replace swaps the block but KEEPS its cid (comments + overrides survive)", (function () {
+    var next = DO.apply(fixture(), { op: "replace", cid: "c_h1", block: { type: "text", text: "was a heading" } });
+    var b = DO.locate(next, "c_h1").block;
+    return b.type === "text" && b.cid === "c_h1" && DO.locate(next, "c_h1").index === 0;
+  })());
+  ok("replace ignores a cid supplied on the incoming block", (function () {
+    var next = DO.apply(fixture(), { op: "replace", cid: "c_h1", block: { type: "text", cid: "c_other" } });
+    return DO.has(next, "c_h1") && !DO.has(next, "c_other");
+  })());
+
+  // --- remove / insert ---
+  ok("remove takes the block out of its parent array", (function () {
+    var next = DO.apply(fixture(), { op: "remove", cid: "c_t1" });
+    return !DO.has(next, "c_t1") && DO.locate(next, "c_g1").block.children.length === 0;
+  })());
+  ok("remove of a container takes its children with it", (function () {
+    var next = DO.apply(fixture(), { op: "remove", cid: "c_g1" });
+    return !DO.has(next, "c_g1") && !DO.has(next, "c_t1");
+  })());
+  ok("insert into a page by id, at an index", (function () {
+    var next = DO.apply(fixture(), { op: "insert", into: { pageId: "p1" }, index: 1, block: { type: "text", cid: "c_new", text: "N" } });
+    var h = DO.locate(next, "c_new");
+    return h.index === 1 && h.pageIndex === 0 && next.pages[0].blocks.length === 4;
+  })());
+  ok("insert with no index appends", (function () {
+    var next = DO.apply(fixture(), { op: "insert", into: { pageId: "p1" }, block: { type: "text", cid: "c_new" } });
+    return DO.locate(next, "c_new").index === 3;
+  })());
+  ok("insert into a container block by cid", (function () {
+    var next = DO.apply(fixture(), { op: "insert", into: { cid: "c_g1", key: "children" }, block: { type: "text", cid: "c_new" } });
+    return DO.locate(next, "c_new").index === 1 && DO.locate(next, "c_g1").block.children.length === 2;
+  })());
+  ok("insert into one column of a columns block", (function () {
+    var next = DO.apply(fixture(), { op: "insert", into: { cid: "c_col", key: "columns", column: 1 }, block: { type: "text", cid: "c_new" } });
+    return DO.locate(next, "c_new").index === 1 && next.pages[0].blocks[2].columns[1].length === 2;
+  })());
+  ok("insert refuses a cid that is already in the document", (function () {
+    try { DO.apply(fixture(), { op: "insert", into: { pageId: "p1" }, block: { type: "text", cid: "c_h1" } }); return false; }
+    catch (e) { return e.name === "OpError" && /duplicate cid/.test(e.message); }
+  })());
+  ok("insert into a page that is not there is an OpError, not a silent no-op", (function () {
+    try { DO.apply(fixture(), { op: "insert", into: { pageId: "nope" }, block: { type: "text" } }); return false; }
+    catch (e) { return e.name === "OpError"; }
+  })());
+
+  // --- move ---
+  ok("move takes a block to another page", (function () {
+    var next = DO.apply(fixture(), { op: "move", cid: "c_h1", into: { pageId: "p2" }, index: 0 });
+    var h = DO.locate(next, "c_h1");
+    return h.pageIndex === 1 && h.index === 0 && next.pages[0].blocks.length === 2;
+  })());
+  ok("move down inside one array lands where the author dropped it", (function () {
+    // c_h1 is at 0 of three. Moving it to index 2 must put it LAST, not second -- the classic
+    // off-by-one when the source is removed after the destination index is resolved.
+    var next = DO.apply(fixture(), { op: "move", cid: "c_h1", into: { pageId: "p1" }, index: 2 });
+    return next.pages[0].blocks[2].cid === "c_h1" && next.pages[0].blocks.length === 3;
+  })());
+  ok("move out of a container and back to the page", (function () {
+    var next = DO.apply(fixture(), { op: "move", cid: "c_t1", into: { pageId: "p1" }, index: 0 });
+    return DO.locate(next, "c_t1").index === 0 && DO.locate(next, "c_g1").block.children.length === 0;
+  })());
+  ok("a move to a destination that does not exist puts the block BACK", (function () {
+    var next;
+    try { next = DO.apply(fixture(), { op: "move", cid: "c_h1", into: { pageId: "nope" } }); }
+    catch (e) { return e.name === "OpError"; }
+    return false;
+  })());
+
+  // --- applyAll: all or nothing ---
+  ok("applyAll runs several changes as one step", (function () {
+    var next = DO.applyAll(fixture(), [
+      { op: "set", cid: "c_h1", key: "text", value: "A" },
+      { op: "set", cid: "c_t1", key: "text", value: "B" }
+    ]);
+    return DO.locate(next, "c_h1").block.text === "A" && DO.locate(next, "c_t1").block.text === "B";
+  })());
+  ok("applyAll is all-or-nothing: change 2 failing discards change 1", (function () {
+    var before = fixture(), snapshot = JSON.stringify(before);
+    try {
+      DO.applyAll(before, [
+        { op: "set", cid: "c_h1", key: "text", value: "A" },
+        { op: "set", cid: "c_gone", key: "text", value: "B" }
+      ]);
+      return false;
+    } catch (e) { return e.name === "StaleRefError" && JSON.stringify(before) === snapshot; }
+  })());
+  ok("applyAll can address a block it inserted earlier in the same step", (function () {
+    var next = DO.applyAll(fixture(), [
+      { op: "insert", into: { pageId: "p1" }, block: { type: "text", cid: "c_new", text: "x" } },
+      { op: "set", cid: "c_new", key: "text", value: "y" }
+    ]);
+    return DO.locate(next, "c_new").block.text === "y";
+  })());
+
+  // --- applyWithResult: the repaint hint ---
+  ok("applyWithResult reports where the change landed", (function () {
+    var r = DO.applyWithResult(fixture(), { op: "set", cid: "c_deep", key: "text", value: "z" });
+    return r.doc && r.hit.pageIndex === 1 && r.hit.block.text === "z";
+  })());
+
+  // --- malformed calls are defects, and say so ---
+  ok("an unknown op is an OpError naming it", (function () {
+    try { DO.apply(fixture(), { op: "frobnicate", cid: "c_h1" }); return false; }
+    catch (e) { return e.name === "OpError" && /frobnicate/.test(e.message); }
+  })());
+  ok("apply needs a document and a change", (function () {
+    var bad = 0;
+    try { DO.apply(null, { op: "set", cid: "c_h1", key: "a", value: 1 }); } catch (e) { bad++; }
+    try { DO.apply(fixture(), null); } catch (e) { bad++; }
+    return bad === 2;
+  })());
+
+  // --- it must not reach into the SCORM package ---
+  // block.id is what render stamps as data-id. doc-ops addresses on cid and never touches id, so
+  // no op here can change an exported byte. If that ever stops being true the export diverges from
+  // the editor, which is the one invariant.
+  ok("doc-ops never reads or writes block.id", !/\bid\b\s*[:=]|\.id\b/.test(
+    codeOnly(src("src/doc-ops.js")).replace(/into\.pageId|pages\[i\]\.id|\bpageId\b/g, "")
+  ));
+})();
+
+// ---- DO: the first surface migrated onto addressed writes ----------------
+// copy-editor.js is the Read view and find & replace. Both enumerate targets ONCE and then write
+// through them at the author's pace -- the exact shape of the fault doc-ops exists to kill. A
+// target now carries `cid` + `path` and every in-app write re-addresses against the live document.
+//
+// Driven on the SAME reconstituted core the FR section built, with a real DocOps in scope, so
+// these are behaviour and not source-text claims: a target whose block has left the document must
+// READ empty and REFUSE to write, and one whose block merely moved must still find its field.
+section("DO copy-editor addressed writes");
+(function () {
+  var fr = __frFence, DocOps = __frDocOps;
+  if (!fr || !DocOps) { ok("the shared F&R fence is available", false); return; }
+
+  function doc() {
+    return { variants: ["V1"], pages: [
+      { id: "p1", blocks: [
+        { type: "heading", cid: "c_h", text: "Title here" },
+        { type: "group", cid: "c_g", children: [{ type: "text", cid: "c_t", text: "body copy" }] },
+        { type: "table", cid: "c_tbl", rows: [[{ t: "cell one" }, { t: "cell two" }]] },
+        { type: "componentGrid", cid: "c_cg", instances: [{ slots: { title: "card title" } }] },
+        { type: "quiz", cid: "c_q", questions: [{ prompt: "the prompt", options: [{ text: "option a" }] }] }
+      ] }
+    ] };
+  }
+  function targetFor(d, pred) { return fr.targets(d, null).filter(pred)[0]; }
+
+  // --- every target carries an address ---
+  ok("every target names the block it belongs to",
+     fr.targets(doc(), null).every(function (t) { return typeof t.cid === "string" && Array.isArray(t.path); }));
+  ok("a block-level target has an empty path", targetFor(doc(), function (t) { return t.cid === "c_h"; }).path.length === 0);
+  ok("a nested target's path reaches its host from the block", (function () {
+    var t = targetFor(doc(), function (t) { return t.label === "option"; });
+    return t.cid === "c_q" && t.path.join(".") === "questions.0.options.0";
+  })());
+  ok("a table cell's path carries row and column", (function () {
+    var t = fr.targets(doc(), null).filter(function (t) { return t.key === "t"; })[1];
+    return t.cid === "c_tbl" && t.path.join(".") === "rows.0.1";
+  })());
+  ok("a card slot's path carries the instance index", (function () {
+    var t = targetFor(doc(), function (t) { return t.isSlot; });
+    return t.cid === "c_cg" && t.path.join(".") === "instances.0";
+  })());
+
+  // --- THE POINT: a target enumerated against an old document does not write into it ---
+  ok("a write re-addresses into the LIVE document, not the one it was enumerated from", (function () {
+    var enumerated = doc();                       // what the author had on screen
+    var t = targetFor(enumerated, function (t) { return t.cid === "c_t"; });
+    var live = doc();                             // what an undo / tab switch put in its place
+    fr.write(t, null, "replaced", live);
+    return DocOps.locate(live, "c_t").block.text === "replaced"
+        && DocOps.locate(enumerated, "c_t").block.text === "body copy"; // the orphan is untouched
+  })());
+  ok("a write whose block has been deleted REFUSES, and says so", (function () {
+    var t = targetFor(doc(), function (t) { return t.cid === "c_t"; });
+    var live = DocOps.apply(doc(), { op: "remove", cid: "c_t" });
+    return fr.write(t, null, "into the void", live) === false;
+  })());
+  ok("a deleted target reads empty rather than the stale value", (function () {
+    var t = targetFor(doc(), function (t) { return t.cid === "c_t"; });
+    var live = DocOps.apply(doc(), { op: "remove", cid: "c_t" });
+    return fr.valueOf(t, null, live) === "";
+  })());
+  ok("a target still writes after its block MOVES to another page", (function () {
+    var t = targetFor(doc(), function (t) { return t.cid === "c_h"; });
+    var live = doc();
+    live.pages.push({ id: "p2", blocks: [] });
+    live = DocOps.apply(live, { op: "move", cid: "c_h", into: { pageId: "p2" } });
+    return fr.write(t, null, "moved but found", live) === true
+        && DocOps.locate(live, "c_h").block.text === "moved but found";
+  })());
+  ok("a nested target refuses when its question has gone but its block remains", (function () {
+    var t = targetFor(doc(), function (t) { return t.label === "option"; });
+    var live = DocOps.apply(doc(), { op: "set", cid: "c_q", key: "questions", value: [] });
+    return fr.write(t, null, "x", live) === false && fr.valueOf(t, null, live) === "";
+  })());
+
+  // --- the variant override layer still routes correctly through the live host ---
+  ok("a variant write lands on the live block's override layer, not the base", (function () {
+    var t = targetFor(doc(), function (t) { return t.cid === "c_h"; });
+    var live = doc();
+    fr.write(t, "V1", "variant copy", live);
+    var bl = DocOps.locate(live, "c_h").block;
+    return bl.overrides && bl.overrides.V1 && bl.overrides.V1.text === "variant copy" && bl.text === "Title here";
+  })());
+  ok("hasOverride reads the live block", (function () {
+    var t = targetFor(doc(), function (t) { return t.cid === "c_h"; });
+    var live = doc();
+    fr.write(t, "V1", "variant copy", live);
+    return fr.hasOverride(t, "V1", live) === true && fr.hasOverride(t, "V1", doc()) === false;
+  })());
+  ok("clearing a variant value prunes the override off the live block", (function () {
+    var t = targetFor(doc(), function (t) { return t.cid === "c_h"; });
+    var live = doc();
+    fr.write(t, "V1", "variant copy", live);
+    fr.write(t, "V1", "", live);
+    return !DocOps.locate(live, "c_h").block.overrides;
+  })());
+
+  // --- the count the dialog shows cannot include unreachable matches ---
+  ok("total skips targets that have left the document", (function () {
+    var d = doc();
+    var ts = fr.targets(d, null);
+    var live = DocOps.apply(d, { op: "remove", cid: "c_t" });
+    return fr.total(ts, null, "body copy", live) === 0 && fr.total(ts, null, "body copy", d) === 1;
+  })());
+
+  // --- ratchets: the app must never call these without the live document ---
+  // Two regions, two rules. INSIDE the @fr fence the core is pure and threads its own `d` through
+  // (frTotal -> frValueOf); OUTSIDE it every call is the app talking to the live document and must
+  // pass E.doc. Checking one rule everywhere would either wave the app through or fail the core.
+  // Split on the fence markers in the RAW text first -- codeOnly() blanks comments, and the
+  // markers are comments -- then strip comments from each half separately.
+  var raw = src("src/editor/copy-editor.js");
+  var rawA = raw.indexOf("/* @fr-start */"), rawB = raw.indexOf("/* @fr-end */");
+  var regions = [
+    { code: codeOnly(raw.slice(0, rawA) + raw.slice(rawB)), inFence: false },
+    { code: codeOnly(raw.slice(rawA, rawB)), inFence: true }
+  ];
+  var bad = [], sites = 0;
+  regions.forEach(function (region) {
+    var text = region.code;
+    var re = /(?:^|[^\w.])(fr(?:Core\.write|Core\.valueOf|Core\.hasOverride|Write|ValueOf|HasOverride))\s*\(/g, m;
+    while ((m = re.exec(text))) {
+      var open = re.lastIndex - 1, depth = 0, end = -1;
+      for (var j = open; j < text.length; j++) {
+        if (text[j] === "(") depth++;
+        else if (text[j] === ")") { depth--; if (!depth) { end = j; break; } }
+      }
+      if (end < 0) continue;
+      if (/\bfunction\s+\w*$/.test(text.slice(Math.max(0, m.index - 12), open))) continue; // declarations
+      sites++;
+      var wants = region.inFence ? /,\s*d\s*$/ : /,\s*E\.doc\s*$/;
+      if (!wants.test(text.slice(open + 1, end))) bad.push(text.slice(m.index, end + 1).replace(/\s+/g, " ").trim().slice(0, 70));
+    }
+  });
+  var body = codeOnly(raw);
+  ok("there are call sites to check (" + sites + ")", sites >= 10);
+  if (bad.length) console.error("    unaddressed: " + bad.join(" | "));
+  ok("no in-app fr write/read call omits the live document" + (bad.length ? " -- " + bad.length + " do" : ""), bad.length === 0);
+  ok("the gate would catch an unaddressed call (proof)", !/,\s*E\.doc\s*$/.test("t, null, value"));
+
+  // --- the fallback that would quietly restore the fault must not exist ---
+  ok("frResolve addresses through DocOps and has no held-reference fallback",
+     /var hit = window\.DocOps\.locate\(d, t\.cid\);/.test(body) && !/doc-ops not on the page/.test(src("src/editor/copy-editor.js")));
+  ok("the unlocked-cell set is keyed by address, not by host object",
+     /function cellKeyOf\(t\) \{ return String\(t && t\.cid\)/.test(body) && !/u\.host === t\.host/.test(body));
+
+  // Both pages that run this module must carry doc-ops, before it.
+  ["index.html", "kit.html"].forEach(function (page) {
+    var html = src(page);
+    var o = html.indexOf("src/doc-ops.js"), c = html.indexOf("src/editor/copy-editor.js");
+    ok(page + " loads src/doc-ops.js before copy-editor.js", o > -1 && c > -1 && o < c);
+  });
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

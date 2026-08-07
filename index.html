@@ -397,6 +397,10 @@
   <script src="src/markdown-import.js"></script>
   <!-- Product Rail: dependency-free line-level diff (the "Source updated" reconcile-conflict review). DOM-free, no editor coupling -- load order is not load-bearing. -->
   <script src="src/line-diff.js"></script>
+  <!-- doc-ops: window.DocOps -- every change to a document as data, addressed by block cid.
+       Pure, DOM-free, dependency-free. A surface that re-addresses at write time (copy-editor.js)
+       reads it inside install(), so load order is not load-bearing -- but it must be on the page. -->
+  <script src="src/doc-ops.js"></script>
   <!-- arch-P3b-01 editor namespace: window.VersoEditor — the provide/need/expose/bind table a moved region and editor.js reach each other through. Pure wiring, no DOM. Must precede editor.js and every region module, since both sides of the table register as they load. -->
   <script src="src/editor/kernel.js"></script>
   <!-- arch-P3-01 storage seam: window.VersoStorage — the keys, the adapter swap, the three-facet StorageBackend and the durable-write core. DOM-free. Must precede editor.js, which builds its one live Store from it at boot. -->
