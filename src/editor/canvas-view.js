@@ -321,12 +321,34 @@
     // back. Editor chrome only (a class on the editor-built world) -- render()/doc/export are
     // untouched, and this is opt-in motion behaviour, never a persistent blank.
     var _navSettleT = null;
+    // #347: the LOD is a perf trade, and the browser may no longer need to pay it -- the 7 FPS
+    // above was measured in the packaged WKWebView, not here. This flag turns the whole
+    // suppression off so live-crisp pan/zoom can be A/B'd against it on a real course without a
+    // rebuild: window.__canvasLod(false). Default ON = today's behaviour, so nothing changes
+    // until the measurement says it should. Persisted like NATIVE_SCROLL, because the test
+    // involves importing a course and reloading, and a flag that resets on Cmd+R tests nothing.
+    var LOD_KEY = "authoring.canvasLod";
+    var CANVAS_LOD = true;
+    try { if (localStorage.getItem(LOD_KEY) === "0") CANVAS_LOD = false; } catch (e) {}
+    window.__canvasLod = function (on) {
+      CANVAS_LOD = (on == null) ? CANVAS_LOD : !!on; // no arg = query
+      try { localStorage.setItem(LOD_KEY, CANVAS_LOD ? "1" : "0"); } catch (e) {}
+      if (!CANVAS_LOD) {
+        // Drop any suppression already on screen; otherwise content stays hidden until the
+        // next gesture settles, which reads as the toggle having done nothing.
+        if (_navSettleT) { clearTimeout(_navSettleT); _navSettleT = null; }
+        if (E.world) E.world.classList.remove("nav-lod");
+        proxyEnd();
+      }
+      if (window.console) console.log("[canvas-lod] " + (CANVAS_LOD ? "ON (pages blank while moving)" : "OFF (live crisp; persists across reload)"));
+      return CANVAS_LOD;
+    };
     function markNavigating() {
       // #151: with native-scroll pan on, pan never re-rasterises (no LOD needed) and we want ZOOM
       // to show LIVE content too (the blanking is what read as "pages go black on zoom"). So skip
       // the paint-suppression classes entirely -- zoom paints live. If live zoom janks, a
       // cached-layer zoom is the next step.
-      if (NATIVE_SCROLL) return;
+      if (NATIVE_SCROLL || !CANVAS_LOD) return;
       if (E.world) E.world.classList.add("nav-lod");
       proxyBegin(); // (interim path) on gesture start; no-op if already proxying / not far-zoom / no native bridge
       if (_navSettleT) clearTimeout(_navSettleT);
