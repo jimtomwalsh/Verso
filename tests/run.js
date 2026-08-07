@@ -57,6 +57,22 @@ var total = 0, failed = 0, warnings = 0;
 // Async assertions (awaited bridge/backup paths) register their promise here; the
 // final report waits on all of them before exiting so nothing resolves post-exit.
 var __async = [];
+// Poll until `cond()` holds, then resolve with the result. For anything that waits on a settle
+// timer inside the editor. A fixed sleep is the wrong tool here: this file's synchronous phase
+// runs for seconds before the event loop drains, so a 300ms sleep and a 95ms settle both come due
+// at once and are not reliably serviced in that order. That race failed about four runs in five
+// and blocked two staging deploys. Resolves false at the ceiling, so a genuine break still fails.
+function waitFor(cond, ceilingMs, stepMs) {
+  var waited = 0, step = stepMs || 25, ceiling = ceilingMs || 3000;
+  return new Promise(function (resolve) {
+    (function poll() {
+      var got = false;
+      try { got = !!cond(); } catch (e) { got = false; }
+      if (got || waited >= ceiling) return resolve(got);
+      waited += step; setTimeout(poll, step);
+    })();
+  });
+}
 var sectionName = "";
 function section(name) { sectionName = name; }
 function ok(name, cond) {
@@ -11003,22 +11019,17 @@ section("pan/zoom perf wiring (#150)");
     ok("__canvasLod(true) brings the cull back", world.classList.contains("nav-lod"));
     ok("the choice persists across a reload", w.localStorage.getItem("authoring.canvasLod") === "1");
     // The settle clears it ~120ms after the last movement. Waiting is the only honest check --
-    // a regex over a setTimeout proves the call exists, not that the class comes off.
-    __async.push(new Promise(function (resolve) {
-      setTimeout(function () {
-        ok("nav-lod clears on the settle timer", !world.classList.contains("nav-lod"));
-        resolve();
-      }, 200);
-    }));
-    // Flipping it back off has to clear what is already on screen, not wait for the next settle.
-    __async.push(new Promise(function (resolve) {
-      setTimeout(function () {
-        mark();
-        var tagged = world.classList.contains("nav-lod");
-        w.__canvasLod(false);
-        ok("turning the LOD off clears suppression already on screen", tagged && !world.classList.contains("nav-lod"));
-        resolve();
-      }, 300);
+    // a regex over a setTimeout proves the call exists, not that the class comes off. Poll rather
+    // than sleep a fixed time: this file's synchronous phase runs for seconds before the event
+    // loop drains, and a fixed sleep racing a settle timer under that backlog is what blocked two
+    // staging deploys. Sequential, because the second step needs the first settle to have run.
+    __async.push(waitFor(function () { return !world.classList.contains("nav-lod"); }).then(function (cleared) {
+      ok("nav-lod clears on the settle timer", cleared);
+      // Flipping it back off has to clear what is already on screen, not wait for the next settle.
+      mark();
+      var tagged = world.classList.contains("nav-lod");
+      w.__canvasLod(false);
+      ok("turning the LOD off clears suppression already on screen", tagged && !world.classList.contains("nav-lod"));
     }));
   })();
   // The world is not layer-promoted (#347): on a multi-chapter course the layer is too big to
@@ -11284,14 +11295,17 @@ section("native-scroll pan (#151 lever 1)");
       /^transform \d+ms linear$/.test(world.style.transition) && /^translate\(.*\) scale\(/.test(world.style.transform));
     ok("the zoom readout updates during the gesture, not only on settle",
       K.get("zoomLevelEl").textContent !== "100%");
-    __async.push(new Promise(function (resolve) {
-      setTimeout(function () {
-        ok("zoom bakes to a crisp scale-only transform (transition cleared, zoom committed)",
-          world.style.transition === "" && /^scale\(/.test(world.style.transform) && view.zoom > 1);
-        ok("the transient translate is folded into scroll, so the crisp render lands in the same place",
-          canvas.scrollLeft !== scrollBefore.l || canvas.scrollTop !== scrollBefore.t);
-        resolve();
-      }, 300);
+    // The bake runs on a ~95ms settle timer. A fixed sleep here raced it: this file's synchronous
+    // phase runs for seconds before the event loop ever drains, and under that backlog the bake
+    // timer is not reliably serviced before a fixed 300ms one. It failed roughly four runs in five
+    // and blocked two staging deploys. Poll for the committed state instead, with a ceiling that
+    // still fails loudly if the bake genuinely never happens.
+    __async.push(waitFor(function () {
+      return world.style.transition === "" && /^scale\(/.test(world.style.transform) && view.zoom > 1;
+    }).then(function (baked) {
+      ok("zoom bakes to a crisp scale-only transform (transition cleared, zoom committed)", baked);
+      ok("the transient translate is folded into scroll, so the crisp render lands in the same place",
+        canvas.scrollLeft !== scrollBefore.l || canvas.scrollTop !== scrollBefore.t);
     }));
   })();
   ok("the fold itself is exact (bakeView + zoomTranslate)",
@@ -11317,13 +11331,10 @@ section("native-scroll pan (#151 lever 1)");
     view.zoom = 0.8; view.x = 0; view.y = 0;
     K.bind("applyView")();
     K.bind("zoomIn")(); K.bind("zoomOut")();
-    __async.push(new Promise(function (resolve) {
-      setTimeout(function () {
-        ok("zoom in then out returns to the zoom it started at", Math.abs(view.zoom - 0.8) < 1e-9);
-        K.bind("zoomTo100")();
-        ok("100% snaps the zoom to exactly 1 with no easing", view.zoom === 1 && K.get("zoomLevelEl").textContent === "100%");
-        resolve();
-      }, 250);
+    __async.push(waitFor(function () { return Math.abs(view.zoom - 0.8) < 1e-9; }).then(function (returned) {
+      ok("zoom in then out returns to the zoom it started at", returned);
+      K.bind("zoomTo100")();
+      ok("100% snaps the zoom to exactly 1 with no easing", view.zoom === 1 && K.get("zoomLevelEl").textContent === "100%");
     }));
     // A chunky mouse notch reports a huge deltaY; the cap is what stops one flick jumping the zoom.
     var K2 = EDITOR_BOOT.boot().VersoEditor;
