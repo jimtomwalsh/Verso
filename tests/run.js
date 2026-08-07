@@ -11186,22 +11186,22 @@ section("native-scroll pan (#151 lever 1)");
   // several of them would have passed against code that never ran.
   var e = src("src/editor/canvas-view.js");
   var edSrc = src("src/editor.js");
-  // #347 flipped the default ON. An absent key must mean the new default, so the localStorage read
-  // has to test for an explicit "0" -- reading `=== "1"` would silently keep everyone on the old
-  // path forever, and the flag would look flipped while nothing had changed.
-  ok("NATIVE_SCROLL flag default ON + SCROLL_PAD + console toggle",
-    /var NATIVE_SCROLL = true;/.test(e) && /var SCROLL_PAD = \d+;/.test(e) && /window\.__nativeScroll = function \(on\)/.test(e));
-  ok("an absent nativeScroll key means the new default, not the old one",
-    /getItem\(NS_KEY\) === "0"\) NATIVE_SCROLL = false/.test(e));
-  ok("native-scroll is on out of the box", EDITOR_BOOT.boot().__nativeScroll() === true);
+  // #347 flipped this ON; #348 flipped it back OFF. The second call is the right one: #347's A/B
+  // ran with __wc('auto') set by hand, so it compared native scroll WITHOUT the world's layer
+  // promotion against transform pan WITH it, and the promotion was the actual problem. #350
+  // removed will-change for good, and the compositor-zoom half of this flag flickers at far zoom.
+  // Whichever way the default points, the localStorage read must test for the NON-default value.
+  ok("NATIVE_SCROLL flag default OFF + SCROLL_PAD + console toggle",
+    /var NATIVE_SCROLL = false;/.test(e) && /var SCROLL_PAD = \d+;/.test(e) && /window\.__nativeScroll = function \(on\)/.test(e));
+  ok("an absent nativeScroll key means the default, not the opposite",
+    /getItem\(NS_KEY\) === "1"\) NATIVE_SCROLL = true/.test(e));
+  ok("native-scroll is off out of the box", EDITOR_BOOT.boot().__nativeScroll() === false);
   ok("every world mount routes through attachWorld (no raw canvas.appendChild(world) mount left)",
     (edSrc.match(/attachWorld\(\);/g) || []).length >= 2 && edSrc.indexOf("canvas.appendChild(world)") === -1);
 
-  // Switched OFF (the escape hatch, no longer the default): the world hangs straight off the
-  // viewport and pan is a transform again.
+  // The default path: the world hangs straight off the viewport and pan is a transform.
   (function () {
     var win = EDITOR_BOOT.boot();
-    win.__nativeScroll(false);
     var K = win.VersoEditor;
     var canvas = K.get("canvas"), world = K.get("world"), view = K.get("view");
     ok("flag off: the viewport is not in native-scroll mode", !canvas.classList.contains("native-scroll"));
@@ -11264,10 +11264,10 @@ section("native-scroll pan (#151 lever 1)");
   // real hardware meaningless. Written under the flag's own key, and read back by the next boot.
   ok("the native-scroll flag persists across reload (localStorage) + no-arg query", (function () {
     var win = EDITOR_BOOT.boot();
-    if (win.__nativeScroll() !== true) return false;             // no arg = query, and default is on
-    win.__nativeScroll(false);
-    if (win.localStorage.getItem("authoring.nativeScroll") !== "0") return false;
-    if (win.__nativeScroll() !== false) return false;            // query again, still off
+    if (win.__nativeScroll() !== false) return false;            // no arg = query, and default is off
+    win.__nativeScroll(true);
+    if (win.localStorage.getItem("authoring.nativeScroll") !== "1") return false;
+    if (win.__nativeScroll() !== true) return false;             // query again, still on
     // A fresh boot seeded with that stored value comes up in transform-pan mode, and the opposite
     // seed comes up native -- the opt-out has to survive a reload as surely as the default does.
     var off = LOAD.makeStorage(); off.setItem("authoring.nativeScroll", "0");
@@ -11369,9 +11369,15 @@ section("offscreen-frame culling (#150 slice B)");
   // #348: the cull is switchable at runtime so it can be ruled in or out on a real course, and
   // the diagnostic reports the churn. Default ON -- shipping the instrument changes nothing.
   var W = src("src/editor/world.js");
-  ok("#348: the frame cull has a runtime kill-switch, default ON",
-    /var CULL_ON = true;/.test(W) && /window\.__frameCull = function \(on\)/.test(W) &&
-    /getItem\("authoring\.frameCull"\) === "0"\) CULL_ON = false/.test(W));
+  // #348: measured OFF on a real 61-page course -- cull on flickers a still canvas at far zoom,
+  // cull off is quiet. It only pays when frames are off screen, and at that zoom none are.
+  ok("#348: the frame cull is OFF by default, with a runtime switch",
+    /var CULL_ON = false;/.test(W) && /window\.__frameCull = function \(on\)/.test(W) &&
+    /getItem\("authoring\.frameCull"\) === "1"\) CULL_ON = true/.test(W));
+  ok("#348: __cullDiag checks the frame's CONTENT, not the frame (the frame is never the skipped element)",
+    /firstElementChild/.test(W) && /content\.checkVisibility/.test(W));
+  ok("#348: reserved-height mismatches are only reported while the cull is on",
+    /reservedHeightWrong: mism \? mism\.length : "n\/a \(cull off\)"/.test(W));
   ok("#348: __frameCull(false) strips both the class and the seeded size",
     /classList\.remove\("frame--cull"\); f\.frame\.style\.containIntrinsicSize = ""/.test(W));
   ok("#348: __cullDiag reports restacks, RO fires and render-set changes",

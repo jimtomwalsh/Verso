@@ -305,17 +305,19 @@
       _diag.restacks++;
     }
 
-    // ---- #348 instrumentation -------------------------------------------------------------
-    // The flicker (fragments of pages appearing and disappearing, ~10Hz, on a still canvas at
-    // far zoom) does not reproduce on the sample workspace or in an isolated harness -- plain
-    // cull + ResizeObserver + restack is stable at every zoom. It reproduces instantly on a real
-    // multi-chapter course, so the measurement has to happen there.
+    // ---- #348: the frame cull is OFF by default -------------------------------------------
+    // Measured on a real 61-page course, not inferred. With the cull ON, fragments of pages
+    // flicker in and out on a STILL canvas at far zoom; with it OFF, a still canvas is quiet.
+    // The JS loop is not what churns -- a 5s idle sample read 1 restack, 2 ResizeObserver fires
+    // and every frame reserving exactly its real height. So the thrash is the browser's own
+    // render/skip decision at the relevance boundary, which we cannot damp from inside the loop.
     //
-    // __frameCull(false) strips the cull live, which answers "is content-visibility the cause"
-    // in one keystroke. __cullDiag(seconds) samples the loop and reports what is actually
-    // churning. Both are console-only and change nothing by default.
-    var CULL_ON = true;
-    try { if (localStorage.getItem("authoring.frameCull") === "0") CULL_ON = false; } catch (e) {}
+    // The cull only earns anything when frames are OFF screen. At the far zoom where this bites,
+    // the whole world is on screen and it buys nothing, so off is not much of a trade. It stays
+    // behind `__frameCull(true)` for the far-zoom detail work, which needs a real stand-in for a
+    // page rather than a cull (filed separately), and `__cullDiag(secs)` still reports the churn.
+    var CULL_ON = false;
+    try { if (localStorage.getItem("authoring.frameCull") === "1") CULL_ON = true; } catch (e) {}
     var _diag = { restacks: 0, roFires: 0 };
     window.__frameCull = function (on) {
       CULL_ON = (on == null) ? CULL_ON : !!on;
@@ -336,7 +338,12 @@
       var last = null, setChanges = 0, everToggled = {};
       var iv = setInterval(function () {
         var set = E.frameDescs.map(function (f, i) {
-          var vis = f.frame && f.frame.checkVisibility ? f.frame.checkVisibility({ contentVisibilityAuto: true }) : true;
+          // Check the frame's CONTENT, not the frame. `content-visibility: auto` skips an
+          // element's CONTENTS -- the element itself is never the thing reported as skipped, so
+          // checkVisibility on f.frame answers true forever and the counter reads a flat zero
+          // while the screen is visibly thrashing. That is what it did on the first real reading.
+          var content = f.frame && f.frame.firstElementChild;
+          var vis = content && content.checkVisibility ? content.checkVisibility({ contentVisibilityAuto: true }) : true;
           if (last && last[i] !== (vis ? "1" : "0")) everToggled[i] = (everToggled[i] || 0) + 1;
           return vis ? "1" : "0";
         });
@@ -346,8 +353,11 @@
       return new Promise(function (resolve) {
         setTimeout(function () {
           clearInterval(iv);
-          var mism = [];
-          E.frameDescs.forEach(function (f, i) {
+          // Only meaningful while the cull is ON. With it off there is no reserved box to be
+          // wrong, and parsing the cleared style as 0 reported every frame as mismatched by its
+          // full height -- an artefact that reads exactly like a catastrophic finding.
+          var mism = CULL_ON ? [] : null;
+          if (CULL_ON) E.frameDescs.forEach(function (f, i) {
             if (!f.frame) return;
             var seeded = parseFloat((f.frame.style.containIntrinsicSize || "0px 0px").split(" ")[1]) || 0;
             var prev = f.frame.style.contentVisibility;
@@ -364,8 +374,8 @@
             resizeObserverFires: _diag.roFires - start.roFires,
             renderSetChanges: setChanges,
             framesThatToggled: worst,
-            reservedHeightWrong: mism.length,
-            worstMismatches: mism.sort(function (a, b) { return Math.abs(b.offBy) - Math.abs(a.offBy); }).slice(0, 8)
+            reservedHeightWrong: mism ? mism.length : "n/a (cull off)",
+            worstMismatches: mism ? mism.sort(function (a, b) { return Math.abs(b.offBy) - Math.abs(a.offBy); }).slice(0, 8) : []
           };
           if (window.console) console.log("[cull-diag]", JSON.stringify(r, null, 2));
           resolve(r);

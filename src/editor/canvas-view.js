@@ -237,13 +237,21 @@
     // canvas-local x = SCROLL_PAD - scrollLeft; the existing `view.x` (world origin's canvas-local
     // x) therefore equals SCROLL_PAD - scrollLeft. Backing `view.x/y` off scroll that way keeps
     // EVERY screen<->world read (select, marquee, drag, pins) working unchanged; only the writers
-    // (pan/zoom/fit) reroute to scroll. Default ON since #347: measured on a real multi-chapter
-    // course in the browser, this beat every alternative, and it is the only path where content
-    // never blanks. `window.__nativeScroll(false)` returns to transform-pan for an A/B.
+    // (pan/zoom/fit) reroute to scroll.
+    //
+    // Default OFF again as of #348, after being flipped ON by #347. Both calls were made against
+    // real courses, and the second one is right, because the first was measured through a mask.
+    // #347's A/B ran with `__wc('auto')` set by hand, which drops the world's layer promotion for
+    // that session only. So the comparison was really "native scroll without the promotion" vs
+    // "transform pan WITH it", and the promotion was the whole problem. #350 then removed
+    // `will-change` from the CSS for good. Transform pan is fast on its own now, and the half of
+    // this flag that hurts -- zoom as a compositor transition -- makes fragments of pages flicker
+    // in and out on a large course at far zoom (#348). Plain re-rasterising zoom does not.
+    // Both halves stay behind the flag: `window.__nativeScroll(true)` restores them together.
     var NS_KEY = "authoring.nativeScroll";
-    var NATIVE_SCROLL = true;
-    // Explicit "0" only -- an absent key means "never chose", which now means the new default.
-    try { if (localStorage.getItem(NS_KEY) === "0") NATIVE_SCROLL = false; } catch (e) {} // persist across Cmd+R (testing footgun)
+    var NATIVE_SCROLL = false;
+    // Explicit "1" only -- an absent key means "never chose", which means the default.
+    try { if (localStorage.getItem(NS_KEY) === "1") NATIVE_SCROLL = true; } catch (e) {} // persist across Cmd+R (testing footgun)
     var SCROLL_PAD = 2000; // breathing room around the content so panning feels free (not a huge void)
     var scrollSizer = null, _scrollSync = false;
     function nativeScroll() { return NATIVE_SCROLL; } // the flag as a read, for editor.js's remaining branches
