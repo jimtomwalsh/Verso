@@ -10999,6 +10999,23 @@ section("pan/zoom perf wiring (#150)");
       ok(name + " marks the gesture as navigating", w2.get("world").classList.contains("nav-lod"));
     });
   })();
+  // #347: the LOD can be switched off at runtime so live-crisp pan/zoom is measurable against it
+  // on a real course. Default ON, so merging the flag changes nothing; OFF means no suppression
+  // class ever lands, and any class already on screen comes off the moment you flip it.
+  (function () {
+    var w = EDITOR_BOOT.boot();
+    var world = w.VersoEditor.get("world"), mark = w.VersoEditor.bind("markNavigating");
+    ok("canvas LOD defaults ON (today's behaviour)", w.__canvasLod() === true);
+    mark();
+    var onTagged = world.classList.contains("nav-lod");
+    w.__canvasLod(false);
+    ok("turning the LOD off clears suppression already on screen", onTagged && !world.classList.contains("nav-lod"));
+    mark();
+    ok("with the LOD off, markNavigating never tags nav-lod", !world.classList.contains("nav-lod"));
+    ok("the choice persists across a reload", w.localStorage.getItem("authoring.canvasLod") === "0");
+    w.__canvasLod(true); mark();
+    ok("turning it back on restores the cull", world.classList.contains("nav-lod"));
+  })();
   var css2 = EDITOR_CSS;
   ok("nav-lod stops painting heavy leaf content (img/svg/embed/video)",
     /\.world\.nav-lod img,[\s\S]*?\.world\.nav-lod \.embed__video \{ visibility: hidden; \}/.test(css2));
