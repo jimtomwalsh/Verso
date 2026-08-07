@@ -284,22 +284,94 @@
       if (_worldGeo === "frame") E.frameDescs.forEach(function (f) {
         if (f.frame) f.frame.classList.toggle("is-overflowing", frameContentOverflows(f.frame.scrollHeight, f.frame.clientHeight));
       });
-      // Perf (#150): now that the TRUE heights are measured + stacked, pin each frame's
-      // contain-intrinsic-size to its measured height and enable content-visibility:auto,
-      // so the browser SKIPS painting + laying-out pages scrolled out of the viewport. The
-      // stacking above already used the real measured f.h, and the intrinsic-size equals
-      // that height, so an offscreen frame reserves exactly the right box -> the column
-      // layout + world height are UNCHANGED; the frame's own bg still paints (only its
-      // contents are skipped), and scrolling one into view (or any getBoundingClientRect on
-      // its contents) renders it on demand. The FIRST measure runs with culling already on
-      // for prior frames, but each frame's offsetHeight read forces its own layout, so the
-      // seed height is always exact.
-      if (FRAME_CULL) E.frameDescs.forEach(function (f) {
+      // Perf (#150): now that the heights are measured + stacked, pin each frame's
+      // contain-intrinsic-size and enable content-visibility:auto, so the browser SKIPS
+      // painting + laying-out pages scrolled out of the viewport. The frame's own bg still
+      // paints (only its contents are skipped), and scrolling one into view renders it on demand.
+      //
+      // #348, MEASURED 2026-08-07: this comment used to claim that measuring a frame forces its
+      // own layout, so the seed height is always exact. That claim is FALSE.
+      // A skipped frame's offsetHeight returns its contain-intrinsic-size, not its real
+      // content height -- 34 of 37 offscreen frames in a Puppeteer harness returned exactly the
+      // seeded value, off by up to 900px. So `f.h` above is a re-read of our own last guess for
+      // every culled offscreen frame, and a seed that goes stale (an image lands, the web font
+      // swaps, a block is edited off-view) can never correct itself. Left as-is deliberately
+      // until the flicker driver is confirmed on a real course -- see __cullDiag below.
+      if (FRAME_CULL && CULL_ON) E.frameDescs.forEach(function (f) {
         if (!f.frame) return;
         f.frame.style.containIntrinsicSize = E.FRAME_W + "px " + Math.round(f.h || E.FRAME_H) + "px";
         f.frame.classList.add("frame--cull");
       });
+      _diag.restacks++;
     }
+
+    // ---- #348 instrumentation -------------------------------------------------------------
+    // The flicker (fragments of pages appearing and disappearing, ~10Hz, on a still canvas at
+    // far zoom) does not reproduce on the sample workspace or in an isolated harness -- plain
+    // cull + ResizeObserver + restack is stable at every zoom. It reproduces instantly on a real
+    // multi-chapter course, so the measurement has to happen there.
+    //
+    // __frameCull(false) strips the cull live, which answers "is content-visibility the cause"
+    // in one keystroke. __cullDiag(seconds) samples the loop and reports what is actually
+    // churning. Both are console-only and change nothing by default.
+    var CULL_ON = true;
+    try { if (localStorage.getItem("authoring.frameCull") === "0") CULL_ON = false; } catch (e) {}
+    var _diag = { restacks: 0, roFires: 0 };
+    window.__frameCull = function (on) {
+      CULL_ON = (on == null) ? CULL_ON : !!on;
+      try { localStorage.setItem("authoring.frameCull", CULL_ON ? "1" : "0"); } catch (e) {}
+      E.frameDescs.forEach(function (f) {
+        if (!f.frame) return;
+        if (CULL_ON) { f.frame.style.containIntrinsicSize = E.FRAME_W + "px " + Math.round(f.h || E.FRAME_H) + "px"; f.frame.classList.add("frame--cull"); }
+        else { f.frame.classList.remove("frame--cull"); f.frame.style.containIntrinsicSize = ""; }
+      });
+      if (window.console) console.log("[frame-cull] " + (CULL_ON ? "ON" : "OFF (persists across reload)"));
+      return CULL_ON;
+    };
+    // Sample for `secs` seconds WITHOUT touching anything, then report. renderSetChanges is the
+    // number that matters: on a still canvas it should be 0, and anything else is the thrash.
+    window.__cullDiag = function (secs) {
+      secs = secs || 3;
+      var start = { restacks: _diag.restacks, roFires: _diag.roFires };
+      var last = null, setChanges = 0, everToggled = {};
+      var iv = setInterval(function () {
+        var set = E.frameDescs.map(function (f, i) {
+          var vis = f.frame && f.frame.checkVisibility ? f.frame.checkVisibility({ contentVisibilityAuto: true }) : true;
+          if (last && last[i] !== (vis ? "1" : "0")) everToggled[i] = (everToggled[i] || 0) + 1;
+          return vis ? "1" : "0";
+        });
+        if (last && set.join("") !== last.join("")) setChanges++;
+        last = set;
+      }, 16);
+      return new Promise(function (resolve) {
+        setTimeout(function () {
+          clearInterval(iv);
+          var mism = [];
+          E.frameDescs.forEach(function (f, i) {
+            if (!f.frame) return;
+            var seeded = parseFloat((f.frame.style.containIntrinsicSize || "0px 0px").split(" ")[1]) || 0;
+            var prev = f.frame.style.contentVisibility;
+            f.frame.style.contentVisibility = "visible";
+            var real = f.frame.offsetHeight;
+            f.frame.style.contentVisibility = prev;
+            if (Math.abs(real - seeded) > 1) mism.push({ frame: i, reserved: Math.round(seeded), real: real, offBy: Math.round(real - seeded) });
+          });
+          var worst = Object.keys(everToggled).sort(function (a, b) { return everToggled[b] - everToggled[a]; }).slice(0, 8)
+            .map(function (k) { return "frame " + k + " x" + everToggled[k]; });
+          var r = {
+            seconds: secs, cullOn: CULL_ON, frames: E.frameDescs.length,
+            restacks: _diag.restacks - start.restacks,
+            resizeObserverFires: _diag.roFires - start.roFires,
+            renderSetChanges: setChanges,
+            framesThatToggled: worst,
+            reservedHeightWrong: mism.length,
+            worstMismatches: mism.sort(function (a, b) { return Math.abs(b.offBy) - Math.abs(a.offBy); }).slice(0, 8)
+          };
+          if (window.console) console.log("[cull-diag]", JSON.stringify(r, null, 2));
+          resolve(r);
+        }, secs * 1000);
+      });
+    };
 
     // Spacing consistency: a frame's rendered height can change AFTER the initial
     // layoutColumns measure — an image finishes loading, an HTML embed fits, the Exo 2
@@ -319,7 +391,7 @@
     function observeFrames() {
       if (!window.ResizeObserver) return;
       if (frameRO) frameRO.disconnect();
-      frameRO = new ResizeObserver(scheduleRestack);
+      frameRO = new ResizeObserver(function (recs) { _diag.roFires += recs.length; scheduleRestack(); });
       E.frameDescs.forEach(function (f) { if (f.frame) frameRO.observe(f.frame); });
     }
 
