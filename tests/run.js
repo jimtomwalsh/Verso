@@ -11354,7 +11354,22 @@ section("offscreen-frame culling (#150 slice B)");
   ok("contain-intrinsic-size is seeded from the measured height f.h",
     /containIntrinsicSize = E\.FRAME_W \+ "px " \+ Math\.round\(f\.h/.test(lc));
   ok("the cull pass is gated by FRAME_CULL and adds frame--cull",
-    /if \(FRAME_CULL\) E\.frameDescs\.forEach/.test(lc) && /classList\.add\("frame--cull"\)/.test(lc));
+    /if \(FRAME_CULL && CULL_ON\) E\.frameDescs\.forEach/.test(lc) && /classList\.add\("frame--cull"\)/.test(lc));
+  // #348: the cull is switchable at runtime so it can be ruled in or out on a real course, and
+  // the diagnostic reports the churn. Default ON -- shipping the instrument changes nothing.
+  var W = src("src/editor/world.js");
+  ok("#348: the frame cull has a runtime kill-switch, default ON",
+    /var CULL_ON = true;/.test(W) && /window\.__frameCull = function \(on\)/.test(W) &&
+    /getItem\("authoring\.frameCull"\) === "0"\) CULL_ON = false/.test(W));
+  ok("#348: __frameCull(false) strips both the class and the seeded size",
+    /classList\.remove\("frame--cull"\); f\.frame\.style\.containIntrinsicSize = ""/.test(W));
+  ok("#348: __cullDiag reports restacks, RO fires and render-set changes",
+    /window\.__cullDiag = function/.test(W) && /renderSetChanges: setChanges/.test(W) &&
+    /resizeObserverFires: _diag\.roFires - start\.roFires/.test(W));
+  // The comment that sent the first diagnosis down the wrong path. offsetHeight on a skipped
+  // frame returns the seeded size, so the code cannot re-measure its way out of a stale seed.
+  ok("#348: the false 'offsetHeight forces layout' claim is gone from the cull comment",
+    !/offsetHeight read forces its own layout/.test(W));
   var css = EDITOR_CSS;
   ok("CSS enables content-visibility:auto only on culled frames",
     /\.frame\.frame--cull \{ content-visibility: auto; \}/.test(css));
@@ -19494,7 +19509,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("page-gap css: hidden tools revealed on hover", /\.page-gap__tools \{[\s\S]*?opacity: 0;[\s\S]*?\}\s*\.page-gap:hover \.page-gap__tools \{ opacity: 1;/.test(css));
   ok("fold-vertical merge glyph present", /"fold-vertical":/.test(ic));
   // spacing consistency: per-frame ResizeObserver re-stacks the column on height change
-  ok("observeFrames wires a ResizeObserver to every frame", /function observeFrames\(\)[\s\S]*?new ResizeObserver\(scheduleRestack\)[\s\S]*?frameDescs\.forEach\(function \(f\) \{ if \(f\.frame\) frameRO\.observe\(f\.frame\)/.test(WORLD));
+  ok("observeFrames wires a ResizeObserver to every frame", /function observeFrames\(\)[\s\S]*?new ResizeObserver\(function \(recs\) \{ _diag\.roFires \+= recs\.length; scheduleRestack\(\); \}\)[\s\S]*?frameDescs\.forEach\(function \(f\) \{ if \(f\.frame\) frameRO\.observe\(f\.frame\)/.test(WORLD));
   ok("restack is coalesced to one animation frame", /function scheduleRestack\(\)[\s\S]*?if \(restackRaf\) return;[\s\S]*?requestAnimationFrame\(function \(\) \{[\s\S]*?drawConnectors\(\)/.test(WORLD));
   ok("buildWorld observes frames after building them", /observeFrames\(\); \/\/ re-stack the column/.test(WORLD));
   ok("mount re-stacks after fitEmbeds (embed heights change post-measure)", /fitEmbeds\(\);[\s\S]*?re-stack so the pages[\s\S]*?drawConnectors\(\);\s*\n\s*renderStructure\(\);/.test(e));
