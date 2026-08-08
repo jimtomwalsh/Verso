@@ -90,6 +90,62 @@
   function nextFitMode(mode) { return ((mode == null ? 2 : mode) + 1) % FIT_MODES.length; }
   function fitModeName(mode) { return FIT_MODES[((mode % FIT_MODES.length) + FIT_MODES.length) % FIT_MODES.length]; }
 
+  // ---- #355: when media stops moving ---------------------------------------
+  // The two decisions behind the far-zoom media freeze, kept out here as plain functions of their
+  // inputs so they can be tested without a canvas. The install() half below is the DOM work.
+  //
+  // The threshold is the page's width ON SCREEN, deliberately, not a zoom number. 200px is where a
+  // page is a thumbnail: no motion inside it can be followed, so nothing an author can see is lost
+  // by stopping it. Expressed in page-width the same call stays right at a different page geometry
+  // or on a denser display, which a hard-coded zoom would not.
+  var FREEZE_PAGE_W = 200;
+  function freezeWanted(frameW, zoom, pageWidthPx) {
+    var px = (pageWidthPx == null) ? FREEZE_PAGE_W : pageWidthPx;
+    if (!(px > 0)) return false;                                  // 0 = the lever, turned off
+    if (!(frameW > 0) || !(zoom > 0)) return false;
+    return (frameW * zoom) < px;
+  }
+  // WHAT MOVES, AND HOW YOU KNOW. A still GIF frozen to its own first frame is indistinguishable
+  // from itself, so there is no need to count frames: the TYPE is the whole test, and being wrong
+  // about a still one costs a small poster and nothing else.
+  //
+  // Reading the type off the URL only works when the URL states one. It does for a data: URI and
+  // for a path ending .gif. It does NOT for the shape a real course actually renders: AssetStore
+  // hands raster media to the canvas as a `blob:` object URL, which says nothing about anything.
+  // A URL-only test therefore passes every test written against a data: URI and then freezes
+  // nothing at all on a real course -- which is how this was caught, and why the bytes get asked.
+  function isAnimatedSrc(s) {
+    if (typeof s !== "string" || !s) return false;
+    return /^data:image\/gif[;,]/i.test(s) || /\.gif(\?|#|$)/i.test(s);
+  }
+  // The URL declares nothing: an object URL, or a path with no telling extension. Worth reading.
+  // A data: URI always declares its type, and the listed extensions are never animated, so
+  // neither is ever fetched.
+  function isOpaqueSrc(s) {
+    if (typeof s !== "string" || !s) return false;
+    if (isAnimatedSrc(s)) return false;                            // already certain
+    if (/^data:/i.test(s)) return false;                           // states its own type
+    if (/\.(png|jpe?g|svg|avif|bmp|ico)(\?|#|$)/i.test(s)) return false;
+    return true;
+  }
+  // The three formats on the web that move on their own, from their first bytes. A few kilobytes
+  // is enough: GIF says so in its magic, and both APNG and animated WebP carry their marker chunk
+  // in the header, ahead of any frame data.
+  function animatedFromBytes(bytes) {
+    var b = bytes && bytes.length != null ? bytes : null;
+    if (!b || b.length < 12) return false;
+    function ascii(o, n) { var s = "", i; for (i = 0; i < n; i++) s += String.fromCharCode(b[o + i]); return s; }
+    function has(tag) {
+      var i, j, n = b.length - tag.length;
+      for (i = 0; i <= n; i++) { for (j = 0; j < tag.length; j++) { if (b[i + j] !== tag.charCodeAt(j)) break; } if (j === tag.length) return true; }
+      return false;
+    }
+    if (ascii(0, 3) === "GIF") return true;                         // every GIF, animated or not
+    if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return has("ANIM");
+    if (b[0] === 0x89 && ascii(1, 3) === "PNG") return has("acTL"); // APNG's animation-control chunk
+    return false;
+  }
+
   // ---- the alignment grid --------------------------------------------------
   var GRID_MODES = ["off", "thirds", "quarters", "columns", "fine"];
   var GRID_LABELS = { off: "off", thirds: "rule of thirds", quarters: "quarters", columns: "12-col", fine: "fine" };
@@ -280,6 +336,155 @@
       return NATIVE_SCROLL;
     };
 
+    // ---- #355: media stops moving once a page is too small to read ---------------------
+    //
+    // The last cost on the canvas after #347 and #348. At far zoom every page in the course is
+    // on screen at once, and an animated GIF -- which is what a screen recording is in a Verso
+    // course -- keeps decoding and repainting the whole time. That is not a gesture cost: a
+    // STILL canvas with one GIF a page measured 31 FPS at zero input. Nothing the author does
+    // makes it stop, which is why it reads as the canvas being slow rather than as media
+    // playing.
+    //
+    // So below the threshold each animated image is swapped for a still of its first frame and
+    // every video is paused; above it the live source goes back. The poster is drawn once per
+    // source and cached, and capped at POSTER_MAX on its long edge -- at this zoom it is never
+    // shown larger than a couple of hundred pixels, so the poster is also far cheaper to
+    // rasterise than the GIF it replaces.
+    //
+    // THE THRESHOLD IS THE PAGE'S WIDTH ON SCREEN, not a raw zoom number, and not FAR_ZOOM.
+    // FAR_ZOOM is 50%, where a page is still readable and its motion still means something. A
+    // page under FREEZE_PAGE_W pixels wide carries no motion an author can follow, and deriving
+    // the point from FRAME_W keeps it true on a different page geometry or a denser display,
+    // where a fixed zoom number would not be.
+    //
+    // Editor chrome only. It swaps `src` on the canvas's own <img> nodes and nothing else: the
+    // document, the renderer and the export never see a poster, and a world rebuild throws them
+    // away (which is what the observer is for).
+    // freezeWanted() and isAnimatedSrc() are module-scope, up top, and tested there. This half is
+    // the DOM work: the poster cache, the swap, and the observer that survives a world rebuild.
+    var freezePageW = FREEZE_PAGE_W;   // the live lever's value; FREEZE_PAGE_W is the default
+    var POSTER_MAX = 512;      // poster long edge (px) -- never displayed near this big
+    var _mediaFrozen = false, _posterCache = null, _freezeObs = null, _freezeWorld = null, _freezeT = null;
+    var _sniff = null;   // src -> true / false / "pending"
+    // Does this image move? The URL answers when it can. When it cannot -- the object URL a real
+    // course renders -- read the first 4KB and decide from the bytes, once per source, and run
+    // the freeze pass again when the answer lands. Until then the image stays live, which is the
+    // safe way to be wrong.
+    function freezableSrc(src) {
+      if (isAnimatedSrc(src)) return true;
+      if (!isOpaqueSrc(src)) return false;
+      if (!_sniff) _sniff = new Map();
+      if (_sniff.has(src)) return _sniff.get(src) === true;          // "pending" reads as not yet
+      if (typeof fetch !== "function") return false;                 // nothing to read the bytes with
+      _sniff.set(src, "pending");
+      // Blob.slice keeps this to the header: a 40MB screen recording is never pulled into memory
+      // to answer a question its first twelve bytes settle.
+      fetch(src)
+        .then(function (r) { return r.blob(); })
+        .then(function (bl) { return bl.slice(0, 4096).arrayBuffer(); })
+        .then(function (buf) {
+          _sniff.set(src, animatedFromBytes(new Uint8Array(buf)));
+          if (_mediaFrozen && E.world) freezeMediaIn(E.world);
+        })
+        .catch(function () { _sniff.set(src, false); });
+      return false;
+    }
+    function posterFor(img) {
+      if (!_posterCache) _posterCache = new Map();
+      var src = img.getAttribute("src");
+      if (_posterCache.has(src)) return _posterCache.get(src);       // null cached too: don't retry a taint
+      if (!img.complete || !img.naturalWidth) return null;           // not decoded yet -- the load handler retries
+      var k = Math.min(1, POSTER_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      var c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.naturalWidth * k));
+      c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      var url = null;
+      // A cross-origin asset taints the canvas and toDataURL throws. That image stays live: a
+      // course that cannot be frozen is slower, but it is never blank or wrong.
+      try { c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); url = c.toDataURL("image/png"); }
+      catch (e) { url = null; }
+      _posterCache.set(src, url);
+      return url;
+    }
+    function freezeMediaIn(root) {
+      [].forEach.call(root.querySelectorAll("img"), function (img) {
+        if (img.hasAttribute("data-live-src")) return;               // already frozen
+        var src = img.getAttribute("src");
+        if (!freezableSrc(src)) return;
+        var poster = posterFor(img);
+        if (!poster) {
+          if (_posterCache.has(src)) return;                          // cached null = tainted: leave it live
+          if (!img.__freezePending) {                                 // decode still in flight
+            img.__freezePending = true;
+            img.addEventListener("load", function () {
+              img.__freezePending = false;
+              if (_mediaFrozen && E.world) freezeMediaIn(E.world);
+            }, { once: true });
+          }
+          return;
+        }
+        img.setAttribute("data-live-src", src);
+        img.src = poster;
+      });
+      [].forEach.call(root.querySelectorAll("video"), function (v) {
+        if (v.paused) return;
+        v.setAttribute("data-was-playing", "1");
+        try { v.pause(); } catch (e) {}
+      });
+    }
+    function thawMediaIn(root) {
+      [].forEach.call(root.querySelectorAll("img[data-live-src]"), function (img) {
+        var live = img.getAttribute("data-live-src");
+        img.removeAttribute("data-live-src");
+        img.src = live;
+      });
+      [].forEach.call(root.querySelectorAll("video[data-was-playing]"), function (v) {
+        v.removeAttribute("data-was-playing");
+        try { var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) {}
+      });
+    }
+    // A rebuild while frozen hands back live media, and so does an <img> that gets its real src
+    // after it is in the tree. Both are watched. Our own swap is an src write and does trip this,
+    // but the next pass skips anything already carrying data-live-src, so it settles in one extra
+    // debounced run rather than looping. Neither kind of mutation happens during a pan or a zoom,
+    // so the observer is idle for exactly the frames that matter.
+    function watchFrozenWorld() {
+      if (_freezeObs) _freezeObs.disconnect();
+      _freezeWorld = E.world;
+      if (!_freezeWorld || typeof MutationObserver !== "function") { _freezeObs = null; return; }
+      _freezeObs = new MutationObserver(function () {
+        if (_freezeT) return;
+        _freezeT = setTimeout(function () {
+          _freezeT = null;
+          if (_mediaFrozen && E.world) freezeMediaIn(E.world);
+        }, 60);
+      });
+      _freezeObs.observe(_freezeWorld, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+    }
+    function mediaFreezeWanted() { return freezeWanted(E.FRAME_W, E.view.zoom, freezePageW); }
+    function applyMediaFreeze(on) {
+      if (!E.world) return;
+      // Runs every frame of every gesture, so the no-change case must cost one comparison. The
+      // world check is what re-freezes a rebuilt world without polling the DOM for one.
+      if (on === _mediaFrozen && (!on || _freezeWorld === E.world)) return;
+      _mediaFrozen = on;
+      if (on) { freezeMediaIn(E.world); watchFrozenWorld(); return; }
+      if (_freezeObs) { _freezeObs.disconnect(); _freezeObs = null; }
+      _freezeWorld = null;
+      thawMediaIn(E.world);
+    }
+    // Live lever, like __zoomTune: `__mediaFreeze(0)` turns it off, `__mediaFreeze(300)` freezes
+    // sooner, no arg queries. Not persisted -- unlike the LOD flags this is not a thing to test
+    // across a reload, it is a thing to dial while looking at the canvas.
+    window.__mediaFreeze = function (px) {
+      if (px != null) { freezePageW = Math.max(0, +px || 0); applyMediaFreeze(mediaFreezeWanted()); }
+      return {
+        pageWidthPx: freezePageW, frozen: _mediaFrozen,
+        posters: _posterCache ? _posterCache.size : 0,
+        frozenNow: E.world ? E.world.querySelectorAll("img[data-live-src]").length : 0
+      };
+    };
+
     var targetZoom = 1, zoomAnchor = null, zooming = false;
     function applyView() {
       if (!E.world) return;
@@ -307,6 +512,7 @@
       // cheap boxes. A class toggle only -- reflects the CURRENT zoom every frame; the actual
       // paint drop is gated on .nav-lod so it only bites WHILE moving, snapping back on settle.
       E.world.classList.toggle("world--far", E.view.zoom < FAR_ZOOM);
+      applyMediaFreeze(mediaFreezeWanted()); // #355: no motion once a page is too small to read it
       if (proxyActive()) proxyTrackView(); // #151: keep the cached bitmap glued to the live transform
       E.zoomLevelEl.textContent = Math.round(E.view.zoom * 100) + "%";
       E.persistView();
@@ -567,7 +773,12 @@
     GRID_MODES: GRID_MODES,
     GRID_LABELS: GRID_LABELS,
     nextGridMode: nextGridMode,
-    readGridMode: readGridMode
+    readGridMode: readGridMode,
+    FREEZE_PAGE_W: FREEZE_PAGE_W,
+    freezeWanted: freezeWanted,
+    isAnimatedSrc: isAnimatedSrc,
+    isOpaqueSrc: isOpaqueSrc,
+    animatedFromBytes: animatedFromBytes
   };
 
   window.VersoCanvasView = VersoCanvasView;
