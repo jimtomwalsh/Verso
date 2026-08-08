@@ -10815,6 +10815,26 @@ section("project auto-backup");
   ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(TABS));
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(ebk) && /saveBackupHandle\(E\.activeDocId, h\)/.test(ebk));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(ebk) && /Backup OFF — this course is NOT being saved/.test(ebk) && /No backup folder — this course is NOT being saved anywhere/.test(ebk) && /\? "Reconnect folder" : "Choose folder"/.test(ebk));
+  // THE ONE THAT MATTERS, and the only kind that could have caught what shipped. Every check
+  // above reads source text, and every one of them passed while the browser threw
+  // `dirPermission is not defined` on the first line of the write: the move left the name as a
+  // free identifier, so no backup was ever written in a browser, the boot reconnect died before
+  // it could clear the banner, and the banner's own button died before it could reach the picker.
+  // A free identifier throws only when its path runs -- so run it. A fake directory handle drives
+  // the real FSA path end to end and the files it receives are the proof.
+  __async.push((async function () {
+    var written = [];
+    var dir = { getFileHandle: function (name) { return Promise.resolve({ createWritable: function () {
+      return Promise.resolve({ write: function (t) { written.push({ name: name, text: t }); return Promise.resolve(); }, close: function () { return Promise.resolve(); } });
+    } }); } };
+    var win = EDITOR_BOOT.boot({ window: { showDirectoryPicker: function () { return Promise.reject(new Error("no picker in the VM tier")); } } });
+    win.__setBackupHandle(dir);
+    var res = null, threw = "";
+    try { res = await win.__writeBackupNow(true); } catch (e) { threw = String((e && e.message) || e); }
+    ok("the FSA backup path RUNS (no free identifier) and writes the files",
+      !threw && !!res && !res.error && written.length > 0, threw || (res && res.error) || JSON.stringify(res));
+    ok("what it writes is the self-contained course json", written.some(function (f) { return /\.json$/.test(f.name) && /"pages"|"blocks"/.test(f.text); }));
+  })());
   // arch-P3b-07d: the new-doc flow stayed here; only the banner it raises moved.
   // GH #327 put a guard between the create and the prompt: a code clash returns null, and a
   // document that was never made must not be followed by a folder picker for it.
