@@ -11078,6 +11078,97 @@ section("zoomed-out plain-page LOD (#172)");
     COURSE_CSS.indexOf("world--far") === -1);
 })();
 
+// #355: the far-zoom stutter that outlived #347 and #348 is not a gesture cost. An animated GIF --
+// a screen recording, which is what most of them are in a course -- decodes and repaints for as
+// long as it is on screen, and at far zoom every page in the course is on screen at once. A STILL
+// canvas pays it, at zero input, which is why it reads as the canvas being slow.
+//
+// So below the threshold every animated image is swapped for a still of its first frame and every
+// video is paused, and above it the live source goes back. The threshold is the page's width ON
+// SCREEN rather than a zoom number: that is the decision worth testing, and it is a pure function.
+section("far-zoom media freeze (#355)");
+(function () {
+  var CV = require(path.join(ROOT, "src/editor/canvas-view.js"));
+  var W = 1440; // a page's world width, near what the canvas uses
+  // The threshold is a page WIDTH, so the same call has to answer differently for two page
+  // geometries at the SAME zoom. A fixed zoom number could not, and that is the whole reason for
+  // the shape of this function.
+  ok("freeze is wanted once a page is under FREEZE_PAGE_W wide on screen",
+    CV.freezeWanted(W, 0.1, 200) === true && CV.freezeWanted(W, 0.2, 200) === false);
+  ok("the boundary is exclusive, so exactly FREEZE_PAGE_W stays live",
+    CV.freezeWanted(1000, 0.2, 200) === false && CV.freezeWanted(1000, 0.199, 200) === true);
+  ok("a wide page and a narrow page part company at the SAME zoom",
+    CV.freezeWanted(600, 0.3, 200) === true && CV.freezeWanted(2000, 0.3, 200) === false);
+  ok("0 is the lever turned off, not a threshold of zero", CV.freezeWanted(W, 0.01, 0) === false);
+  ok("nonsense inputs never freeze", CV.freezeWanted(0, 0.1, 200) === false && CV.freezeWanted(W, 0, 200) === false);
+  ok("the default threshold is a thumbnail, and well below FAR_ZOOM's 50%",
+    CV.FREEZE_PAGE_W === 200 && CV.freezeWanted(W, 0.5, CV.FREEZE_PAGE_W) === false);
+  // What counts as animated. Freezing a still GIF is harmless (it looks the same), so the type is
+  // the whole test -- but a JPEG or an SVG must never be swapped, because a poster of one is pure
+  // cost for no motion saved.
+  ok("gif data URIs and gif paths are animated", CV.isAnimatedSrc("data:image/gif;base64,R0lGOD") === true && CV.isAnimatedSrc("media/demo.gif") === true);
+  ok("a query string or a fragment after .gif still counts", CV.isAnimatedSrc("a/b.gif?v=2") === true && CV.isAnimatedSrc("a/b.gif#x") === true);
+  ok("png / jpeg / svg / webp are left alone", ["data:image/png;base64,iV", "p.jpg", "p.svg", "data:image/svg+xml,<svg/>", "p.webp"].every(function (s) { return CV.isAnimatedSrc(s) === false; }));
+  ok("a name that merely contains gif is not a gif", CV.isAnimatedSrc("gifts/banner.png") === false && CV.isAnimatedSrc("my.gif.png") === false);
+  ok("junk is not animated", [null, undefined, "", 42, {}].every(function (s) { return CV.isAnimatedSrc(s) === false; }));
+  // THE ONE THAT DECIDES WHETHER THIS WORKS ON A REAL COURSE. AssetStore hands raster media to
+  // the canvas as a blob: object URL, which states no type at all -- so a URL-only test passes
+  // every case above and then freezes NOTHING on a course with real assets in it. A browser probe
+  // caught that; these two keep it caught.
+  ok("a blob: object URL is opaque, so the bytes get asked", CV.isOpaqueSrc("blob:http://localhost:8123/9f2-ab") === true);
+  ok("a data: URI states its own type and is never fetched", CV.isOpaqueSrc("data:image/png;base64,iV") === false && CV.isOpaqueSrc("data:image/gif;base64,R0") === false);
+  ok("an extension that can never animate is not fetched either", ["a.png", "a.jpg", "a.jpeg", "a.svg", "a.avif", "a.bmp", "a.ico"].every(function (s) { return CV.isOpaqueSrc(s) === false; }));
+  ok("a src already known to be a gif is not fetched", CV.isOpaqueSrc("a.gif") === false && CV.isOpaqueSrc("data:image/gif;base64,R0") === false);
+  ok("an unknown path IS worth reading", CV.isOpaqueSrc("/media/9f2ab") === true && CV.isOpaqueSrc("https://x/y.webp") === true);
+  (function () {
+    function bytes() { return new Uint8Array([].slice.call(arguments)); }
+    function sig(s, extra) { var a = []; var i; for (i = 0; i < s.length; i++) a.push(s.charCodeAt(i)); (extra || []).forEach(function (c) { a.push(c); }); while (a.length < 16) a.push(0); return new Uint8Array(a); }
+    function withTag(head, tag) { var a = [].slice.call(head); var i; for (i = 0; i < tag.length; i++) a.push(tag.charCodeAt(i)); return new Uint8Array(a); }
+    ok("GIF is read straight off the magic", CV.animatedFromBytes(sig("GIF89a")) === true && CV.animatedFromBytes(sig("GIF87a")) === true);
+    ok("a plain PNG does not move", CV.animatedFromBytes(new Uint8Array([0x89, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82])) === false);
+    ok("an APNG does, because acTL is in its header", CV.animatedFromBytes(withTag(new Uint8Array([0x89, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 8]), "acTL")) === true);
+    ok("a still WebP does not move, an ANIM one does", (function () {
+      var still = new Uint8Array([82, 73, 70, 70, 1, 1, 1, 1, 87, 69, 66, 80, 86, 80, 56, 32]);
+      return CV.animatedFromBytes(still) === false && CV.animatedFromBytes(withTag(still, "ANIM")) === true;
+    })());
+    ok("a JPEG does not move", CV.animatedFromBytes(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1])) === false);
+    ok("too few bytes to tell is answered no, not yes", CV.animatedFromBytes(new Uint8Array([71, 73, 70])) === false && CV.animatedFromBytes(null) === false);
+    ok("the ANIM/acTL scan cannot run off the end of the buffer", CV.animatedFromBytes(new Uint8Array(12)) === false);
+  })();
+  // Driven, not matched: applyView has to reach the freeze on every view write, at the real
+  // FRAME_W the canvas uses, and the lever has to actually move the boundary.
+  (function () {
+    var win = EDITOR_BOOT.boot(), K = win.VersoEditor;
+    var view = K.get("view"), applyView = K.bind("applyView"), FRAME_W = K.get("FRAME_W");
+    view.zoom = 1; applyView();
+    var at100 = win.__mediaFreeze();
+    view.zoom = 0.05; applyView();
+    var at5 = win.__mediaFreeze();
+    view.zoom = 0.4; applyView();
+    var at40 = win.__mediaFreeze();
+    ok("applyView drives the freeze from the CURRENT zoom", at100.frozen === false && at5.frozen === true && at40.frozen === false);
+    ok("the boundary lands where FRAME_W puts it", (FRAME_W * 0.05) < 200 && (FRAME_W * 0.4) >= 200);
+    ok("__mediaFreeze(0) turns it off while still far out", win.__mediaFreeze(0).frozen === false);
+    ok("__mediaFreeze(px) moves the boundary and re-applies", (function () {
+      view.zoom = 0.4; applyView();
+      return win.__mediaFreeze(FRAME_W * 0.5).frozen === true; // a threshold above the current width
+    })());
+    win.__mediaFreeze(200); // leave the boot's world as it was found
+    ok("the lever reports what it is doing", (function () { var s = win.__mediaFreeze(); return s.pageWidthPx === 200 && typeof s.posters === "number" && typeof s.frozenNow === "number"; })());
+  })();
+  // Invariant: editor chrome only. A poster exists on the canvas's own <img> nodes and nowhere
+  // else -- the document never records one, the renderer never emits one, the export never sees
+  // one. `data-live-src` is the marker, so its absence from those three is the check.
+  ok("the freeze never leaks into render() or course output",
+    src("src/render.js").indexOf("data-live-src") === -1 &&
+    src("src/render.js").indexOf("mediaFreeze") === -1 &&
+    COURSE_CSS.indexOf("data-live-src") === -1);
+  ok("the poster is capped, so a frozen course cannot cost more memory than the live one",
+    /var POSTER_MAX = \d+;/.test(src("src/editor/canvas-view.js")));
+  ok("a rebuilt world is re-frozen by an observer, not by polling the DOM each frame",
+    /MutationObserver\(/.test(src("src/editor/canvas-view.js")) && /_freezeWorld === E\.world/.test(src("src/editor/canvas-view.js")));
+})();
+
 // ---- background-pause power governor (#179): stop forever-timers while occluded -----------
 // The autosave (4s) + review (60s) polls fire forever, even when the window is hidden -- a
 // constant CPU wake that defeats macOS App Nap. A visibilitychange handler pauses both while
