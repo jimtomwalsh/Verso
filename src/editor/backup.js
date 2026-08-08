@@ -23,13 +23,21 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "h", "saveRegistry", "registry", "doc", "activeDocId"
+      "h", "saveRegistry", "registry", "doc", "activeDocId", "dirPermission"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is deliberately absent and read through E.
     var h = E.h,
         saveRegistry = E.saveRegistry,
-        registry = E.registry;
+        registry = E.registry,
+        // dirPermission stayed in editor.js (three regions ask the same question of a File System
+        // Access handle). The move shipped without it in this list, so every FSA path here threw
+        // `dirPermission is not defined` the moment a handle existed: no browser backup was ever
+        // written, the boot reconnect died before it could clear the banner, and the banner's own
+        // button died before it could reach the picker. A free identifier throws only when its
+        // path runs, and no path here runs until a folder is bound -- the same class the 07
+        // publish-run bug taught, one file later.
+        dirPermission = E.dirPermission;
 
     // ---- Project auto-backup (P0 data-safety) --------
     // The live course exists ONLY in opaque WebKit storage; this writes durable,
@@ -103,7 +111,8 @@
         if (!b.files.length) return { skipped: "unchanged" };
         var r = await nativeBackupCall("write", { folder: E.doc.backup.folderPath, files: b.files });
         if (r && r.ok) { if (!b.unchanged) backupLastText = b.jsonText; if (b.didSnap) backupLastSnapshot = Date.now(); showBackupBanner(false); return { wrote: !b.unchanged, snapshot: b.didSnap, native: true }; }
-        showBackupBanner(true); return { error: (r && r.error) || "native write failed" };
+        var nerr = (r && r.error) || "native write failed";
+        reportBackupFault(nerr); return { error: nerr };
       }
       // browser FSA
       if (!backupHandle) return { skipped: "no-folder" };
@@ -116,7 +125,7 @@
         if (bb.didSnap) backupLastSnapshot = Date.now();
         showBackupBanner(false);
         return { wrote: !bb.unchanged, snapshot: bb.didSnap };
-      } catch (e) { showBackupBanner(true); return { error: String((e && e.message) || e) }; }
+      } catch (e) { reportBackupFault(e); return { error: String((e && e.message) || e) }; }
     }
     function scheduleBackup() {
       if (!(E.doc && E.doc.backup) && !backupHandle) return;
@@ -136,15 +145,21 @@
         return r;
       }
       if (mode === "fsa") {
+        // One catch used to cover the picker AND everything after it, so a fault in the write
+        // returned null exactly like a cancel: the author picked a folder, saw the banner stay,
+        // and had nothing to report but "the button does nothing". Cancel is quiet; a real fault
+        // is not.
+        var h;
+        try { h = await window.showDirectoryPicker({ mode: "readwrite" }); }
+        catch (e) { return null; } // AbortError: the author closed the picker
         try {
-          var h = await window.showDirectoryPicker({ mode: "readwrite" });
           backupHandle = h; backupLastText = null; backupLastSnapshot = 0;
           E.doc.backup = { folderName: h.name || "folder", boundAt: Date.now() };
           await saveBackupHandle(E.activeDocId, h);
           saveRegistry(registry);
           await writeBackupNow(true);
           return h;
-        } catch (e) { return null; }
+        } catch (e) { reportBackupFault(e); return null; }
       }
       window.alert("Can't pick a folder here. In the Verso app this uses a native picker; in a browser use Chrome or Edge, opened locally.");
       return null;
@@ -156,9 +171,14 @@
       backupHandle = null; backupLastText = null; backupLastSnapshot = 0;
       if (!(E.doc && E.doc.backup)) { showBackupBanner(!!(E.doc && E.doc.backupRequired)); return; } // unbound + required (new course) -> nag
       if (backupMode() === "native") { showBackupBanner(!E.doc.backup.folderPath); return; }
-      var saved = await loadBackupHandle(E.activeDocId);
-      if (saved && (await dirPermission(saved, true)) === "granted") { backupHandle = saved; showBackupBanner(false); }
-      else showBackupBanner(true);
+      // Boot must always END in a banner decision. A throw here left the last banner state on
+      // screen unchanged and no handle bound, which reads to an author as a banner that survives
+      // a hard refresh for no reason.
+      try {
+        var saved = await loadBackupHandle(E.activeDocId);
+        if (saved && (await dirPermission(saved, true)) === "granted") { backupHandle = saved; showBackupBanner(false); }
+        else showBackupBanner(true);
+      } catch (e) { reportBackupFault(e); }
     }
     async function reconnectBackupFolder() { // user gesture (banner / settings button)
       if (backupMode() === "native") { // path-based; just try a write, else re-pick
@@ -170,7 +190,14 @@
       return !!(await bindProjectFolder()); // permission lost / folder moved -> re-pick
     }
     // LOUD "backup OFF" banner (mirrors the save-fail banner) — decision 4.
-    var backupBannerEl = null;
+    var backupBannerEl = null, backupFault = "";
+    // A throw on a data-safety path must reach the author, not just the console. The banner is
+    // already on screen when these paths run, so it carries the reason.
+    function reportBackupFault(e) {
+      backupFault = String((e && e.message) || e);
+      if (window.console && console.error) console.error("[backup]", e);
+      showBackupBanner(true);
+    }
     function showBackupBanner(off) {
       if (!off) { if (backupBannerEl) backupBannerEl.hidden = true; return; }
       if (!backupBannerEl) {
@@ -178,15 +205,22 @@
         backupBannerEl.id = "backup-off-banner"; backupBannerEl.setAttribute("role", "alert");
         var m = document.createElement("span"); m.className = "backup-off-banner__msg"; backupBannerEl.appendChild(m);
         var b = document.createElement("button"); b.className = "backup-off-banner__btn"; b.type = "button";
-        b.addEventListener("click", function () { reconnectBackupFolder(); }); // reconnect if bound, else picks a folder
+        // reconnect if bound, else picks a folder. The rejection handler is the point: this button
+        // is the author's only way back from backup-off, and a throw inside it used to be an
+        // unhandled rejection nobody saw.
+        b.addEventListener("click", function () {
+          backupFault = "";
+          Promise.resolve().then(reconnectBackupFolder).catch(reportBackupFault);
+        });
         backupBannerEl.appendChild(b);
         document.body.appendChild(backupBannerEl);
       }
       // Two states: BOUND-but-not-writable (reconnect) vs never bound (choose a folder — new courses).
       var bound = !!(E.doc && E.doc.backup);
-      backupBannerEl.querySelector(".backup-off-banner__msg").textContent = bound
+      backupBannerEl.querySelector(".backup-off-banner__msg").textContent = (bound
         ? "Backup OFF — this course is NOT being saved to " + (E.doc.backup.folderName || "your project folder") + ". Reconnect to resume auto-backup."
-        : "No backup folder — this course is NOT being saved anywhere. Choose a project folder to protect your work.";
+        : "No backup folder — this course is NOT being saved anywhere. Choose a project folder to protect your work.")
+        + (backupFault ? " (Last attempt failed: " + backupFault + ")" : "");
       backupBannerEl.querySelector(".backup-off-banner__btn").textContent = bound ? "Reconnect folder" : "Choose folder";
       backupBannerEl.hidden = false;
     }
